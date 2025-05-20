@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/tmbritton/ecs-db/internal/storage"
 )
 
 const version = "0.1.0"
@@ -22,6 +24,12 @@ func main() {
 	fmt.Println("ECS Database CLI - Starting up")
 
 	// TODO: Initialize your database here
+	db, err := storage.InitDb("./ecs.db")
+	if err != nil {
+		fmt.Printf("Error initializing database: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
 	fmt.Println("Database initialized")
 
 	// TODO: Add command processing here
