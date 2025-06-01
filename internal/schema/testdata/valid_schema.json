@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "schema": {
+    "components": {
+      "title": {"type": "text"},
+      "author": {"type": "reference", "entityType": "user"}
+    },
+    "entities": {
+      "post": {"components": ["title", "author"]},
+      "user": {"components": ["title"]}
+    }
+  }
+}

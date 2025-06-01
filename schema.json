@@ -1,0 +1,34 @@
+{
+  "version": "0.0.0",
+  "schema": {
+    "components": {
+      "title": {
+        "type": "text"
+      },
+      "description": {
+        "type": "text"
+      },
+      "body": {
+        "type": "text"
+      },
+      "name": {
+        "type": "text"
+      },
+      "created": {
+        "type": "integer"
+      },
+      "author": {
+        "type": "reference",
+        "entityType": "author"
+      }
+    },
+    "entities": {
+      "post": {
+        "components": ["title", "description", "body", "created", "author"]
+      },
+      "author": {
+        "components": ["name"]
+      }
+    }
+  }
+}
