@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // SQLiteStore handles database connections and operations
@@ -14,7 +15,7 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-func InitDb(path string) (*SQLiteStore, error) {
+func InitDb(path string, schema schema.DatabaseSchema) (*SQLiteStore, error) {
 	// Ensure directory exists
 	dbDir := filepath.Dir(path)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
@@ -22,7 +23,7 @@ func InitDb(path string) (*SQLiteStore, error) {
 	}
 
 	// Open database connection
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite3", path+"-"+schema.Version)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -34,7 +35,7 @@ func InitDb(path string) (*SQLiteStore, error) {
 	}
 
 	// Create tables if they don't exist
-	if err := initSchema(db); err != nil {
+	if err := initSchema(db, schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
 	}
@@ -47,8 +48,8 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
-func initSchema(db *sql.DB) error {
-	schema := `
+func initSchema(db *sql.DB, schema schema.DatabaseSchema) error {
+	sql := `
     -- Entities Table
     CREATE TABLE IF NOT EXISTS entities (
       id TEXT PRIMARY KEY,
@@ -68,6 +69,6 @@ func initSchema(db *sql.DB) error {
     CREATE INDEX IF NOT EXISTS idx_schema_version on schema(version);
   `
 
-	_, err := db.Exec(schema)
+	_, err := db.Exec(sql)
 	return err
 }

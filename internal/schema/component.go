@@ -44,6 +44,10 @@ type EmailComponent struct {
 	BaseComponent
 }
 
+type BoolComponent struct {
+	BaseComponent
+}
+
 var ComponentMap = map[string]func() Component{
 	"text":      func() Component { return &TextComponent{} },
 	"integer":   func() Component { return &IntegerComponent{} },
@@ -51,4 +55,5 @@ var ComponentMap = map[string]func() Component{
 	"datetime":  func() Component { return &DatetimeComponent{} },
 	"url":       func() Component { return &UrlComponent{} },
 	"email":     func() Component { return &EmailComponent{} },
+	"boolean":   func() Component { return &BoolComponent{} },
 }
