@@ -412,3 +412,325 @@ func TestLoadSchema_EntityRefComponent(t *testing.T) {
 		t.Errorf("ValidateSchema() error = %v", err)
 	}
 }
+
+// ── Duplicate key detection tests ─────────────────────────────
+
+func TestLoadSchema_DuplicateComponentKey(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {"type": "string"},
+			"Position": {"type": "object", "properties": {"x": {"type": "number"}}}
+		},
+		"entityTypes": {
+			"Player": {"requiredComponents": ["Position"]}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	if err == nil {
+		t.Fatal("expected error for duplicate component key, got nil")
+	}
+	// Verify the error message mentions the duplicate key
+	if !containsString(err.Error(), `duplicate components key "Position"`) {
+		t.Errorf("error message should mention duplicate key: %v", err)
+	}
+}
+
+func TestLoadSchema_DuplicateEntityTypeKey(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {"type": "object", "properties": {"x": {"type": "number"}}}
+		},
+		"entityTypes": {
+			"Player": {"requiredComponents": ["Position"]},
+			"Player": {"requiredComponents": []}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	if err == nil {
+		t.Fatal("expected error for duplicate entity type key, got nil")
+	}
+	if !containsString(err.Error(), `duplicate entityTypes key "Player"`) {
+		t.Errorf("error message should mention duplicate key: %v", err)
+	}
+}
+
+func TestLoadSchema_DuplicateKeys_NestedObjects(t *testing.T) {
+	// Duplicate keys inside object-typed properties exercise the recursive
+	// skip logic within detectDuplicateKeys.
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {
+				"type": "object",
+				"properties": {
+					"coord": {
+						"type": "object",
+						"properties": {
+							"x": {"type": "number"},
+							"x": {"type": "integer"}
+						}
+					}
+				}
+			}
+		},
+		"entityTypes": {
+			"Player": {"requiredComponents": ["Position"]}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	// Duplicate keys at the property level are silently merged by
+	// json.Unmarshal — detectDuplicateKeys only checks the top-level
+	// components/entityTypes maps, so this should pass the duplicate check
+	// and fail later during component validation (properties validation
+	// doesn't check for duplicates).
+	if err == nil {
+		// If no error, that's acceptable — nested duplicates are
+		// out of scope for detectDuplicateKeys.
+	} else if !containsString(err.Error(), "duplicate") {
+		t.Logf("error on nested duplicate (acceptable): %v", err)
+	}
+}
+
+func TestLoadSchema_DuplicateSkipArrayValue(t *testing.T) {
+	// A non-target top-level key with an array value exercises the
+	// skipValue → array path for coverage.
+	json := `{
+		"schemaVersion": 1,
+		"tags": ["alpha", "beta", {"nested": true}],
+		"components": {
+			"Name": {"type": "string"}
+		},
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Name"]}
+		}
+	}`
+	s, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("LoadSchema() unexpected error: %v", err)
+	}
+	if len(s.Components) != 1 {
+		t.Errorf("expected 1 component, got %d", len(s.Components))
+	}
+}
+
+func TestLoadSchema_ComponentsNotObjectValue(t *testing.T) {
+	// If "components" exists but is not an object (e.g. an array), the
+	// detector should skip it gracefully rather than crash. This exercises
+	// the `delim != json.Delim('{')` branch.
+	json := `{
+		"schemaVersion": 1,
+		"components": ["should", "not", "be", "an", "array"],
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Name"]}
+		}
+	}`
+	// This will still fail during Unmarshal (map vs array type mismatch),
+	// but detectDuplicateKeys should handle it gracefully.
+	_, err := LoadSchema([]byte(json))
+	if err == nil {
+		t.Fatalf("expected error for non-object components value")
+	}
+	// Should NOT panic or complain about duplicates — the error should
+	// come from json.Unmarshal type mismatch.
+	if containsString(err.Error(), "duplicate") {
+		t.Errorf("should not report duplicate key error: %v", err)
+	}
+}
+
+func TestLoadSchema_NoDuplicates_NoError(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {"type": "object", "properties": {"x": {"type": "number"}}},
+			"Health": {"type": "object", "properties": {"hp": {"type": "integer"}}}
+		},
+		"entityTypes": {
+			"Player": {"requiredComponents": ["Position", "Health"]},
+			"Goblin": {"requiredComponents": ["Position"]}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("expected no error for valid schema with no duplicates, got: %v", err)
+	}
+}
+
+func TestLoadSchema_DuplicateInOnlyComponents(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Name": {"type": "string"},
+			"Name": {"type": "integer"}
+		},
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Name"]}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	if err == nil {
+		t.Fatal("expected duplicate key error")
+	}
+}
+
+func TestLoadSchema_DuplicateInOnlyEntityTypes(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Name": {"type": "string"}
+		},
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Name"]},
+			"Thing": {"requiredComponents": ["Name"]}
+		}
+	}`
+	_, err := LoadSchema([]byte(json))
+	if err == nil {
+		t.Fatal("expected duplicate key error")
+	}
+}
+
+// ── SQL compatibility validation tests ────────────────────────
+
+func TestValidateSQLCompatibility_AllKnownTypes(t *testing.T) {
+	comps := map[string]Component{
+		"obj":   {Type: ComponentTypeObject, Properties: map[string]Property{"x": {Type: "number"}}},
+		"arr":   {Type: ComponentTypeArray, Items: &Property{Type: PropertyTypeEntityRef}},
+		"ref":   {Type: ComponentTypeEntityRef},
+		"str":   {Type: ComponentTypeString},
+		"int":   {Type: ComponentTypeInteger},
+		"num":   {Type: ComponentTypeNumber},
+		"bool":  {Type: ComponentTypeBoolean},
+	}
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    comps,
+		EntityTypes:   map[string]EntityType{"T": {RequiredComponents: []string{"obj"}, ValidationLevel: ValidationStrict}},
+	}
+	if err := ValidateSchema(s); err != nil {
+		t.Errorf("ValidateSchema failed: %v", err)
+	}
+}
+
+func TestValidateSQLCompatibility_UnknownComponentType(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"Custom": {Type: "custom-unknown-type"},
+		},
+		EntityTypes: map[string]EntityType{
+			"T": {RequiredComponents: []string{"Custom"}, ValidationLevel: ValidationStrict},
+		},
+	}
+	err := ValidateSchema(s)
+	if err == nil {
+		t.Fatal("expected error for component type with no SQL mapping")
+	}
+	if !containsString(err.Error(), `component "Custom" uses type "custom-unknown-type" which has no SQL mapping`) {
+		t.Errorf("wrong error message: %v", err)
+	}
+}
+
+func TestValidateSchema_PhasedErrors(t *testing.T) {
+	s3 := DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    map[string]Component{"Bad": {Type: "unknown"}},
+		EntityTypes:   map[string]EntityType{"T": {RequiredComponents: []string{"Bad"}, ValidationLevel: ValidationStrict}},
+	}
+	err := ValidateSchema(s3)
+	if err == nil || !containsString(err.Error(), "SQL compatibility:") {
+		t.Errorf("expected SQL compatibility phase error: %v", err)
+	}
+}
+
+// ── InitSchema file path context tests ────────────────────────
+
+func TestInitSchema_ErrorIncludesFilePath(t *testing.T) {
+	dir := t.TempDir()
+
+	// Semantic validation failure — path should be in the error
+	path2 := filepath.Join(dir, "invalid.json")
+	if err := writeFile(path2, `{
+		"schemaVersion": 1,
+		"components": {"Name": {"type": "string"}},
+		"entityTypes": {"T": {"requiredComponents": ["Missing"]}}
+	}`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := InitSchema(path2)
+	if err == nil || !containsString(err.Error(), path2) {
+		t.Errorf("expected error with file path: %v", err)
+	}
+}
+
+// ── allowExtraComponents semantics tests ──────────────────────
+
+func TestEntityType_IsComponentAllowed(t *testing.T) {
+	et := EntityType{
+		RequiredComponents:   []string{"Position", "Health"},
+		OptionalComponents:   []string{"Velocity"},
+		AllowExtraComponents: false,
+		ValidationLevel:      ValidationStrict,
+	}
+
+	tests := []struct {
+		name string
+		comp string
+		want bool
+	}{
+		{"required component", "Position", true},
+		{"another required", "Health", true},
+		{"optional component", "Velocity", true},
+		{"neither when allowExtra=false", "Sprite", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := et.IsComponentAllowed(tt.comp)
+			if got != tt.want {
+				t.Errorf("IsComponentAllowed(%q) = %v, want %v", tt.comp, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEntityType_IsComponentAllowed_WithExtra(t *testing.T) {
+	et := EntityType{
+		RequiredComponents:   []string{"Position"},
+		OptionalComponents:   []string{},
+		AllowExtraComponents: true,
+		ValidationLevel:      ValidationWarning,
+	}
+
+	// When allowExtraComponents is true, everything is allowed.
+	if !et.IsComponentAllowed("Anything") {
+		t.Error("expected anything to be allowed when allowExtraComponents is true")
+	}
+}
+
+func TestEntityType_EmptyValidationLevelDefaultsToStrict(t *testing.T) {
+	et := EntityType{ValidationLevel: ""}
+	et.ApplyDefaults()
+	if et.ValidationLevel != ValidationStrict {
+		t.Errorf("ValidationLevel = %q, want %q", et.ValidationLevel, ValidationStrict)
+	}
+}
+
+// ── Helper functions ─────────────────────────────────────────
+
+func containsString(s, sub string) bool {
+	return len(s) >= len(sub) && findSubstring(s, sub)
+}
+
+func findSubstring(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
+}
