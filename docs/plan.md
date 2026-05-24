@@ -12,19 +12,19 @@ Language-agnostic by intent — interpreter language (Go/Rust) and renderer lang
 
 Establish `schema.json` as the declarative source of truth for components and entity types. Generate the SQLite schema from it. Validate strictly by default so modder mistakes are loud. Until this works, nothing else can.
 
-- [ ] **Define schema.json document shape** — Lock the format before anything reads it.
+- [x] **Define schema.json document shape** — Lock the format before anything reads it.
   - Component declarations with typed properties (number, integer, string, object, array, entity-ref)
   - Entity type templates: `requiredComponents`, `optionalComponents`, `allowExtraComponents`, `validationLevel`
   - Top-level `schemaVersion` integer
   - JSON Schema (or equivalent) for self-validation of the file itself
 
-- [ ] **schema.json loader & validator** — Refuse to start on malformed input with clear errors.
+- [x] **schema.json loader & validator** — Refuse to start on malformed input with clear errors.
   - Reject malformed JSON with line/column
   - Validate every `entityTypes.*.*Components` reference points to a declared component
   - Validate component property types are supported by the SQL generator
   - Reject duplicate component or entity-type names
 
-- [ ] **SQL DDL generation from schema.json** — One source of truth, two representations.
+- [x] **SQL DDL generation from schema.json** — One source of truth, two representations.
   - Fixed tables: `meta`, `world`, `entities`, `event_queue`, `input_events`, `transitions`
   - One `comp_*` table per declared component with typed columns
   - Pragmas at init: WAL, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`
