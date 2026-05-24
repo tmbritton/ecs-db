@@ -149,6 +149,26 @@ func openTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// fixedTableColumns defines the expected column names for each fixed table.
+// We only verify column *names* exist, not types (PRAGMA table_info doesn't
+// reliably return the full DDL). Exact types are checked by the schema test.
+var fixedTableColumns = map[string][]string{
+	"meta":         {"key", "value"},
+	"world":        {"key", "value"},
+	"entities":     {"id", "entity_type", "created_tick"},
+	"event_queue":  {"id", "tick", "target_entity", "kind", "payload"},
+	"input_events": {"id", "received_at_ms", "kind", "payload", "consumed"},
+	"transitions": {"id", "tick", "wall_ms", "entity_id", "machine_id", "from_state", "to_state", "event", "guard_result", "actions_run"},
+}
+
+// expectedIndexes lists indexes that createTables must create.
+var expectedIndexes = []string{
+	"idx_entity_type",
+	"idx_event_queue_tick",
+	"idx_input_events_consumed",
+	"idx_transitions_entity_id",
+}
+
 func TestNewSQLiteStore_CreatesFixedTables(t *testing.T) {
 	store, err := NewSQLiteStore(t.TempDir()+"/test.sqlite", schema.DatabaseSchema{
 		SchemaVersion: 1,
@@ -160,19 +180,59 @@ func TestNewSQLiteStore_CreatesFixedTables(t *testing.T) {
 	}
 	defer store.Close()
 
-	// Verify all fixed tables exist
-	tables := []string{"meta", "world", "entities", "event_queue", "input_events", "transitions"}
-	for _, name := range tables {
+	// Verify all fixed tables exist and have the expected columns.
+	for table, wantCols := range fixedTableColumns {
 		var count int
 		err := store.db.QueryRow(
 			"SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?",
-			name,
+			table,
 		).Scan(&count)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
-			t.Errorf("table %q not found (count=%d)", name, count)
+			t.Errorf("table %q not found (count=%d)", table, count)
+			continue
+		}
+
+		// Verify columns via PRAGMA table_info.
+		rows, err := store.db.Query("PRAGMA table_info(" + table + ")")
+		if err != nil {
+			t.Fatalf("PRAGMA table_info(%s): %v", table, err)
+		}
+		foundCols := make(map[string]bool)
+		for rows.Next() {
+			var cid int
+			var name, colType string
+			var notNull int
+			var dfltVal interface{}
+			var pk int
+			if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltVal, &pk); err != nil {
+				t.Fatal(err)
+			}
+			foundCols[name] = true
+		}
+		rows.Close()
+
+		for _, col := range wantCols {
+			if !foundCols[col] {
+				t.Errorf("table %q missing column %q (found: %v)", table, col, foundCols)
+			}
+		}
+	}
+
+	// Verify all expected indexes exist.
+	for _, idx := range expectedIndexes {
+		var count int
+		err := store.db.QueryRow(
+			"SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?",
+			idx,
+		).Scan(&count)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("index %q not found (count=%d)", idx, count)
 		}
 	}
 }

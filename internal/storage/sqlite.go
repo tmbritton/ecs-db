@@ -120,6 +120,11 @@ func createTables(db *sql.DB, s schema.DatabaseSchema) error {
 		guard_result TEXT,
 		actions_run TEXT
 	);
+
+	-- Indexes on query-hot columns
+	CREATE INDEX IF NOT EXISTS idx_event_queue_tick ON event_queue(tick);
+	CREATE INDEX IF NOT EXISTS idx_input_events_consumed ON input_events(consumed);
+	CREATE INDEX IF NOT EXISTS idx_transitions_entity_id ON transitions(entity_id);
 	`
 	if _, err := db.Exec(fixed); err != nil {
 		return fmt.Errorf("creating fixed tables: %w", err)
