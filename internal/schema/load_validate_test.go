@@ -3,6 +3,7 @@ package schema
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -431,7 +432,7 @@ func TestLoadSchema_DuplicateComponentKey(t *testing.T) {
 		t.Fatal("expected error for duplicate component key, got nil")
 	}
 	// Verify the error message mentions the duplicate key
-	if !containsString(err.Error(), `duplicate components key "Position"`) {
+	if !strings.Contains(err.Error(), `duplicate components key "Position"`) {
 		t.Errorf("error message should mention duplicate key: %v", err)
 	}
 }
@@ -451,7 +452,7 @@ func TestLoadSchema_DuplicateEntityTypeKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for duplicate entity type key, got nil")
 	}
-	if !containsString(err.Error(), `duplicate entityTypes key "Player"`) {
+	if !strings.Contains(err.Error(), `duplicate entityTypes key "Player"`) {
 		t.Errorf("error message should mention duplicate key: %v", err)
 	}
 }
@@ -488,7 +489,7 @@ func TestLoadSchema_DuplicateKeys_NestedObjects(t *testing.T) {
 	if err == nil {
 		// If no error, that's acceptable — nested duplicates are
 		// out of scope for detectDuplicateKeys.
-	} else if !containsString(err.Error(), "duplicate") {
+	} else if !strings.Contains(err.Error(), "duplicate") {
 		t.Logf("error on nested duplicate (acceptable): %v", err)
 	}
 }
@@ -534,7 +535,7 @@ func TestLoadSchema_ComponentsNotObjectValue(t *testing.T) {
 	}
 	// Should NOT panic or complain about duplicates — the error should
 	// come from json.Unmarshal type mismatch.
-	if containsString(err.Error(), "duplicate") {
+	if strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("should not report duplicate key error: %v", err)
 	}
 }
@@ -627,7 +628,7 @@ func TestValidateSQLCompatibility_UnknownComponentType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for component type with no SQL mapping")
 	}
-	if !containsString(err.Error(), `component "Custom" uses type "custom-unknown-type" which has no SQL mapping`) {
+	if !strings.Contains(err.Error(), `component "Custom" uses type "custom-unknown-type" which has no SQL mapping`) {
 		t.Errorf("wrong error message: %v", err)
 	}
 }
@@ -639,7 +640,7 @@ func TestValidateSchema_PhasedErrors(t *testing.T) {
 		EntityTypes:   map[string]EntityType{"T": {RequiredComponents: []string{"Bad"}, ValidationLevel: ValidationStrict}},
 	}
 	err := ValidateSchema(s3)
-	if err == nil || !containsString(err.Error(), "SQL compatibility:") {
+	if err == nil || !strings.Contains(err.Error(), "SQL compatibility:") {
 		t.Errorf("expected SQL compatibility phase error: %v", err)
 	}
 }
@@ -659,7 +660,7 @@ func TestInitSchema_ErrorIncludesFilePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := InitSchema(path2)
-	if err == nil || !containsString(err.Error(), path2) {
+	if err == nil || !strings.Contains(err.Error(), path2) {
 		t.Errorf("expected error with file path: %v", err)
 	}
 }
@@ -717,19 +718,6 @@ func TestEntityType_EmptyValidationLevelDefaultsToStrict(t *testing.T) {
 }
 
 // ── Helper functions ─────────────────────────────────────────
-
-func containsString(s, sub string) bool {
-	return len(s) >= len(sub) && findSubstring(s, sub)
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
 
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)

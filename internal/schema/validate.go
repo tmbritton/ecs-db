@@ -10,6 +10,7 @@ import (
 // knownSQLComponentTypes is the set of component types that the storage
 // layer can generate SQL tables for. If a component uses a type outside
 // this set, the schema is considered invalid.
+// Keep in sync with storage.componentTableSQL's component type switch.
 var knownSQLComponentTypes = map[string]bool{
 	ComponentTypeObject:    true,
 	ComponentTypeArray:     true,
@@ -210,9 +211,6 @@ func validateStructure(s DatabaseSchema) error {
 	if len(s.EntityTypes) == 0 {
 		return fmt.Errorf("entityTypes: at least one entity type must be declared")
 	}
-
-	// Check for duplicate component names within the same entity type.
-	// (Duplicate names across different entity types are allowed.)
 	return nil
 }
 
