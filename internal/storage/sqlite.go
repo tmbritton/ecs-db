@@ -12,7 +12,8 @@ import (
 
 // SQLiteStore handles database connections and operations
 type SQLiteStore struct {
-	db *sql.DB
+	db     *sql.DB
+	schema schema.DatabaseSchema
 }
 
 // NewSQLiteStore opens or creates a SQLite database at the given path and
@@ -55,7 +56,7 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error
 		return nil, fmt.Errorf("failed to initialise schema: %w", err)
 	}
 
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{db: db, schema: s}, nil
 }
 
 // Close closes the database connection
