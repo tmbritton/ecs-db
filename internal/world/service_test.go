@@ -2,7 +2,9 @@ package world
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -19,6 +21,25 @@ func baseSchema() schema.DatabaseSchema {
 		EntityTypes: map[string]schema.EntityType{
 			"Goblin": {
 				RequiredComponents: []string{"Position", "Health"},
+				ValidationLevel:    schema.ValidationStrict,
+			},
+		},
+	}
+}
+
+// detachSchema is like baseSchema but includes an optional component for detach tests.
+func detachSchema() schema.DatabaseSchema {
+	return schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]schema.Component{
+			"Position": {Type: schema.ComponentTypeObject},
+			"Health":   {Type: schema.ComponentTypeObject},
+			"Velocity": {Type: schema.ComponentTypeObject},
+		},
+		EntityTypes: map[string]schema.EntityType{
+			"Goblin": {
+				RequiredComponents: []string{"Position", "Health"},
+				OptionalComponents: []string{"Velocity"},
 				ValidationLevel:    schema.ValidationStrict,
 			},
 		},
@@ -245,8 +266,6 @@ func TestEntityService_Warnings_IsClearedOnError(t *testing.T) {
 		EntityTypes:   map[string]schema.EntityType{},
 	})
 
-	// First call with warning mode that produces warnings.
-	// (Can't actually call CreateEntity with nil store — test Warnings only.)
 	// Just verify Warnings() doesn't panic.
 	if svc.Warnings() != nil {
 		t.Error("new service should have nil warnings")
@@ -269,8 +288,6 @@ func TestValidationError_Error_EmptyErrors(t *testing.T) {
 }
 
 func TestEntityService_CreateEntity_WarningsConcurrency(t *testing.T) {
-	// Two services sharing the same store but called concurrently to
-	// verify the warnings field is properly handled per-call.
 	store := &mockStore{
 		currentTick: 1,
 		tx: &mockTx{
@@ -304,4 +321,329 @@ func TestEntityService_CreateEntity_WarningsConcurrency(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// ---- AttachComponent tests ----
+
+func TestEntityService_AttachComponent_Success(t *testing.T) {
+	tx := &mockTx{}
+	store := &mockStore{
+		entityType:   "Goblin",
+		hasComponent: false,
+		tx:           tx,
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.AttachComponent(context.Background(), 1, "Position", map[string]interface{}{"x": 5.0})
+	if err != nil {
+		t.Fatalf("AttachComponent error: %v", err)
+	}
+	if !tx.committed {
+		t.Error("transaction should have been committed")
+	}
+}
+
+func TestEntityService_AttachComponent_EntityNotFound(t *testing.T) {
+	store := &mockStore{
+		entityTypeErr: &EntityNotFoundError{ID: 999},
+		tx:            &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.AttachComponent(context.Background(), 999, "Position", nil)
+	if err == nil {
+		t.Fatal("expected error for non-existent entity")
+	}
+	var notFound *EntityNotFoundError
+	if !errors.As(err, &notFound) {
+		t.Errorf("expected EntityNotFoundError, got %T: %v", err, err)
+	}
+}
+
+func TestEntityService_AttachComponent_AlreadyAttached(t *testing.T) {
+	store := &mockStore{
+		entityType:   "Goblin",
+		hasComponent: true,
+		tx:           &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.AttachComponent(context.Background(), 1, "Position", nil)
+	if err == nil {
+		t.Fatal("expected error for already attached component")
+	}
+	if !strings.Contains(err.Error(), "already attached") {
+		t.Errorf("expected 'already attached' in error: %v", err)
+	}
+}
+
+func TestEntityService_AttachComponent_ValidationError(t *testing.T) {
+	store := &mockStore{
+		entityType:   "Goblin",
+		hasComponent: false,
+		tx:           &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]schema.Component{
+			"Position": {Type: schema.ComponentTypeObject},
+		},
+		EntityTypes: map[string]schema.EntityType{
+			"Goblin": {
+				RequiredComponents:   []string{"Position"},
+				AllowExtraComponents: false,
+				ValidationLevel:      schema.ValidationStrict,
+			},
+		},
+	})
+
+	// "Health" not declared in schema.
+	err := svc.AttachComponent(context.Background(), 1, "Health", nil)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestEntityService_AttachComponent_WarningModeProceeds(t *testing.T) {
+	tx := &mockTx{}
+	store := &mockStore{
+		entityType:   "Goblin",
+		hasComponent: false,
+		tx:           tx,
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]schema.Component{
+			"Position": {Type: schema.ComponentTypeObject},
+			"Velocity": {Type: schema.ComponentTypeObject},
+		},
+		EntityTypes: map[string]schema.EntityType{
+			"Goblin": {
+				RequiredComponents:   []string{"Position"},
+				AllowExtraComponents: false,
+				ValidationLevel:      schema.ValidationWarning,
+			},
+		},
+	})
+
+	// Velocity is not allowed but warning mode permits it.
+	err := svc.AttachComponent(context.Background(), 1, "Velocity", nil)
+	if err != nil {
+		t.Fatalf("warning mode should not error: %v", err)
+	}
+	if !tx.committed {
+		t.Error("transaction should have been committed in warning mode")
+	}
+}
+
+func TestEntityService_AttachComponent_RollbackOnFailure(t *testing.T) {
+	tx := &mockTx{
+		attachCompErr: fmt.Errorf("constraint violation"),
+	}
+	store := &mockStore{
+		entityType:   "Goblin",
+		hasComponent: false,
+		tx:           tx,
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.AttachComponent(context.Background(), 1, "Position", nil)
+	if err == nil {
+		t.Fatal("expected error from AttachComponent")
+	}
+	if !tx.rolledBack {
+		t.Error("transaction should have been rolled back")
+	}
+	if tx.committed {
+		t.Error("transaction should NOT have been committed")
+	}
+}
+
+// ---- DetachComponent tests ----
+
+func TestEntityService_DetachComponent_Success(t *testing.T) {
+	tx := &mockTx{}
+	store := &mockStore{
+		entityType: "Goblin",
+		tx:         tx,
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(detachSchema())
+
+	// Velocity is optional so it can be detached.
+	err := svc.DetachComponent(context.Background(), 1, "Velocity")
+	if err != nil {
+		t.Fatalf("DetachComponent error: %v", err)
+	}
+	if !tx.committed {
+		t.Error("transaction should have been committed")
+	}
+}
+
+func TestEntityService_DetachComponent_RequiredComponent(t *testing.T) {
+	store := &mockStore{
+		entityType: "Goblin",
+		tx:         &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.DetachComponent(context.Background(), 1, "Health")
+	if err == nil {
+		t.Fatal("expected error for required component detach")
+	}
+	if _, ok := err.(*ComponentMutationError); !ok {
+		t.Errorf("expected ComponentMutationError, got %T: %v", err, err)
+	}
+}
+
+func TestEntityService_DetachComponent_EntityNotFound(t *testing.T) {
+	store := &mockStore{
+		entityTypeErr: &EntityNotFoundError{ID: 999},
+		tx:            &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.DetachComponent(context.Background(), 999, "Position")
+	if err == nil {
+		t.Fatal("expected error for non-existent entity")
+	}
+}
+
+func TestEntityService_DetachComponent_RollbackOnFailure(t *testing.T) {
+	tx := &mockTx{
+		detachCompErr: fmt.Errorf("database error"),
+	}
+	store := &mockStore{
+		entityType: "Goblin",
+		tx:         tx,
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(detachSchema())
+
+	// Velocity is optional so validation passes, then the DB fails.
+	err := svc.DetachComponent(context.Background(), 1, "Velocity")
+	if err == nil {
+		t.Fatal("expected error from DetachComponent")
+	}
+	if !tx.rolledBack {
+		t.Error("transaction should have been rolled back")
+	}
+	if tx.committed {
+		t.Error("transaction should NOT have been committed")
+	}
+}
+
+func TestEntityService_DetachComponent_RequiredComponentValidationFails(t *testing.T) {
+	store := &mockStore{
+		beginTxErr: fmt.Errorf("db locked"),
+		entityType: "Goblin",
+		tx:         &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	// Health is required so validation fails before BeginTx is called.
+	err := svc.DetachComponent(context.Background(), 1, "Health")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
+func TestComponentMutationError_Error(t *testing.T) {
+	e := &ComponentMutationError{
+		Action:   "attach",
+		EntityID: 42,
+		Type:     "Goblin",
+		Errors:   []string{"component already attached"},
+	}
+	if !strings.Contains(e.Error(), "attach") {
+		t.Errorf("Error() should contain 'attach': %s", e.Error())
+	}
+	if !strings.Contains(e.Error(), "42") {
+		t.Errorf("Error() should contain entity id: %s", e.Error())
+	}
+
+	e2 := &ComponentMutationError{Action: "detach", EntityID: 1, Errors: nil}
+	if e2.Error() == "" {
+		t.Error("Error() should not be empty for nil Errors")
+	}
+}
+
+func TestIsAlreadyAttached(t *testing.T) {
+	if !IsAlreadyAttached(ErrAlreadyAttached) {
+		t.Error("expected ErrAlreadyAttached to be detected")
+	}
+	if IsAlreadyAttached(fmt.Errorf("something else")) {
+		t.Error("should not detect unrelated error")
+	}
+	wrapped := fmt.Errorf("wrapper: %w", ErrAlreadyAttached)
+	if !IsAlreadyAttached(wrapped) {
+		t.Error("should detect wrapped ErrAlreadyAttached")
+	}
+}
+
+func TestEntityNotFoundError_Error(t *testing.T) {
+	e := &EntityNotFoundError{ID: 42}
+	got := e.Error()
+	if !strings.Contains(got, "42") {
+		t.Errorf("Error() = %q, should contain entity id", got)
+	}
+}
+
+func TestEntityService_AttachComponent_HasComponentError(t *testing.T) {
+	store := &mockStore{
+		entityType:      "Goblin",
+		hasComponentErr: fmt.Errorf("db locked"),
+		tx:              &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(baseSchema())
+
+	err := svc.AttachComponent(context.Background(), 1, "Position", nil)
+	if err == nil {
+		t.Fatal("expected error from HasComponent")
+	}
+	if !strings.Contains(err.Error(), "db locked") {
+		t.Errorf("expected 'db locked' in error: %v", err)
+	}
+}
+
+func TestEntityService_DetachComponent_BeginTxError(t *testing.T) {
+	store := &mockStore{
+		entityType: "Goblin",
+		beginTxErr: fmt.Errorf("db locked"),
+		tx:         &mockTx{},
+	}
+
+	svc := NewEntityService(store)
+	svc.SetSchema(detachSchema())
+
+	// Velocity is optional so validation passes, then BeginTx fails.
+	err := svc.DetachComponent(context.Background(), 1, "Velocity")
+	if err == nil {
+		t.Fatal("expected error from BeginTx")
+	}
+	if !strings.Contains(err.Error(), "db locked") {
+		t.Errorf("expected 'db locked' in error: %v", err)
+	}
 }

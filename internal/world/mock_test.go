@@ -7,6 +7,8 @@ type mockTx struct {
 	insertEntityResults []insertEntityResult
 	insertEntityIdx     int
 	insertCompErr       error
+	attachCompErr       error
+	detachCompErr       error
 	commitErr           error
 	rollbackErr         error
 	committed           bool
@@ -31,6 +33,14 @@ func (m *mockTx) InsertComponent(ctx context.Context, entityID int64, compName s
 	return m.insertCompErr
 }
 
+func (m *mockTx) AttachComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+	return m.attachCompErr
+}
+
+func (m *mockTx) DetachComponent(ctx context.Context, entityID int64, compName string) error {
+	return m.detachCompErr
+}
+
 func (m *mockTx) Commit() error {
 	m.committed = true
 	return m.commitErr
@@ -43,10 +53,14 @@ func (m *mockTx) Rollback() error {
 
 // mockStore is a hand-written mock EntityStore.
 type mockStore struct {
-	beginTxErr     error
-	currentTick    int64
-	currentTickErr error
-	tx             *mockTx
+	beginTxErr      error
+	currentTick     int64
+	currentTickErr  error
+	tx              *mockTx
+	entityType      string
+	entityTypeErr   error
+	hasComponent    bool
+	hasComponentErr error
 }
 
 func (m *mockStore) BeginTx(ctx context.Context) (Tx, error) {
@@ -58,4 +72,12 @@ func (m *mockStore) BeginTx(ctx context.Context) (Tx, error) {
 
 func (m *mockStore) GetCurrentTick(ctx context.Context) (int64, error) {
 	return m.currentTick, m.currentTickErr
+}
+
+func (m *mockStore) GetEntityType(ctx context.Context, entityID int64) (string, error) {
+	return m.entityType, m.entityTypeErr
+}
+
+func (m *mockStore) HasComponent(ctx context.Context, entityID int64, compName string) (bool, error) {
+	return m.hasComponent, m.hasComponentErr
 }

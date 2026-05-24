@@ -118,3 +118,120 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("entity creation validation failed for type %q: %s",
 		e.Type, e.Errors[0])
 }
+
+// AttachComponent attaches a new component to an existing entity. Performs
+// schema validation before inserting. Runs in its own transaction.
+func (s *EntityService) AttachComponent(
+	ctx context.Context,
+	entityID int64,
+	compName string,
+	values map[string]interface{},
+) error {
+	// Look up the entity type.
+	entityTypeName, err := s.store.GetEntityType(ctx, entityID)
+	if err != nil {
+		return fmt.Errorf("attaching component to entity %d: %w", entityID, err)
+	}
+
+	// Check if already attached.
+	alreadyAttached, err := s.store.HasComponent(ctx, entityID, compName)
+	if err != nil {
+		return fmt.Errorf("attaching component to entity %d: %w", entityID, err)
+	}
+
+	// Validate the attach.
+	vr := ValidateAttachComponent(s.schema, entityTypeName, compName, alreadyAttached)
+	if !vr.Valid() {
+		s.warnings = vr.Warnings
+		return &ComponentMutationError{
+			Action:   "attach",
+			EntityID: entityID,
+			Type:     entityTypeName,
+			Errors:   vr.Errors,
+			Warnings: vr.Warnings,
+		}
+	}
+
+	s.warnings = make([]string, len(vr.Warnings))
+	copy(s.warnings, vr.Warnings)
+
+	// Begin transaction and attach.
+	tx, err := s.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("attaching component to entity %d: %w", entityID, err)
+	}
+
+	if err := tx.AttachComponent(ctx, entityID, compName, values); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("attaching component to entity %d: %w", entityID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("attaching component to entity %d: %w", entityID, err)
+	}
+
+	return nil
+}
+
+// DetachComponent removes a component from an existing entity. Performs
+// schema validation before deleting. Runs in its own transaction.
+func (s *EntityService) DetachComponent(
+	ctx context.Context,
+	entityID int64,
+	compName string,
+) error {
+	// Look up the entity type.
+	entityTypeName, err := s.store.GetEntityType(ctx, entityID)
+	if err != nil {
+		return fmt.Errorf("detaching component from entity %d: %w", entityID, err)
+	}
+
+	// Validate the detach.
+	vr := ValidateDetachComponent(s.schema, entityTypeName, compName)
+	if !vr.Valid() {
+		s.warnings = vr.Warnings
+		return &ComponentMutationError{
+			Action:   "detach",
+			EntityID: entityID,
+			Type:     entityTypeName,
+			Errors:   vr.Errors,
+			Warnings: vr.Warnings,
+		}
+	}
+
+	s.warnings = vr.Warnings
+
+	// Begin transaction and detach.
+	tx, err := s.store.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("detaching component from entity %d: %w", entityID, err)
+	}
+
+	if err := tx.DetachComponent(ctx, entityID, compName); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("detaching component from entity %d: %w", entityID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("detaching component from entity %d: %w", entityID, err)
+	}
+
+	return nil
+}
+
+// ComponentMutationError is returned when attach/detach fails validation.
+type ComponentMutationError struct {
+	Action   string // "attach" or "detach"
+	EntityID int64
+	Type     string
+	Errors   []string
+	Warnings []string
+}
+
+func (e *ComponentMutationError) Error() string {
+	if len(e.Errors) == 0 {
+		return fmt.Sprintf("component %s validation failed for entity %d: no details", e.Action, e.EntityID)
+	}
+	return fmt.Sprintf("component %s validation failed for entity %d (type %q): %s",
+		e.Action, e.EntityID, e.Type, e.Errors[0])
+}

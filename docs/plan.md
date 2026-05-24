@@ -30,10 +30,18 @@ Establish `schema.json` as the declarative source of truth for components and en
   - Pragmas at init: WAL, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`
   - `ON DELETE CASCADE` from `entities(id)` to all `comp_*.entity_id`
 
-- [ ] **Entity creation with type validation** — Enforce contracts at attachment time, not query time.
+- [x] **Entity creation with type validation** — Enforce contracts at attachment time, not query time.
   - Required components present at creation
   - No disallowed components when `allowExtraComponents=false`
   - Honor `validationLevel`: `strict` refuses, `warning` logs and proceeds
+  - Coverage: `world` 98.5%, `storage` 81.8%, `schema` 93.1%
+
+- [x] **Component attach/detach with type validation** — Enable entities to gain and lose components post-creation.
+  - `EntityService.AttachComponent` with schema validation, duplicate prevention, and transactional insert
+  - `EntityService.DetachComponent` with required-component guard, transactional delete
+  - `EntityStore.GetEntityType` and `EntityStore.HasComponent` lookup methods
+  - Validation honors `validationLevel` on attach; detach of required components always errors
+  - Coverage: `world` 95.0%, `storage` 80.1%
 
 - [ ] **Component attach/detach with type validation** — Same rules apply post-creation.
   - Reject attaching unknown components

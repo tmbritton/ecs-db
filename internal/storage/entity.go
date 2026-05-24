@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/mattn/go-sqlite3"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/world"
 )
@@ -29,6 +31,24 @@ func (t *sqliteTx) InsertEntity(ctx context.Context, entityType string, createdT
 }
 
 func (t *sqliteTx) InsertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+	return t.insertComponent(ctx, entityID, compName, values)
+}
+
+func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+	err := t.insertComponent(ctx, entityID, compName, values)
+	// On UNIQUE constraint violation, return the domain sentinel.
+	if err != nil {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+			return world.ErrAlreadyAttached
+		}
+	}
+	return err
+}
+
+// insertComponent is the shared implementation for both InsertComponent
+// and AttachComponent — they do the same SQL operation.
+func (t *sqliteTx) insertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
 	comp, ok := t.schema.Components[compName]
 	if !ok {
 		return fmt.Errorf("component %q not declared in schema", compName)
@@ -195,6 +215,28 @@ func (t *sqliteTx) Rollback() error {
 	return t.tx.Rollback()
 }
 
+func (t *sqliteTx) DetachComponent(ctx context.Context, entityID int64, compName string) error {
+	_, ok := t.schema.Components[compName]
+	if !ok {
+		return fmt.Errorf("component %q not declared in schema", compName)
+	}
+
+	tableName := "comp_" + strings.ToLower(compName)
+	query := fmt.Sprintf("DELETE FROM %s WHERE entity_id = ?", tableName)
+	result, err := t.tx.ExecContext(ctx, query, entityID)
+	if err != nil {
+		return fmt.Errorf("deleting from %s: %w", tableName, err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected on delete from %s: %w", tableName, err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("entity %d has no %s component to detach", entityID, compName)
+	}
+	return nil
+}
+
 // BeginTx starts a new transaction and returns it wrapped as a world.Tx.
 // Implements world.EntityStore.
 func (s *SQLiteStore) BeginTx(ctx context.Context) (world.Tx, error) {
@@ -221,6 +263,43 @@ func (s *SQLiteStore) GetCurrentTick(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("reading current tick: %w", err)
 	}
 	return tick, nil
+}
+
+// GetEntityType returns the entity type for the given entity ID.
+// Implements world.EntityStore.
+func (s *SQLiteStore) GetEntityType(ctx context.Context, entityID int64) (string, error) {
+	var entityType string
+	err := s.db.QueryRowContext(
+		ctx,
+		"SELECT entity_type FROM entities WHERE id = ?",
+		entityID,
+	).Scan(&entityType)
+	if err == sql.ErrNoRows {
+		return "", &world.EntityNotFoundError{ID: entityID}
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading entity type for id %d: %w", entityID, err)
+	}
+	return entityType, nil
+}
+
+// HasComponent returns true if the entity has the named component attached.
+// Implements world.EntityStore.
+func (s *SQLiteStore) HasComponent(ctx context.Context, entityID int64, compName string) (bool, error) {
+	table := "comp_" + strings.ToLower(compName)
+	var placeholder int
+	err := s.db.QueryRowContext(
+		ctx,
+		fmt.Sprintf("SELECT 1 FROM %s WHERE entity_id = ? LIMIT 1", table),
+		entityID,
+	).Scan(&placeholder)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checking component %s for entity %d: %w", compName, entityID, err)
+	}
+	return true, nil
 }
 
 // Compile-time interface checks.

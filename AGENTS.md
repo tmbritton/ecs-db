@@ -177,5 +177,6 @@ func TestValidateFoo(t *testing.T) {
 - Commits follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
 - One commit per logical change — no "fix" commits on top of "feat" commits for the same concern
 - Update stories as tasks are completed: mark checkboxes in `docs/stories/epic-1/*.md`
+  - **After completing a story, also mark it done in `docs/plan.md`** (Epic 1 section) with coverage figures. This keeps the roadmap current.
 - Implementation lives on `main`; feature branches only for parallel work
 - **Before every `git commit`: launch a fresh-context `reviewer` subagent to review the staged diff.** The reviewer should check for correctness, regressions, test quality, style alignment, and simplicity. Apply fixes worth doing now before committing.
