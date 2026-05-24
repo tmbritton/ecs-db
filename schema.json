@@ -1,34 +1,40 @@
 {
-  "version": "0.0.0",
-  "schema": {
-    "components": {
-      "title": {
-        "type": "text"
-      },
-      "description": {
-        "type": "text"
-      },
-      "body": {
-        "type": "text"
-      },
-      "name": {
-        "type": "text"
-      },
-      "created": {
-        "type": "integer"
-      },
-      "author": {
-        "type": "reference",
-        "entityType": "author"
+  "schemaVersion": 1,
+  "components": {
+    "Position": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
       }
     },
-    "entities": {
-      "post": {
-        "components": ["title", "description", "body", "created", "author"]
-      },
-      "author": {
-        "components": ["name"]
+    "Health": {
+      "type": "object",
+      "properties": {
+        "hp": { "type": "integer" },
+        "maxHp": { "type": "integer" }
       }
+    },
+    "Sprite": {
+      "type": "object",
+      "properties": {
+        "imageId": { "type": "string" },
+        "frame": { "type": "integer" }
+      }
+    }
+  },
+  "entityTypes": {
+    "Goblin": {
+      "requiredComponents": ["Position", "Health", "Sprite"],
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    },
+    "Player": {
+      "requiredComponents": ["Position", "Health", "Sprite"],
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
     }
   }
 }

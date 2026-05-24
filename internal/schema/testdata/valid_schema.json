@@ -1,13 +1,21 @@
 {
-  "version": "1.0",
-  "schema": {
-    "components": {
-      "title": {"type": "text"},
-      "author": {"type": "reference", "entityType": "user"}
+  "schemaVersion": 1,
+  "components": {
+    "Position": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
     },
-    "entities": {
-      "post": {"components": ["title", "author"]},
-      "user": {"components": ["title"]}
+    "Name": { "type": "string" }
+  },
+  "entityTypes": {
+    "Player": {
+      "requiredComponents": ["Position", "Name"],
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
     }
   }
 }

@@ -2,79 +2,73 @@ package storage
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
-type ComponentTableBuilder struct {
-	name      string
-	component schema.Component
-	sql       string
-}
-
-func NewComponentTableBuilder(name string, component schema.Component) *ComponentTableBuilder {
-	return &ComponentTableBuilder{
-		name:      name,
-		component: component,
-		sql:       "",
+// componentTableSQL generates the CREATE TABLE statement for a single component.
+// Object components produce one typed column per property. Non-object components
+// produce a single "value" column with an appropriate SQL type.
+func componentTableSQL(name string, comp schema.Component) (string, error) {
+	sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS comp_%s (\n", strings.ToLower(name))
+	cols := []string{
+		"\tentity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE",
 	}
-}
 
-func (ctb *ComponentTableBuilder) addName() {
-	ctb.sql = fmt.Sprintf(`CREATE TABLE IF NOT EXISTS component_%s (`, ctb.name)
-}
-
-func (ctb *ComponentTableBuilder) addColumns() {
-	// Default columns
-	ctb.sql += `
-		id TEXT PRIMARY KEY,
-		entity_id TEXT,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-	`
-
-	if textComp, ok := ctb.component.(*schema.TextComponent); ok {
-		ctb.sql += `value TEXT`
-		if textComp.MinLength != nil {
-			ctb.sql += fmt.Sprintf(` CHECK (length(value) >= %d)`, *textComp.MinLength)
-		}
-		if textComp.MaxLength != nil {
-			ctb.sql += fmt.Sprintf(` CHECK (length(value) <= %d)`, *textComp.MaxLength)
+	switch comp.Type {
+	case schema.ComponentTypeObject:
+		for propName, prop := range comp.Properties {
+			sqlType := propertySQLType(prop)
+			col := fmt.Sprintf("\t%s %s NOT NULL", strings.ToLower(propName), sqlType)
+			cols = append(cols, col)
 		}
 
-		ctb.sql += ","
+	case schema.ComponentTypeEntityRef:
+		cols = append(cols, "\ttarget_entity_id INTEGER NOT NULL REFERENCES entities(id)")
+
+	case schema.ComponentTypeArray:
+		// Arrays are stored as JSON in a single column regardless of item type.
+		cols = append(cols, "\tvalue TEXT NOT NULL DEFAULT '[]'")
+
+	case schema.ComponentTypeString:
+		cols = append(cols, "\tvalue TEXT NOT NULL DEFAULT ''")
+
+	case schema.ComponentTypeInteger:
+		cols = append(cols, "\tvalue INTEGER NOT NULL DEFAULT 0")
+
+	case schema.ComponentTypeNumber:
+		cols = append(cols, "\tvalue REAL NOT NULL DEFAULT 0.0")
+
+	case schema.ComponentTypeBoolean:
+		cols = append(cols, "\tvalue BOOLEAN NOT NULL DEFAULT 0")
+
+	default:
+		return "", fmt.Errorf("unsupported component type %q", comp.Type)
 	}
 
-	if intComp, ok := ctb.component.(*schema.IntegerComponent); ok {
-		if intComp.Min != nil && intComp.Max != nil {
-			ctb.sql += fmt.Sprintf(`value INTEGER CHECK (value >= %d AND value <= %d),`, *intComp.Min, *intComp.Max)
-		} else if intComp.Min != nil {
-			ctb.sql += fmt.Sprintf(`value INTEGER CHECK (value >= %d),`, *intComp.Min)
-		} else if intComp.Max != nil {
-			ctb.sql += fmt.Sprintf(`value INTEGER CHECK (value <= %d),`, *intComp.Max)
-		} else {
-			ctb.sql += "value INTEGER,"
-		}
-	}
-
-	if _, ok := ctb.component.(*schema.ReferenceComponent); ok {
-		ctb.sql += `value TEXT UNIQUE NOT NULL,`
-	}
-
-	if _, ok := ctb.component.(*schema.BoolComponent); ok {
-		ctb.sql += `
-			value INTEGER CHECK (value IN (0, 1)),
-		`
-	}
+	sql += strings.Join(cols, ",\n")
+	sql += "\n)"
+	return sql, nil
 }
 
-func (ctb *ComponentTableBuilder) closeColumns() {
-	ctb.sql = ctb.sql + ");"
-}
-
-func (ctb *ComponentTableBuilder) BuildSql() string {
-	ctb.addName()
-	ctb.addColumns()
-	ctb.closeColumns()
-	return ctb.sql
+// propertySQLType maps a Property to its SQLite column type.
+func propertySQLType(p schema.Property) string {
+	switch p.Type {
+	case schema.PropertyTypeString:
+		return "TEXT"
+	case schema.PropertyTypeInteger:
+		return "INTEGER"
+	case schema.PropertyTypeNumber:
+		return "REAL"
+	case schema.PropertyTypeBoolean:
+		return "INTEGER"
+	case schema.PropertyTypeEntityRef:
+		return "INTEGER"
+	case schema.PropertyTypeObject, schema.PropertyTypeArray:
+		// Nested structures are stored as JSON.
+		return "TEXT"
+	default:
+		return "TEXT"
+	}
 }

@@ -6,116 +6,107 @@ import (
 	"os"
 )
 
-// Temporary struct for initial parsing
-type tempSchema struct {
-	Version string `json:"version"`
-	Schema  struct {
-		Components map[string]json.RawMessage `json:"components"`
-		Entities   map[string]Entity          `json:"entities"`
-	} `json:"schema"`
-}
-
+// LoadSchema parses schema.json bytes into a DatabaseSchema.
+// It performs structural unmarshalling (type dispatch for components,
+// default application for entity types) but does NOT run semantic
+// validation. Call ValidateSchema on the result.
 func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
-	var schema DatabaseSchema
-	var temp tempSchema
-
-	if err := json.Unmarshal(jsonData, &temp); err != nil {
-		return DatabaseSchema{}, err
+	var raw struct {
+		SchemaVersion json.RawMessage     `json:"schemaVersion"`
+		Components    map[string]Component `json:"components"`
+		EntityTypes   map[string]EntityType `json:"entityTypes"`
+	}
+	if err := json.Unmarshal(jsonData, &raw); err != nil {
+		return DatabaseSchema{}, fmt.Errorf("failed to parse schema.json: %w", err)
 	}
 
-	schema.Schema.Components = make(map[string]Component)
-
-	for key, val := range temp.Schema.Components {
-		var typeInfo struct {
-			Type string `json:"type"`
-		}
-
-		if err := json.Unmarshal(val, &typeInfo); err != nil {
-			return DatabaseSchema{}, err
-		}
-		componentFactory, ok := ComponentMap[typeInfo.Type]
-		if ok {
-			component := componentFactory()
-
-			if err := json.Unmarshal(val, component); err != nil {
-				return DatabaseSchema{}, err
-			}
-			schema.Schema.Components[key] = component
-		} else {
-			return DatabaseSchema{}, fmt.Errorf("%s is not a known component type", typeInfo.Type)
-		}
+	// ── schemaVersion: must be a JSON integer ──
+	var version float64
+	if err := json.Unmarshal(raw.SchemaVersion, &version); err != nil {
+		return DatabaseSchema{}, fmt.Errorf("schemaVersion: expected integer, got %s", string(raw.SchemaVersion))
+	}
+	if version != float64(int(version)) {
+		return DatabaseSchema{}, fmt.Errorf("schemaVersion: expected integer, got %g", version)
+	}
+	if int(version) < 1 {
+		return DatabaseSchema{}, fmt.Errorf("schemaVersion: must be >= 1, got %d", int(version))
 	}
 
-	schema.Version = temp.Version
+	// ── Entity type defaults ──
+	for i, et := range raw.EntityTypes {
+		et.ApplyDefaults()
+		raw.EntityTypes[i] = et
+	}
 
-	schema.Schema.Entities = temp.Schema.Entities
-
-	return schema, nil
+	return DatabaseSchema{
+		SchemaVersion: int(version),
+		Components:    raw.Components,
+		EntityTypes:   raw.EntityTypes,
+	}, nil
 }
 
-// Ensure all components referenced by entities actually exist
-func ValidateEntities(schema DatabaseSchema) error {
-	for entityName, entity := range schema.Schema.Entities {
-		for _, componentName := range entity.Components {
-			_, exists := schema.Schema.Components[componentName]
-			if !exists {
-				return fmt.Errorf("entity %s references non-existent component %s", entityName, componentName)
+// ValidateSchema performs semantic validation on a loaded schema.
+func ValidateSchema(s DatabaseSchema) error {
+	// Redundant with LoadSchema's integer check — kept as a safety net
+	// for callers that construct DatabaseSchema directly without LoadSchema.
+	if s.SchemaVersion < 1 {
+		return fmt.Errorf("schemaVersion: must be >= 1, got %d", s.SchemaVersion)
+	}
+
+	if len(s.Components) == 0 {
+		return fmt.Errorf("components: at least one component must be declared")
+	}
+
+	if len(s.EntityTypes) == 0 {
+		return fmt.Errorf("entityTypes: at least one entity type must be declared")
+	}
+
+	// Component name → existence already guaranteed by the map.
+	// Entity type component references must resolve.
+	for typeName, et := range s.EntityTypes {
+		allComponents := append(et.RequiredComponents, et.OptionalComponents...)
+		for _, compName := range allComponents {
+			if _, ok := s.Components[compName]; !ok {
+				return fmt.Errorf("entityType %q references undeclared component %q",
+					typeName, compName)
 			}
 		}
-	}
-	return nil
-}
 
-// Ensure all reference components point to valid entity types
-func ValidateReferenceComponents(schema DatabaseSchema) error {
-	for _, component := range schema.Schema.Components {
-		if refComponent, ok := component.(*ReferenceComponent); ok {
-			entityType := refComponent.EntityType
-			_, exists := schema.Schema.Entities[entityType]
-			if !exists {
-				// return false
-				return fmt.Errorf("entityType %s refers to a non-existent entity type", entityType)
+		// No overlap between required and optional.
+		for _, req := range et.RequiredComponents {
+			for _, opt := range et.OptionalComponents {
+				if req == opt {
+					return fmt.Errorf("entityType %q: component %q is in both requiredComponents and optionalComponents",
+						typeName, req)
+				}
 			}
 		}
-	}
-	return nil
-}
 
-func ValidateSchema(schema DatabaseSchema) error {
-	if schema.Version == "" {
-		return fmt.Errorf("version field is required")
-	}
-
-	if schema.Schema.Components == nil || len(schema.Schema.Components) == 0 {
-		return fmt.Errorf("components field is required")
-	}
-
-	if schema.Schema.Entities == nil || len(schema.Schema.Entities) == 0 {
-		return fmt.Errorf("entities field is required")
-	}
-
-	if err := ValidateEntities(schema); err != nil {
-		return err
-	}
-
-	if err := ValidateReferenceComponents(schema); err != nil {
-		return err
+		// validationLevel must be valid.
+		switch et.ValidationLevel {
+		case ValidationStrict, ValidationWarning:
+			// ok
+		default:
+			return fmt.Errorf("entityType %q: invalid validationLevel %q (must be %q or %q)",
+				typeName, et.ValidationLevel, ValidationStrict, ValidationWarning)
+		}
 	}
 
 	return nil
 }
 
+// InitSchema reads schema.json from disk, unmarshals, and validates it.
 func InitSchema(path string) (DatabaseSchema, error) {
-	jsonData, err := os.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return DatabaseSchema{}, fmt.Errorf("Error reading file at %s", path)
+		return DatabaseSchema{}, fmt.Errorf("reading schema file: %w", err)
 	}
-	schema, err := LoadSchema(jsonData)
+	s, err := LoadSchema(data)
 	if err != nil {
 		return DatabaseSchema{}, err
 	}
-	if err := ValidateSchema(schema); err != nil {
+	if err := ValidateSchema(s); err != nil {
 		return DatabaseSchema{}, err
 	}
-	return schema, nil
+	return s, nil
 }

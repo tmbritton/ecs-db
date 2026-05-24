@@ -15,15 +15,17 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-func InitDb(path string, schema schema.DatabaseSchema) (*SQLiteStore, error) {
+// NewSQLiteStore opens or creates a SQLite database at the given path and
+// initialises the fixed + generated tables from the schema.
+func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error) {
 	// Ensure directory exists
-	dbDir := filepath.Dir(path)
+	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
 	// Open database connection
-	db, err := sql.Open("sqlite3", path+"-"+schema.Version)
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -34,10 +36,23 @@ func InitDb(path string, schema schema.DatabaseSchema) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Create tables if they don't exist
-	if err := initSchema(db, schema); err != nil {
+	// Apply pragmas
+	for _, pragma := range []string{
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA synchronous = NORMAL",
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA foreign_keys = ON",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("applying pragma: %s: %w", pragma, err)
+		}
+	}
+
+	// Create tables
+	if err := createTables(db, s); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to initialize schema: %w", err)
+		return nil, fmt.Errorf("failed to initialise schema: %w", err)
 	}
 
 	return &SQLiteStore{db: db}, nil
@@ -45,30 +60,89 @@ func InitDb(path string, schema schema.DatabaseSchema) (*SQLiteStore, error) {
 
 // Close closes the database connection
 func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
 }
 
-func initSchema(db *sql.DB, schema schema.DatabaseSchema) error {
-	sql := `
-    -- Entities Table
-    CREATE TABLE IF NOT EXISTS entities (
-      id TEXT PRIMARY KEY,
-      type TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
+// DB returns the underlying *sql.DB for adapters that need direct access.
+func (s *SQLiteStore) DB() *sql.DB {
+	return s.db
+}
 
-    CREATE INDEX IF NOT EXISTS idx_entity_type ON entities(type);
+func createTables(db *sql.DB, s schema.DatabaseSchema) error {
+	// Fixed tables
+	fixed := `
+	CREATE TABLE IF NOT EXISTS meta (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
 
-    -- Schema Table
-    CREATE TABLE IF NOT EXISTS schema (
-      id TEXT PRIMARY KEY,
-      version TEXT,
-      definition TEXT
-    );
+	CREATE TABLE IF NOT EXISTS world (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
 
-    CREATE INDEX IF NOT EXISTS idx_schema_version on schema(version);
-  `
+	CREATE TABLE IF NOT EXISTS entities (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		entity_type TEXT NOT NULL,
+		created_tick INTEGER NOT NULL DEFAULT 0
+	);
 
-	_, err := db.Exec(sql)
-	return err
+	CREATE INDEX IF NOT EXISTS idx_entity_type ON entities(entity_type);
+
+	CREATE TABLE IF NOT EXISTS event_queue (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tick INTEGER NOT NULL,
+		target_entity INTEGER,
+		kind TEXT NOT NULL,
+		payload TEXT NOT NULL DEFAULT '{}'
+	);
+
+	CREATE TABLE IF NOT EXISTS input_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		received_at_ms INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		payload TEXT NOT NULL DEFAULT '{}',
+		consumed INTEGER NOT NULL DEFAULT 0
+	);
+
+	CREATE TABLE IF NOT EXISTS transitions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tick INTEGER NOT NULL,
+		wall_ms INTEGER NOT NULL,
+		entity_id INTEGER NOT NULL,
+		machine_id TEXT NOT NULL,
+		from_state TEXT NOT NULL,
+		to_state TEXT NOT NULL,
+		event TEXT NOT NULL,
+		guard_result TEXT,
+		actions_run TEXT
+	);
+	`
+	if _, err := db.Exec(fixed); err != nil {
+		return fmt.Errorf("creating fixed tables: %w", err)
+	}
+
+	// Record schema version in meta
+	if _, err := db.Exec(
+		"INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
+		fmt.Sprintf("%d", s.SchemaVersion),
+	); err != nil {
+		return fmt.Errorf("recording schema_version: %w", err)
+	}
+
+	// Generate component tables
+	for name, comp := range s.Components {
+		stmt, err := componentTableSQL(name, comp)
+		if err != nil {
+			return fmt.Errorf("building table for component %q: %w", name, err)
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("creating table for component %q: %w", name, err)
+		}
+	}
+
+	return nil
 }

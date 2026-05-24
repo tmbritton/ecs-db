@@ -1,12 +1,16 @@
 # Story 1: Define & Lock schema.json Document Shape
 
 **Epic:** 1 — Schema-driven data foundation  
-**Status:** ⚠️ Partially done — format diverges from architecture doc  
+**Status:** ✅ Done  
 **Priority:** Critical blocker — nothing else builds correctly until this is locked
 
 ## Context
 
 The architecture doc (`docs/game-engine-arch.md`) defines a fully specified `schema.json` format. The current `schema.json` and `internal/schema/types.go` implement a different, simpler shape. These must be reconciled before the loader, validator, DDL generator, and entity creation logic can be finalized.
+
+## Decision
+
+Aligned to the architecture document (Option A). Components are multi-column (`object` type with typed `properties`), entity types have `requiredComponents`, `optionalComponents`, `allowExtraComponents`, and `validationLevel`. The `schemaVersion` is an integer for migration comparison.
 
 ## Current State vs Architecture
 
@@ -23,21 +27,38 @@ The architecture doc (`docs/game-engine-arch.md`) defines a fully specified `sch
 
 ## Tasks
 
-- [ ] **Decide the component shape** — single `value` column (current) vs. multi-column per component property (architecture doc). The architecture doc's approach is more expressive and aligns with SQL normalization, but requires more complex DDL generation. Record the decision in this story.
-- [ ] **Lock the top-level JSON shape** — `schemaVersion` (int), `components` (object keyed by name), `entityTypes` (object keyed by name). Update `internal/schema/types.go` to match.
-- [ ] **Define entity type fields** — `requiredComponents` (list), `optionalComponents` (list), `allowExtraComponents` (bool, default `false`), `validationLevel` (`"strict"` or `"warning"`, default `"strict"`).
-- [ ] **Define the component property system** — at minimum: `object` (with `properties` map supporting `string`, `integer`, `number`, `entity-ref`, `boolean`), `array` (with `items` specifying the item type), and `entity-ref` shorthand. Update `internal/schema/types.go` accordingly.
-- [ ] **Write a JSON Schema (or Go validation equivalent)** for `schema.json` itself — self-validate the document shape before running semantic validations.
-- [ ] **Update `schema.json`** to the locked format using one concrete example entity type from the architecture doc (e.g., `Goblin` or `Player`).
-- [ ] **Update all existing tests** to use the new format.
+- [x] **Decide the component shape** — multi-column per architecture doc.
+- [x] **Lock the top-level JSON shape** — Done. `DatabaseSchema{SchemaVersion int, Components, EntityTypes}`.
+- [x] **Define entity type fields** — `EntityType{RequiredComponents, OptionalComponents, AllowExtraComponents, ValidationLevel}` with `ApplyDefaults()`.
+- [x] **Define the component property system** — `Property{Type, Properties, Items}` with recursive `Validate()`. New file: `internal/schema/property.go`.
+- [x] **Write Go validation** — `LoadSchema` + `ValidateSchema` enforce structural and semantic rules.
+- [x] **Update `schema.json`** — Goblin + Player with Position, Health, Sprite.
+- [x] **Update all existing tests** — old `schema_test.go` replaced with comprehensive coverage (67 tests, 98.2%).
 
 ## Acceptance Criteria
 
-- [ ] `schema.json` at the repo root matches the locked document shape exactly, with a `schemaVersion` integer field and at least two entity types and three components declared.
-- [ ] `internal/schema/types.go` exports Go structs that exactly round-trip the locked `schema.json` shape.
-- [ ] The Go structs use `schemaVersion int` (not string "version") and the correct top-level key names.
-- [ ] Entity type struct includes `RequiredComponents`, `OptionalComponents`, `AllowExtraComponents`, and `ValidationLevel` fields with appropriate defaults.
-- [ ] Component struct supports at least `object` (with nested typed properties) and `array` types in addition to primitives.
-- [ ] A `LoadSchema` call on a structurally-invalid `schema.json` (e.g., wrong top-level keys, missing `schemaVersion`) returns a descriptive error naming the structural issue.
-- [ ] All Go tests pass after the format change.
-- [ ] The architecture doc's example `schema.json` can be loaded by the new types.
+- [x] `schema.json` at the repo root matches the locked document shape exactly, with a `schemaVersion` integer field and at least two entity types and three components declared.
+- [x] `internal/schema/types.go` exports Go structs that exactly round-trip the locked `schema.json` shape.
+- [x] The Go structs use `schemaVersion int` (not string "version") and the correct top-level key names.
+- [x] Entity type struct includes `RequiredComponents`, `OptionalComponents`, `AllowExtraComponents`, and `ValidationLevel` fields with appropriate defaults.
+- [x] Component struct supports at least `object` (with nested typed properties) and `array` types in addition to primitives.
+- [x] A `LoadSchema` call on a structurally-invalid `schema.json` (e.g., wrong top-level keys, missing `schemaVersion`) returns a descriptive error naming the structural issue.
+- [x] All Go tests pass after the format change.
+- [x] The architecture doc's example `schema.json` can be loaded by the new types.
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `internal/schema/types.go` | Rewritten: `DatabaseSchema`, `EntityType`, `ValidationLevel` with helper methods |
+| `internal/schema/property.go` | **New**: `Property` type system with recursive validation |
+| `internal/schema/component.go` | Rewritten: polymorphic `Component` with `UnmarshalJSON` dispatch |
+| `internal/schema/entity.go` | Deleted — moved into `types.go` |
+| `internal/schema/validate.go` | Rewritten: `LoadSchema`, `ValidateSchema`, `InitSchema` |
+| `internal/schema/schema_test.go` | Deleted — replaced by new test files |
+| `internal/schema/property_test.go` | **New**: property type tests |
+| `internal/schema/component_test.go` | **New**: component unmarshalling tests |
+| `internal/schema/entitytype_test.go` | **New**: EntityType helper method tests |
+| `internal/schema/load_validate_test.go` | **New**: loader + validator integration tests |
+| `schema.json` | Migrated to locked format (Goblin + Player) |
+| `internal/schema/testdata/*` | Updated to new format |

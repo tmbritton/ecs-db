@@ -1,7 +1,7 @@
 
 {
-  "version": "1.0"
-  "schema": {
+  "schemaVersion": 1
+  "components": {
     "components": {
       "title": {"type": "text"},
       "author": {"type": "reference", "entityType": "user"}
