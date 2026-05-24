@@ -4,23 +4,23 @@ import "testing"
 
 func TestEntityTypeApplyDefaults(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    EntityType
+		name      string
+		input     EntityType
 		wantLevel ValidationLevel
 	}{
 		{
-			name:     "empty level defaults to strict",
-			input:    EntityType{},
+			name:      "empty level defaults to strict",
+			input:     EntityType{},
 			wantLevel: ValidationStrict,
 		},
 		{
-			name:     "explicit strict stays strict",
-			input:    EntityType{ValidationLevel: ValidationStrict},
+			name:      "explicit strict stays strict",
+			input:     EntityType{ValidationLevel: ValidationStrict},
 			wantLevel: ValidationStrict,
 		},
 		{
-			name:     "explicit warning stays warning",
-			input:    EntityType{ValidationLevel: ValidationWarning},
+			name:      "explicit warning stays warning",
+			input:     EntityType{ValidationLevel: ValidationWarning},
 			wantLevel: ValidationWarning,
 		},
 	}
@@ -38,9 +38,9 @@ func TestEntityTypeApplyDefaults(t *testing.T) {
 func TestEntityTypeIsComponentRequired(t *testing.T) {
 	et := EntityType{RequiredComponents: []string{"Position", "Health"}}
 	tests := []struct {
-		name string
+		name      string
 		component string
-		want bool
+		want      bool
 	}{
 		{"Position is required", "Position", true},
 		{"Health is required", "Health", true},
@@ -59,9 +59,9 @@ func TestEntityTypeIsComponentRequired(t *testing.T) {
 func TestEntityTypeIsComponentOptional(t *testing.T) {
 	et := EntityType{OptionalComponents: []string{"Velocity", "Behavior"}}
 	tests := []struct {
-		name string
+		name      string
 		component string
-		want bool
+		want      bool
 	}{
 		{"Velocity is optional", "Velocity", true},
 		{"Behavior is optional", "Behavior", true},
@@ -78,37 +78,37 @@ func TestEntityTypeIsComponentOptional(t *testing.T) {
 
 func TestEntityTypeIsComponentAllowed(t *testing.T) {
 	tests := []struct {
-		name string
-		et   EntityType
+		name      string
+		et        EntityType
 		component string
-		want bool
+		want      bool
 	}{
 		{
-			name: "allowed via required",
-			et:   EntityType{RequiredComponents: []string{"Position"}},
+			name:      "allowed via required",
+			et:        EntityType{RequiredComponents: []string{"Position"}},
 			component: "Position",
-			want: true,
+			want:      true,
 		},
 		{
-			name: "allowed via optional",
-			et:   EntityType{OptionalComponents: []string{"Velocity"}},
+			name:      "allowed via optional",
+			et:        EntityType{OptionalComponents: []string{"Velocity"}},
 			component: "Velocity",
-			want: true,
+			want:      true,
 		},
 		{
-			name: "allowed via extra components",
-			et:   EntityType{AllowExtraComponents: true},
+			name:      "allowed via extra components",
+			et:        EntityType{AllowExtraComponents: true},
 			component: "Anything",
-			want: true,
+			want:      true,
 		},
 		{
 			name: "not allowed when strict and not listed",
 			et: EntityType{
-				RequiredComponents: []string{"Position"},
+				RequiredComponents:   []string{"Position"},
 				AllowExtraComponents: false,
 			},
 			component: "Velocity",
-			want: false,
+			want:      false,
 		},
 	}
 	for _, tt := range tests {

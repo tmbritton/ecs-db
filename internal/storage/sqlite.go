@@ -21,7 +21,7 @@ type SQLiteStore struct {
 func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error) {
 	// Ensure directory exists
 	dbDir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dbDir, 0755); err != nil {
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
@@ -33,7 +33,7 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
@@ -45,14 +45,14 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error
 		"PRAGMA foreign_keys = ON",
 	} {
 		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("applying pragma: %s: %w", pragma, err)
 		}
 	}
 
 	// Create tables
 	if err := createTables(db, s); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to initialise schema: %w", err)
 	}
 

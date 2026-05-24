@@ -32,8 +32,8 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	}
 
 	var raw struct {
-		SchemaVersion json.RawMessage     `json:"schemaVersion"`
-		Components    map[string]Component `json:"components"`
+		SchemaVersion json.RawMessage       `json:"schemaVersion"`
+		Components    map[string]Component  `json:"components"`
 		EntityTypes   map[string]EntityType `json:"entityTypes"`
 	}
 	if err := json.Unmarshal(jsonData, &raw); err != nil {

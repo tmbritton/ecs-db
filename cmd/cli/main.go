@@ -25,7 +25,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	fmt.Printf("Database initialized (schema version %d)\n", dbSchema.SchemaVersion)
 
 	// TODO: Add command processing here

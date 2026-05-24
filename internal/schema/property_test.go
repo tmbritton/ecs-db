@@ -77,8 +77,8 @@ func TestPropertyValidate(t *testing.T) {
 			},
 		},
 		{
-			name: "object without properties",
-			prop: Property{Type: PropertyTypeObject},
+			name:    "object without properties",
+			prop:    Property{Type: PropertyTypeObject},
 			wantErr: true,
 		},
 		{

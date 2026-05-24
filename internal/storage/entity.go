@@ -210,7 +210,8 @@ func (s *SQLiteStore) BeginTx(ctx context.Context) (world.Tx, error) {
 // Implements world.EntityStore.
 func (s *SQLiteStore) GetCurrentTick(ctx context.Context) (int64, error) {
 	var tick int64
-	err := s.db.QueryRowContext(ctx,
+	err := s.db.QueryRowContext(
+		ctx,
 		"SELECT CAST(value AS INTEGER) FROM world WHERE key='current_tick'",
 	).Scan(&tick)
 	if err == sql.ErrNoRows {
@@ -224,6 +225,6 @@ func (s *SQLiteStore) GetCurrentTick(ctx context.Context) (int64, error) {
 
 // Compile-time interface checks.
 var (
-	_ world.Tx         = (*sqliteTx)(nil)
+	_ world.Tx          = (*sqliteTx)(nil)
 	_ world.EntityStore = (*SQLiteStore)(nil)
 )

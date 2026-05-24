@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook: auto-formats staged Go files with gofumpt,
+# re-stages the formatted versions, then runs linters and unit tests.
+# Exits non-zero if lint or tests fail, aborting the commit.
+set -euo pipefail
+
+# Use git to find the repo root (works whether called from .git/hooks/ or
+# directly, since git sets GIT_DIR which confuses relative path logic).
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Prefer mise exec for versioned tools; fall back to direct PATH.
+MISE_BIN=""
+if command -v mise &>/dev/null; then
+  MISE_BIN="mise exec --"
+fi
+
+errors=0
+
+run() {
+  local desc="$1"; shift
+  printf "${BOLD}▶ ${desc}${NC} ... "
+  if "$@" >/dev/null 2>&1; then
+    echo -e "${GREEN}✓${NC}"
+  else
+    echo -e "${RED}✗${NC}"
+    "$@" >&2 2>&1
+    errors=$((errors + 1))
+  fi
+}
+
+echo ""
+echo "${BOLD}── Pre-commit checks ──────────────────────────────${NC}"
+
+# ── 1. Auto-format staged .go files with gofumpt and re-stage ──
+
+# Collect staged .go files (added, copied, modified, renamed).
+mapfile -t staged_go < <(
+  git diff --cached --name-only --diff-filter=ACMR -- '*.go' ':!vendor/'
+)
+
+if [ ${#staged_go[@]} -gt 0 ]; then
+  printf "${BOLD}▶ gofumpt (${#staged_go[@]} file(s))${NC} ... "
+  # gofumpt -w formats in place. Suppress output — exit 0 always with -w.
+  $MISE_BIN gofumpt -w "${staged_go[@]}" 2>/dev/null || true
+  git add "${staged_go[@]}"
+  echo -e "${GREEN}✓${NC}"
+else
+  printf "${BOLD}▶ gofumpt (no staged .go files)${NC} ... ${GREEN}✓${NC}\n"
+fi
+
+# ── 2. Lint ──
+run "golangci-lint" $MISE_BIN golangci-lint run ./...
+
+# ── 3. Tests ──
+run "go test" go test ./...
+
+echo ""
+if [ "$errors" -gt 0 ]; then
+  echo -e "\n${RED}${BOLD}── ${errors} check(s) failed. Commit aborted. ────────${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}${BOLD}── All checks passed ✓ ──────────────────────────────${NC}"
+echo ""

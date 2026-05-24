@@ -20,7 +20,7 @@ func makeStore(t *testing.T, s schema.DatabaseSchema) *SQLiteStore {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -274,7 +274,7 @@ func TestSQLiteStore_CreateEntity_ArrayComponent(t *testing.T) {
 		SchemaVersion: 1,
 		Components: map[string]schema.Component{
 			"Inventory": {
-				Type: schema.ComponentTypeArray,
+				Type:  schema.ComponentTypeArray,
 				Items: &schema.Property{Type: schema.PropertyTypeEntityRef},
 			},
 		},
@@ -368,7 +368,7 @@ func TestSQLiteStore_CreateEntity_AutoIncrementIDs(t *testing.T) {
 		SchemaVersion: 1,
 		Components: map[string]schema.Component{
 			"Position": {
-				Type: schema.ComponentTypeObject,
+				Type:       schema.ComponentTypeObject,
 				Properties: map[string]schema.Property{"x": {Type: schema.PropertyTypeNumber}},
 			},
 		},
@@ -400,7 +400,7 @@ func TestSQLiteStore_CreateEntity_CascadeDeleteAfterCreation(t *testing.T) {
 		SchemaVersion: 1,
 		Components: map[string]schema.Component{
 			"Health": {
-				Type: schema.ComponentTypeObject,
+				Type:       schema.ComponentTypeObject,
 				Properties: map[string]schema.Property{"hp": {Type: schema.PropertyTypeInteger}},
 			},
 		},
@@ -710,11 +710,11 @@ func TestSQLiteStore_CreateEntity_WarningModeWithExtraComponent(t *testing.T) {
 		SchemaVersion: 1,
 		Components: map[string]schema.Component{
 			"Position": {
-				Type: schema.ComponentTypeObject,
+				Type:       schema.ComponentTypeObject,
 				Properties: map[string]schema.Property{"x": {Type: schema.PropertyTypeNumber}},
 			},
 			"Velocity": {
-				Type: schema.ComponentTypeObject,
+				Type:       schema.ComponentTypeObject,
 				Properties: map[string]schema.Property{"vx": {Type: schema.PropertyTypeNumber}},
 			},
 		},

@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"database/sql"
 	"strings"
 	"testing"
 
@@ -114,9 +113,9 @@ func TestComponentTableSQL_LowercaseTableName(t *testing.T) {
 
 func TestPropertySQLType(t *testing.T) {
 	tests := []struct {
-		name  string
-		prop  schema.Property
-		want  string
+		name string
+		prop schema.Property
+		want string
 	}{
 		{"string", schema.Property{Type: schema.PropertyTypeString}, "TEXT"},
 		{"integer", schema.Property{Type: schema.PropertyTypeInteger}, "INTEGER"},
@@ -139,16 +138,6 @@ func TestPropertySQLType(t *testing.T) {
 
 // ── NewSQLiteStore integration tests ──────────────────────────
 
-func openTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	return db
-}
-
 // fixedTableColumns defines the expected column names for each fixed table.
 // We only verify column *names* exist, not types (PRAGMA table_info doesn't
 // reliably return the full DDL). Exact types are checked by the schema test.
@@ -158,7 +147,7 @@ var fixedTableColumns = map[string][]string{
 	"entities":     {"id", "entity_type", "created_tick"},
 	"event_queue":  {"id", "tick", "target_entity", "kind", "payload"},
 	"input_events": {"id", "received_at_ms", "kind", "payload", "consumed"},
-	"transitions": {"id", "tick", "wall_ms", "entity_id", "machine_id", "from_state", "to_state", "event", "guard_result", "actions_run"},
+	"transitions":  {"id", "tick", "wall_ms", "entity_id", "machine_id", "from_state", "to_state", "event", "guard_result", "actions_run"},
 }
 
 // expectedIndexes lists indexes that createTables must create.
@@ -178,7 +167,7 @@ func TestNewSQLiteStore_CreatesFixedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Verify all fixed tables exist and have the expected columns.
 	for table, wantCols := range fixedTableColumns {
@@ -212,7 +201,7 @@ func TestNewSQLiteStore_CreatesFixedTables(t *testing.T) {
 			}
 			foundCols[name] = true
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		for _, col := range wantCols {
 			if !foundCols[col] {
@@ -246,7 +235,7 @@ func TestNewSQLiteStore_RecordsSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	var value string
 	err = store.db.QueryRow(
@@ -280,7 +269,7 @@ func TestNewSQLiteStore_CreatesComponentTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	for _, name := range []string{"comp_position", "comp_name"} {
 		var count int
@@ -310,14 +299,14 @@ func TestNewSQLiteStore_EntityRefComponentCreatesFK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Check the column exists
 	rows, err := store.db.Query("PRAGMA table_info(comp_target)")
 	if err != nil {
 		t.Fatalf("PRAGMA table_info: %v", err)
 	}
-	defer rows.Close()
+	t.Cleanup(func() { _ = rows.Close() })
 
 	found := false
 	for rows.Next() {
@@ -354,7 +343,7 @@ func TestNewSQLiteStore_CascadeDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	// Insert entity + component
 	res, err := store.db.Exec("INSERT INTO entities (entity_type, created_tick) VALUES ('Goblin', 1)")
@@ -411,7 +400,7 @@ func TestStore_DB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	t.Cleanup(func() { _ = store.Close() })
 
 	if store.DB() == nil {
 		t.Error("DB() returned nil")
@@ -425,7 +414,7 @@ func TestStore_DB_AfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.Close()
+	_ = store.Close()
 	// Should still return a non-nil pointer even after close
 	if store.DB() == nil {
 		t.Error("DB() returned nil after Close")

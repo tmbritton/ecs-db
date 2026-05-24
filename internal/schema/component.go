@@ -66,7 +66,7 @@ func (c *Component) UnmarshalJSON(data []byte) error {
 	// Structural validation.
 	switch c.Type {
 	case ComponentTypeObject:
-		if c.Properties == nil || len(c.Properties) == 0 {
+		if len(c.Properties) == 0 {
 			return fmt.Errorf("component type %q must define %q with at least one property",
 				ComponentTypeObject, "properties")
 		}

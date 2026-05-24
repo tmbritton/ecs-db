@@ -4,13 +4,13 @@ import "fmt"
 
 // Supported property type values.
 const (
-	PropertyTypeString     = "string"
-	PropertyTypeInteger    = "integer"
-	PropertyTypeNumber     = "number"
-	PropertyTypeBoolean    = "boolean"
-	PropertyTypeObject     = "object"
-	PropertyTypeArray      = "array"
-	PropertyTypeEntityRef  = "entity-ref"
+	PropertyTypeString    = "string"
+	PropertyTypeInteger   = "integer"
+	PropertyTypeNumber    = "number"
+	PropertyTypeBoolean   = "boolean"
+	PropertyTypeObject    = "object"
+	PropertyTypeArray     = "array"
+	PropertyTypeEntityRef = "entity-ref"
 )
 
 var supportedPropertyTypes = map[string]bool{

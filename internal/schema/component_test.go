@@ -49,8 +49,8 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "valid entity-ref component",
-			json: `{"type": "entity-ref"}`,
+			name:    "valid entity-ref component",
+			json:    `{"type": "entity-ref"}`,
 			wantErr: false,
 			check: func(t *testing.T, c *Component) {
 				if c.Type != ComponentTypeEntityRef {
@@ -59,8 +59,8 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "valid string component",
-			json: `{"type": "string"}`,
+			name:    "valid string component",
+			json:    `{"type": "string"}`,
 			wantErr: false,
 			check: func(t *testing.T, c *Component) {
 				if c.Type != ComponentTypeString {
@@ -69,18 +69,18 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 			},
 		},
 		{
-			name: "valid integer component",
-			json: `{"type": "integer"}`,
+			name:    "valid integer component",
+			json:    `{"type": "integer"}`,
 			wantErr: false,
 		},
 		{
-			name: "valid number component",
-			json: `{"type": "number"}`,
+			name:    "valid number component",
+			json:    `{"type": "number"}`,
 			wantErr: false,
 		},
 		{
-			name: "valid boolean component",
-			json: `{"type": "boolean"}`,
+			name:    "valid boolean component",
+			json:    `{"type": "boolean"}`,
 			wantErr: false,
 		},
 		{
@@ -104,13 +104,13 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "object without properties",
-			json: `{"type": "object"}`,
+			name:    "object without properties",
+			json:    `{"type": "object"}`,
 			wantErr: true,
 		},
 		{
-			name: "object with empty properties",
-			json: `{"type": "object", "properties": {}}`,
+			name:    "object with empty properties",
+			json:    `{"type": "object", "properties": {}}`,
 			wantErr: true,
 		},
 		{
@@ -129,8 +129,8 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "array with invalid items type",
-			json: `{"type": "array", "items": {"type": "email"}}`,
+			name:    "array with invalid items type",
+			json:    `{"type": "array", "items": {"type": "email"}}`,
 			wantErr: true,
 		},
 	}
@@ -148,5 +148,3 @@ func TestComponentUnmarshalJSON(t *testing.T) {
 		})
 	}
 }
-
-

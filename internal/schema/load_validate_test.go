@@ -305,7 +305,7 @@ func TestInitSchema_ValidFile(t *testing.T) {
 		"entityTypes": {
 			"Person": {"requiredComponents": ["Name"]}
 		}
-	}`), 0644); err != nil {
+	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -338,7 +338,7 @@ func TestInitSchema_ParseableButInvalid(t *testing.T) {
 		"entityTypes": {
 			"Person": {"requiredComponents": ["Name", "Missing"]}
 		}
-	}`), 0644); err != nil {
+	}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -351,7 +351,7 @@ func TestInitSchema_ParseableButInvalid(t *testing.T) {
 func TestInitSchema_MalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "schema.json")
-	if err := os.WriteFile(path, []byte(`{"schemaVersion": 1`), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schemaVersion": 1`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -596,13 +596,13 @@ func TestLoadSchema_DuplicateInOnlyEntityTypes(t *testing.T) {
 
 func TestValidateSQLCompatibility_AllKnownTypes(t *testing.T) {
 	comps := map[string]Component{
-		"obj":   {Type: ComponentTypeObject, Properties: map[string]Property{"x": {Type: "number"}}},
-		"arr":   {Type: ComponentTypeArray, Items: &Property{Type: PropertyTypeEntityRef}},
-		"ref":   {Type: ComponentTypeEntityRef},
-		"str":   {Type: ComponentTypeString},
-		"int":   {Type: ComponentTypeInteger},
-		"num":   {Type: ComponentTypeNumber},
-		"bool":  {Type: ComponentTypeBoolean},
+		"obj":  {Type: ComponentTypeObject, Properties: map[string]Property{"x": {Type: "number"}}},
+		"arr":  {Type: ComponentTypeArray, Items: &Property{Type: PropertyTypeEntityRef}},
+		"ref":  {Type: ComponentTypeEntityRef},
+		"str":  {Type: ComponentTypeString},
+		"int":  {Type: ComponentTypeInteger},
+		"num":  {Type: ComponentTypeNumber},
+		"bool": {Type: ComponentTypeBoolean},
 	}
 	s := DatabaseSchema{
 		SchemaVersion: 1,
@@ -720,5 +720,5 @@ func TestEntityType_EmptyValidationLevelDefaultsToStrict(t *testing.T) {
 // ── Helper functions ─────────────────────────────────────────
 
 func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0o644)
 }

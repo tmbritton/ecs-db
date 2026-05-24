@@ -9,13 +9,13 @@ import (
 
 func TestValidateEntityCreation(t *testing.T) {
 	tests := []struct {
-		name             string
-		schema           schema.DatabaseSchema
-		entityType       string
-		provided         []string
-		wantErrors       int
-		wantWarnings     int
-		wantErrorSubstr  string
+		name              string
+		schema            schema.DatabaseSchema
+		entityType        string
+		provided          []string
+		wantErrors        int
+		wantWarnings      int
+		wantErrorSubstr   string
 		wantWarningSubstr string
 	}{
 		{
@@ -36,8 +36,8 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType: "Goblin",
-			provided:   []string{"Position", "Health", "Velocity"},
+			entityType:   "Goblin",
+			provided:     []string{"Position", "Health", "Velocity"},
 			wantErrors:   0,
 			wantWarnings: 0,
 		},
@@ -57,8 +57,8 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType: "Goblin",
-			provided:   []string{"Position", "Health"},
+			entityType:   "Goblin",
+			provided:     []string{"Position", "Health"},
 			wantErrors:   0,
 			wantWarnings: 0,
 		},
@@ -143,8 +143,8 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType: "Particle",
-			provided:   []string{"Position", "Velocity"},
+			entityType:   "Particle",
+			provided:     []string{"Position", "Velocity"},
 			wantErrors:   0,
 			wantWarnings: 0,
 		},
@@ -164,10 +164,10 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType:       "Particle",
-			provided:         []string{"Position"},
-			wantErrors:       0,
-			wantWarnings:     1,
+			entityType:        "Particle",
+			provided:          []string{"Position"},
+			wantErrors:        0,
+			wantWarnings:      1,
 			wantWarningSubstr: `missing required component "Health"`,
 		},
 		{
@@ -186,10 +186,10 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType:       "Particle",
-			provided:         []string{"Position", "Velocity"},
-			wantErrors:       0,
-			wantWarnings:     1,
+			entityType:        "Particle",
+			provided:          []string{"Position", "Velocity"},
+			wantErrors:        0,
+			wantWarnings:      1,
 			wantWarningSubstr: `component "Velocity" is not allowed`,
 		},
 		{
@@ -241,8 +241,8 @@ func TestValidateEntityCreation(t *testing.T) {
 					},
 				},
 			},
-			entityType: "Empty",
-			provided:   []string{},
+			entityType:   "Empty",
+			provided:     []string{},
 			wantErrors:   0,
 			wantWarnings: 0,
 		},
@@ -309,5 +309,3 @@ func TestValidateEntityCreation(t *testing.T) {
 		})
 	}
 }
-
-

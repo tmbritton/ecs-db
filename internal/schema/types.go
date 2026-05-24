@@ -11,19 +11,19 @@ const (
 // DatabaseSchema is the root representation of schema.json.
 // The JSON shape is flat — no nested "schema" wrapper.
 type DatabaseSchema struct {
-	SchemaVersion int                      `json:"schemaVersion"`
-	Components    map[string]Component     `json:"components"`
-	EntityTypes   map[string]EntityType    `json:"entityTypes"`
+	SchemaVersion int                   `json:"schemaVersion"`
+	Components    map[string]Component  `json:"components"`
+	EntityTypes   map[string]EntityType `json:"entityTypes"`
 }
 
 // EntityType is a named template declaring which components an entity of
 // that type must have, may have, and whether additional components are
 // permitted after creation.
 type EntityType struct {
-	RequiredComponents   []string          `json:"requiredComponents"`
-	OptionalComponents   []string          `json:"optionalComponents"`
-	AllowExtraComponents bool              `json:"allowExtraComponents"`
-	ValidationLevel      ValidationLevel   `json:"validationLevel"`
+	RequiredComponents   []string        `json:"requiredComponents"`
+	OptionalComponents   []string        `json:"optionalComponents"`
+	AllowExtraComponents bool            `json:"allowExtraComponents"`
+	ValidationLevel      ValidationLevel `json:"validationLevel"`
 }
 
 // ApplyDefaults populates fields whose defaults depend on omitted JSON keys.
