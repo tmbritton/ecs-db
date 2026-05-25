@@ -16,7 +16,7 @@ func makeStore(t *testing.T, s schema.DatabaseSchema) *SQLiteStore {
 		s.EntityTypes = map[string]schema.EntityType{"_placeholder": {}}
 	}
 
-	store, err := NewSQLiteStore(t.TempDir()+"/test.sqlite", s)
+	store, err := NewSQLiteStore(t.TempDir()+"/test.sqlite", s, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}

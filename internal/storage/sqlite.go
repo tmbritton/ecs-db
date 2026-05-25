@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 	_ "modernc.org/sqlite" // SQLite driver
@@ -18,7 +20,18 @@ type SQLiteStore struct {
 
 // NewSQLiteStore opens or creates a SQLite database at the given path and
 // initialises the fixed + generated tables from the schema.
-func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error) {
+//
+// On first run (no tables exist), it creates all tables and writes
+// schema_version, build_time, and optionally schema_hash to the meta table.
+//
+// On subsequent opens (tables exist), it compares the stored schema_version
+// against the provided schema.DatabaseSchema. If versions differ, it returns
+// *SchemaVersionMismatchError — the caller must handle this (e.g., trigger
+// migrations). If versions match, existing data is preserved.
+//
+// schemaHash is an optional SHA-256 hex digest of the schema.json bytes.
+// Pass "" to omit it from meta.
+func NewSQLiteStore(dbPath string, s schema.DatabaseSchema, schemaHash string) (*SQLiteStore, error) {
 	// Ensure directory exists
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
@@ -50,10 +63,25 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error
 		}
 	}
 
-	// Create tables
-	if err := createTables(db, s); err != nil {
+	// Detect fresh vs existing database by checking if the meta table exists.
+	existing, err := tablesExist(db)
+	if err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("failed to initialise schema: %w", err)
+		return nil, fmt.Errorf("checking for existing database: %w", err)
+	}
+
+	if existing {
+		// Existing database — verify schema version matches.
+		if err := checkSchemaVersion(db, s.SchemaVersion); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else {
+		// Fresh database — create all tables and write meta.
+		if err := bootstrapDatabase(db, s, schemaHash); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("bootstrapping database: %w", err)
+		}
 	}
 
 	return &SQLiteStore{db: db, schema: s}, nil
@@ -72,28 +100,85 @@ func (s *SQLiteStore) DB() *sql.DB {
 	return s.db
 }
 
-func createTables(db *sql.DB, s schema.DatabaseSchema) error {
-	// Fixed tables
+// tablesExist checks whether the meta table exists in the database,
+// as a proxy for "has this database been initialised before".
+func tablesExist(db *sql.DB) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='meta'",
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("querying sqlite_master: %w", err)
+	}
+	return count > 0, nil
+}
+
+// checkSchemaVersion reads the stored schema_version from meta and
+// compares it against the provided version. Returns *SchemaVersionMismatchError
+// on mismatch, nil on match.
+func checkSchemaVersion(db *sql.DB, currentVersion int) error {
+	var stored string
+	err := db.QueryRow(
+		"SELECT value FROM meta WHERE key = 'schema_version'",
+	).Scan(&stored)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("database exists but meta table is missing schema_version")
+	}
+	if err != nil {
+		return fmt.Errorf("reading stored schema_version: %w", err)
+	}
+
+	dbVersion, err := strconv.Atoi(stored)
+	if err != nil {
+		return fmt.Errorf("corrupted schema_version in meta: %q", stored)
+	}
+	if dbVersion != currentVersion {
+		return &SchemaVersionMismatchError{
+			DBVersion:   dbVersion,
+			FileVersion: currentVersion,
+		}
+	}
+	return nil
+}
+
+// bootstrapDatabase creates all tables and writes initial meta rows
+// in a single transaction. The meta table is created first (outside the
+// transaction, as DDL auto-commits in SQLite), then remaining tables
+// and meta data are written inside a transaction.
+func bootstrapDatabase(db *sql.DB, s schema.DatabaseSchema, schemaHash string) error {
+	// Create meta first so that tablesExist works after partial failure.
+	if _, err := db.Exec(`
+		CREATE TABLE meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`); err != nil {
+		return fmt.Errorf("creating meta table: %w", err)
+	}
+
+	// Begin transaction for the remaining DDL + meta writes.
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Remaining fixed tables.
 	fixed := `
-	CREATE TABLE IF NOT EXISTS meta (
+	CREATE TABLE world (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS world (
-		key TEXT PRIMARY KEY,
-		value TEXT NOT NULL
-	);
-
-	CREATE TABLE IF NOT EXISTS entities (
+	CREATE TABLE entities (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		entity_type TEXT NOT NULL,
 		created_tick INTEGER NOT NULL DEFAULT 0
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_entity_type ON entities(entity_type);
+	CREATE INDEX idx_entity_type ON entities(entity_type);
 
-	CREATE TABLE IF NOT EXISTS event_queue (
+	CREATE TABLE event_queue (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		tick INTEGER NOT NULL,
 		target_entity INTEGER,
@@ -101,7 +186,7 @@ func createTables(db *sql.DB, s schema.DatabaseSchema) error {
 		payload TEXT NOT NULL DEFAULT '{}'
 	);
 
-	CREATE TABLE IF NOT EXISTS input_events (
+	CREATE TABLE input_events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		received_at_ms INTEGER NOT NULL,
 		kind TEXT NOT NULL,
@@ -109,7 +194,7 @@ func createTables(db *sql.DB, s schema.DatabaseSchema) error {
 		consumed INTEGER NOT NULL DEFAULT 0
 	);
 
-	CREATE TABLE IF NOT EXISTS transitions (
+	CREATE TABLE transitions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		tick INTEGER NOT NULL,
 		wall_ms INTEGER NOT NULL,
@@ -123,32 +208,51 @@ func createTables(db *sql.DB, s schema.DatabaseSchema) error {
 	);
 
 	-- Indexes on query-hot columns
-	CREATE INDEX IF NOT EXISTS idx_event_queue_tick ON event_queue(tick);
-	CREATE INDEX IF NOT EXISTS idx_input_events_consumed ON input_events(consumed);
-	CREATE INDEX IF NOT EXISTS idx_transitions_entity_id ON transitions(entity_id);
+	CREATE INDEX idx_event_queue_tick ON event_queue(tick);
+	CREATE INDEX idx_input_events_consumed ON input_events(consumed);
+	CREATE INDEX idx_transitions_entity_id ON transitions(entity_id);
 	`
-	if _, err := db.Exec(fixed); err != nil {
+	if _, err := tx.Exec(fixed); err != nil {
 		return fmt.Errorf("creating fixed tables: %w", err)
 	}
 
-	// Record schema version in meta
-	if _, err := db.Exec(
-		"INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
-		fmt.Sprintf("%d", s.SchemaVersion),
-	); err != nil {
-		return fmt.Errorf("recording schema_version: %w", err)
-	}
-
-	// Generate component tables
+	// Generate component tables.
 	for name, comp := range s.Components {
 		stmt, err := componentTableSQL(name, comp)
 		if err != nil {
 			return fmt.Errorf("building table for component %q: %w", name, err)
 		}
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("creating table for component %q: %w", name, err)
 		}
 	}
 
+	// Write meta rows.
+	if _, err := tx.Exec(
+		"INSERT INTO meta (key, value) VALUES ('schema_version', ?)",
+		fmt.Sprintf("%d", s.SchemaVersion),
+	); err != nil {
+		return fmt.Errorf("recording schema_version: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		"INSERT INTO meta (key, value) VALUES ('build_time', ?)",
+		time.Now().UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("recording build_time: %w", err)
+	}
+
+	if schemaHash != "" {
+		if _, err := tx.Exec(
+			"INSERT INTO meta (key, value) VALUES ('schema_hash', ?)",
+			schemaHash,
+		); err != nil {
+			return fmt.Errorf("recording schema_hash: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing bootstrap transaction: %w", err)
+	}
 	return nil
 }

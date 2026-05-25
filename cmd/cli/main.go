@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 
@@ -12,14 +14,28 @@ func main() {
 	fmt.Println("ECS Database CLI - Starting up")
 
 	// Load schema
-	dbSchema, err := schema.InitSchema("./schema.json")
+	schemaPath := "./schema.json"
+	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schema from schema.json: %v\n", err)
 		os.Exit(1)
 	}
+	dbSchema, err := schema.LoadSchema(schemaBytes)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing schema from schema.json: %v\n", err)
+		os.Exit(1)
+	}
+	if err := schema.ValidateSchema(dbSchema); err != nil {
+		fmt.Fprintf(os.Stderr, "Error validating schema from schema.json: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Compute hash for build metadata.
+	hash := sha256.Sum256(schemaBytes)
+	schemaHash := hex.EncodeToString(hash[:])
 
 	// Initialize database
-	db, err := storage.NewSQLiteStore("./ecs.db", dbSchema)
+	db, err := storage.NewSQLiteStore("./ecs.db", dbSchema, schemaHash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error initializing database: %v\n", err)
 		os.Exit(1)

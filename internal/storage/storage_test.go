@@ -163,7 +163,7 @@ func TestNewSQLiteStore_CreatesFixedTables(t *testing.T) {
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
 		EntityTypes:   map[string]schema.EntityType{},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestNewSQLiteStore_RecordsSchemaVersion(t *testing.T) {
 		SchemaVersion: 3,
 		Components:    map[string]schema.Component{},
 		EntityTypes:   map[string]schema.EntityType{},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestNewSQLiteStore_CreatesComponentTables(t *testing.T) {
 		EntityTypes: map[string]schema.EntityType{
 			"Player": {RequiredComponents: []string{"Position", "Name"}},
 		},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestNewSQLiteStore_EntityRefComponentCreatesFK(t *testing.T) {
 		EntityTypes: map[string]schema.EntityType{
 			"Aim": {RequiredComponents: []string{"Target"}},
 		},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestNewSQLiteStore_CascadeDelete(t *testing.T) {
 		EntityTypes: map[string]schema.EntityType{
 			"Goblin": {RequiredComponents: []string{"Health"}},
 		},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewSQLiteStore error: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestNewSQLiteStore_CascadeDelete(t *testing.T) {
 func TestNewSQLiteStore_MissingDirectory(t *testing.T) {
 	_, err := NewSQLiteStore("/no/such/dir/test.sqlite", schema.DatabaseSchema{
 		SchemaVersion: 1,
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("expected error for missing directory, got nil")
 	}
@@ -396,7 +396,7 @@ func TestStore_DB(t *testing.T) {
 	store, err := NewSQLiteStore(t.TempDir()+"/test.sqlite", schema.DatabaseSchema{
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestStore_DB(t *testing.T) {
 func TestStore_DB_AfterClose(t *testing.T) {
 	store, err := NewSQLiteStore(t.TempDir()+"/test.sqlite", schema.DatabaseSchema{
 		SchemaVersion: 1,
-	})
+	}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
