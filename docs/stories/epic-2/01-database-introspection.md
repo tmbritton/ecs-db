@@ -1,7 +1,7 @@
 # Story 1: Database Introspection
 
 **Epic:** 2 — Schema versioning & auto-migrations  
-**Status:** ⚠️ Not started  
+**Status:** ✅ Done  
 **Priority:** Critical blocker — introspection is the foundation for everything auto-migrate needs
 
 ## Context
