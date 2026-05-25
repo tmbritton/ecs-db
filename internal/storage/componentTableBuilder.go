@@ -54,21 +54,5 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 
 // propertySQLType maps a Property to its SQLite column type.
 func propertySQLType(p schema.Property) string {
-	switch p.Type {
-	case schema.PropertyTypeString:
-		return "TEXT"
-	case schema.PropertyTypeInteger:
-		return "INTEGER"
-	case schema.PropertyTypeNumber:
-		return "REAL"
-	case schema.PropertyTypeBoolean:
-		return "INTEGER"
-	case schema.PropertyTypeEntityRef:
-		return "INTEGER"
-	case schema.PropertyTypeObject, schema.PropertyTypeArray:
-		// Nested structures are stored as JSON.
-		return "TEXT"
-	default:
-		return "TEXT"
-	}
+	return schema.PropertySQLType(p)
 }

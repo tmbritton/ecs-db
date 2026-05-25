@@ -62,7 +62,7 @@ Automatic migrations driven purely by `schema.json` changes. The user edits the 
 
 Refined into stories: See [`docs/stories/epic-2/`](docs/stories/epic-2/).
 
-- [ ] **Database introspection** — Reconstruct the current database schema from SQLite.
+- [x] **Database introspection** — Reconstruct the current database schema from SQLite.
   - Discover all `comp_*` tables via `sqlite_master`
   - Recover column names and SQL types via `PRAGMA table_info`
   - Read `schema_version` from `meta`

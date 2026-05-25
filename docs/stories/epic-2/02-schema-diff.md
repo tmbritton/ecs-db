@@ -1,7 +1,7 @@
 # Story 2: Schema Diff Computation
 
 **Epic:** 2 — Schema versioning & auto-migrations  
-**Status:** ⚠️ Not started  
+**Status:** ✅ Done  
 **Priority:** High — feeds the DDL generator; no migrations without a diff
 
 ## Context

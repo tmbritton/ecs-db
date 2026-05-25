@@ -199,23 +199,30 @@ func TestIntrospectComponentTable_ObjectComponent(t *testing.T) {
 		t.Fatalf("len(columns) = %d, want 3", len(columns))
 	}
 
-	checkCol := func(idx int, name, sqlType string, isPK bool) {
+	// Find columns by name (order is non-deterministic due to map iteration).
+	colMap := make(map[string]DomainColumn)
+	for _, c := range columns {
+		colMap[c.Name] = c
+	}
+
+	checkCol := func(name, sqlType string, isPK bool) {
 		t.Helper()
-		c := columns[idx]
-		if c.Name != name {
-			t.Errorf("columns[%d].Name = %q, want %q", idx, c.Name, name)
+		c, ok := colMap[name]
+		if !ok {
+			t.Errorf("missing column %q", name)
+			return
 		}
 		if c.SQLType != sqlType {
-			t.Errorf("columns[%d].SQLType = %q, want %q", idx, c.SQLType, sqlType)
+			t.Errorf("column %q SQLType = %q, want %q", name, c.SQLType, sqlType)
 		}
 		if c.IsPK != isPK {
-			t.Errorf("columns[%d].IsPK = %v, want %v", idx, c.IsPK, isPK)
+			t.Errorf("column %q IsPK = %v, want %v", name, c.IsPK, isPK)
 		}
 	}
 
-	checkCol(0, "entity_id", "INTEGER", true)
-	checkCol(1, "x", "REAL", false)
-	checkCol(2, "y", "REAL", false)
+	checkCol("entity_id", "INTEGER", true)
+	checkCol("x", "REAL", false)
+	checkCol("y", "REAL", false)
 }
 
 func TestIntrospectComponentTable_EntityRefComponent(t *testing.T) {

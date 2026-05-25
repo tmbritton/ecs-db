@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // DomainSchema is the "as-built" database schema reconstructed from introspection.
@@ -219,4 +221,36 @@ func IntrospectAll(db *sql.DB) (*DomainSchema, error) {
 	// If entities table doesn't exist, we silently skip (empty map).
 
 	return result, nil
+}
+
+// ToDiffSchema converts the storage-side DomainSchema to the domain-side
+// representation used by schema.Diff(). It strips the Default field (not
+// needed for diff) and preserves everything else.
+func (ds *DomainSchema) ToDiffSchema() *schema.DomainSchema {
+	if ds == nil {
+		return nil
+	}
+	result := &schema.DomainSchema{
+		SchemaVersion:   ds.SchemaVersion,
+		EntityTypeNames: make(map[string]bool),
+		Components:      make(map[string]schema.DomainComponent),
+	}
+	for k, v := range ds.EntityTypeNames {
+		result.EntityTypeNames[k] = v
+	}
+	for k, v := range ds.Components {
+		domCols := make([]schema.DomainColumn, len(v.Columns))
+		for i, c := range v.Columns {
+			domCols[i] = schema.DomainColumn{
+				Name:    c.Name,
+				SQLType: c.SQLType,
+				IsPK:    c.IsPK,
+			}
+		}
+		result.Components[k] = schema.DomainComponent{
+			Type:    v.Type,
+			Columns: domCols,
+		}
+	}
+	return result
 }
