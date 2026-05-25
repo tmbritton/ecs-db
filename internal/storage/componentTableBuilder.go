@@ -41,7 +41,7 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 		cols = append(cols, "\tvalue REAL NOT NULL DEFAULT 0.0")
 
 	case schema.ComponentTypeBoolean:
-		cols = append(cols, "\tvalue BOOLEAN NOT NULL DEFAULT 0")
+		cols = append(cols, "\tvalue INTEGER NOT NULL DEFAULT 0")
 
 	default:
 		return "", fmt.Errorf("unsupported component type %q", comp.Type)

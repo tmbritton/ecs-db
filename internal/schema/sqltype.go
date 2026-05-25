@@ -16,7 +16,7 @@ func PropertySQLType(p Property) string {
 	case PropertyTypeEntityRef:
 		return "INTEGER"
 	case PropertyTypeObject, PropertyTypeArray:
-		// Nested structures are stored as JSON.
+		// Nested structures and arrays are stored as JSON.
 		return "TEXT"
 	default:
 		return "TEXT"

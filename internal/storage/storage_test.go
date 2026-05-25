@@ -97,7 +97,7 @@ func TestComponentTableSQL_Boolean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, sql, "value BOOLEAN NOT NULL DEFAULT 0")
+	assertContains(t, sql, "value INTEGER NOT NULL DEFAULT 0")
 }
 
 func TestComponentTableSQL_LowercaseTableName(t *testing.T) {

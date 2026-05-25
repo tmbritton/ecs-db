@@ -287,7 +287,7 @@ func TestIntrospectComponentTable_ScalarTypes(t *testing.T) {
 			name:      "boolean",
 			component: schema.Component{Type: "boolean"},
 			wantCol:   "value",
-			wantType:  "BOOLEAN",
+			wantType:  "INTEGER",
 			wantDflt:  "0",
 		},
 		{
@@ -426,8 +426,8 @@ func TestInferComponentType(t *testing.T) {
 		},
 		{
 			name: "boolean",
-			cols: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "BOOLEAN"}},
-			want: "boolean",
+			cols: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "INTEGER"}},
+			want: "integer", // BOOLEAN → INTEGER; indistinguishable from numeric integer at the SQL level
 		},
 		{
 			name: "array",
@@ -719,7 +719,7 @@ func TestIntrospectAll_RoundTrip(t *testing.T) {
 				"name":      "string",
 				"count":     "integer",
 				"weight":    "number",
-				"active":    "boolean",
+				"active":    "integer", // boolean columns are INTEGER; semantics from schema, not runtime
 				"target":    "entity-ref",
 				"inventory": "array",
 			},
@@ -811,5 +811,68 @@ func TestIntrospectAll_RoundTrip(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ── ToDiffSchema tests ──────────────────────────────────────────────
+
+func TestToDiffSchema_NilReturnsNil(t *testing.T) {
+	var ds *DomainSchema
+	if ds.ToDiffSchema() != nil {
+		t.Fatal("ToDiffSchema() on nil receiver should return nil")
+	}
+}
+
+func TestToDiffSchema_Conversion(t *testing.T) {
+	ds := &DomainSchema{
+		SchemaVersion: 3,
+		Components: map[string]DomainComponent{
+			"position": {
+				Type: "object",
+				Columns: []DomainColumn{
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, Default: ""},
+					{Name: "x", SQLType: "REAL", IsPK: false, Default: ""},
+					{Name: "y", SQLType: "REAL", IsPK: false, Default: ""},
+				},
+			},
+			"health": {
+				Type: "integer",
+				Columns: []DomainColumn{
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, Default: "0"},
+					{Name: "value", SQLType: "INTEGER", IsPK: false, Default: "0"},
+				},
+			},
+		},
+		EntityTypeNames: map[string]bool{"Player": true, "Enemy": true},
+	}
+
+	got := ds.ToDiffSchema()
+
+	if got.SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3", got.SchemaVersion)
+	}
+
+	// Default field is stripped (schema.DomainColumn has no Default field).
+	// The compilation of this test already proves the conversion is correct.
+	_ = got.Components
+
+	// Entity types preserved.
+	if !got.EntityTypeNames["Player"] || !got.EntityTypeNames["Enemy"] {
+		t.Errorf("missing entity type names")
+	}
+
+	// Components preserved with correct types.
+	if got.Components["position"].Type != "object" {
+		t.Errorf("position.Type = %q, want object", got.Components["position"].Type)
+	}
+	if got.Components["health"].Type != "integer" {
+		t.Errorf("health.Type = %q, want integer", got.Components["health"].Type)
+	}
+	// Column count preserved.
+	if len(got.Components["position"].Columns) != 3 {
+		t.Errorf("position.Columns len = %d, want 3", len(got.Components["position"].Columns))
+	}
+	if len(got.Components["health"].Columns) != 2 {
+		t.Errorf("health.Columns len = %d, want 2", len(got.Components["health"].Columns))
 	}
 }
