@@ -43,52 +43,58 @@ Establish `schema.json` as the declarative source of truth for components and en
   - Validation honors `validationLevel` on attach; detach of required components always errors
   - Coverage: `world` 95.0%, `storage` 80.1%
 
-- [ ] **Component attach/detach with type validation** — Same rules apply post-creation.
+- [x] **Component attach/detach with type validation** — Same rules apply post-creation.
   - Reject attaching unknown components
   - Reject attaching disallowed components on strict types
   - Detaching a required component is an error
 
-- [ ] **world.sqlite bootstrap** — Cleanly create or open the database.
+- [x] **world.sqlite bootstrap** — Cleanly create or open the database.
   - Create on first run, write `schema_version` to `meta`
-  - On open, compare `meta.schema_version` to `schema.json` — trigger migrations on mismatch (see Epic 2)
-  - Record build info in `meta` for debugging
+  - On open, compare `meta.schema_version` to `schema.json` — returns `ErrSchemaVersionMismatch` on mismatch (Epic 2 will trigger migrations)
+  - Record build info (`build_time`, optional `schema_hash`) in `meta` for debugging
+  - Coverage: `storage` 80.5%
 
 ---
 
 ## Epic 2: Schema versioning & migrations
 
-Finish the schema system as a coherent unit. Versioning, migrations, and mod compatibility belong with the data model itself, not bolted on after the renderer ships. The architecture doc suggested deferring this; the tradeoff is doing the work before the exact pain shape is known, in exchange for never having a `TODO: migrations` flag hanging in the codebase.
+Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.
 
-- [ ] **Migration file format** — Versioned, ordered, up-only initially.
-  - `migrations/N_to_N+1/` directories or numbered files
-  - DDL change + optional data backfill
-  - Down migrations deferred until a concrete need appears
+Refined into stories: See [`docs/stories/epic-2/`](docs/stories/epic-2/).
 
-- [ ] **Migration runner** — Apply transactionally.
-  - On startup mismatch, compute path from db `schema_version` → current `schema.json` version
-  - Apply migrations in order, each in a single transaction
-  - Update `meta.schema_version` on success
-  - Fail loud and roll back on any step failure — no partial migrations
+- [ ] **Database introspection** — Reconstruct the current database schema from SQLite.
+  - Discover all `comp_*` tables via `sqlite_master`
+  - Recover column names and SQL types via `PRAGMA table_info`
+  - Read `schema_version` from `meta`
+  - Entity types are NOT introspectable (metadata-only in `schema.json`)
+
+- [ ] **Schema diff computation** — Compare the as-built database schema against `schema.json`.
+  - Detect new/removed components, added/removed properties, SQL type changes
+  - Detect entity type changes (new, removed, requirement changes — metadata only)
+  - Produce a deterministic, safely-ordered list of changes
+
+- [ ] **DDL generation from diff** — Translate each change type into SQL.
+  - New components → `CREATE TABLE` (reuse existing `componentTableSQL`)
+  - New properties → `ALTER TABLE ADD COLUMN`
+  - Removed properties / type changes → table-rebuild sequence (SQLite lacks `DROP COLUMN`)
+  - Removed components → `DROP TABLE`
+  - Destructive changes flagged for configurable warning/confirmation
+
+- [ ] **Auto-migration runner** — Integrate into `NewSQLiteStore` startup flow.
+  - On version mismatch: introspect → diff → generate DDL → execute in one transaction
+  - Update `meta.schema_version` and `meta.build_time` on success
+  - Structured error reporting on failure (which change, which statement)
+  - `MigrationPolicy` (`auto` / `confirm`) controls destructive change behavior
+
+- [ ] **Smoke test: round-trip a migration** — Prove the full pipeline works.
+  - Create DB at version 1 with an entity, add a component in version 2
+  - Reopen with new schema, verify table created, original data intact, `meta` updated
+  - Second test: add a property to an existing component, verify column added
 
 - [ ] **Backup before migrate** — Cheap insurance.
-  - Copy `world.sqlite` to `world.sqlite.bak.{version}` before applying
+  - Copy `world.sqlite` to `world.sqlite.bak.v{version}` before applying DDL
   - Configurable retention (keep last N backups)
-
-- [ ] **Migration authoring workflow** — Document the cycle while the system is fresh.
-  - Bump `schema.json` version
-  - Write DDL change
-  - Write data backfill if needed
-  - Test against a snapshot of the previous version
-  - README in `migrations/` documenting the pattern
-
-- [ ] **Mod pack compatibility** — Mods are versioned too.
-  - Mod packs declare a target schema version
-  - Reject loading mods built against an incompatible schema with a clear message
-  - Decide policy: hard refuse, or allow with a warning when only additive changes have happened since the mod's target
-
-- [ ] **Smoke test: round-trip a migration** — Prove it works before relying on it.
-  - Create DB at version N, add a component to schema, write a migration, run, verify data is intact and queryable
-  - Verify the backup file exists and is openable
+  - Backup failure → warning logged, migration proceeds
 
 ---
 

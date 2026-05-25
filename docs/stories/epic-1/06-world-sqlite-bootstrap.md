@@ -1,7 +1,7 @@
 # Story 6: world.sqlite Bootstrap & Schema Version Management
 
 **Epic:** 1 — Schema-driven data foundation  
-**Status:** ⚠️ Partially done — database opens and creates tables, but version tracking is wrong  
+**Status:** ✅ Done — committed 7eb4a7b  
 **Priority:** High — Must write schema version into `meta` for Epic 2 migrations to work
 
 ## Context
