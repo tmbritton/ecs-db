@@ -148,7 +148,7 @@ func InferComponentType(cols []DomainColumn) string {
 	case 1:
 		col := dataCols[0]
 		switch {
-		case col.Name == "value" && col.SQLType == "TEXT" && (col.DefaultVal() == "[]" || strings.Contains(col.DefaultVal(), "[")):
+		case col.Name == "value" && col.SQLType == "TEXT" && strings.Contains(col.DefaultVal(), "["):
 			return "array"
 		case col.Name == "value" && col.SQLType == "BOOLEAN":
 			return "boolean"
