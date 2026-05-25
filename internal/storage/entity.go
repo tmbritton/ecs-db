@@ -9,9 +9,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mattn/go-sqlite3"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/world"
+	"modernc.org/sqlite"
+	sqliteLib "modernc.org/sqlite/lib"
 )
 
 // sqliteTx wraps *sql.Tx and the schema to implement the world.Tx port.
@@ -38,8 +39,8 @@ func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName
 	err := t.insertComponent(ctx, entityID, compName, values)
 	// On UNIQUE constraint violation, return the domain sentinel.
 	if err != nil {
-		var sqliteErr sqlite3.Error
-		if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+		var sqliteErr *sqlite.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteLib.SQLITE_CONSTRAINT_UNIQUE {
 			return world.ErrAlreadyAttached
 		}
 	}

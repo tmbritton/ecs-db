@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3" // SQLite driver
 	"github.com/tmbritton/ecs-db/internal/schema"
+	_ "modernc.org/sqlite" // SQLite driver
 )
 
 // SQLiteStore handles database connections and operations
@@ -26,7 +26,7 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema) (*SQLiteStore, error
 	}
 
 	// Open database connection
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
