@@ -174,10 +174,11 @@ func TestNewSQLiteStore_ExistingDatabaseMatchingVersionSucceeds(t *testing.T) {
 	}
 }
 
-func TestNewSQLiteStore_ExistingDatabaseMismatchedVersionReturnsError(t *testing.T) {
+func TestNewSQLiteStore_ExistingDatabaseMismatchedVersionAutoMigrates(t *testing.T) {
+	// NewSQLiteStore now auto-migrates on version mismatch (MigrationAuto).
 	path := t.TempDir() + "/test.sqlite"
 
-	// Create the database at version 1.
+	// Create the database at version 1 with no components.
 	store, err := NewSQLiteStore(path, schema.DatabaseSchema{
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
@@ -188,30 +189,26 @@ func TestNewSQLiteStore_ExistingDatabaseMismatchedVersionReturnsError(t *testing
 	}
 	_ = store.Close()
 
-	// Open with version 2 — should error.
-	_, err = NewSQLiteStore(path, schema.DatabaseSchema{
+	// Open with version 2 — should auto-migrate successfully.
+	store2, err := NewSQLiteStore(path, schema.DatabaseSchema{
 		SchemaVersion: 2,
 		Components:    map[string]schema.Component{},
 		EntityTypes:   map[string]schema.EntityType{},
 	}, "")
-	if err == nil {
-		t.Fatal("expected ErrSchemaVersionMismatch, got nil")
+	if err != nil {
+		t.Fatalf("expected auto-migration to succeed, got: %v", err)
 	}
+	t.Cleanup(func() { _ = store2.Close() })
 
-	var mismatch *SchemaVersionMismatchError
-	if !errors.As(err, &mismatch) {
-		t.Fatalf("expected *SchemaVersionMismatchError, got %T: %v", err, err)
+	// schema_version should now be 2.
+	var value string
+	if err := store2.db.QueryRow(
+		"SELECT value FROM meta WHERE key = 'schema_version'",
+	).Scan(&value); err != nil {
+		t.Fatalf("reading schema_version: %v", err)
 	}
-	if mismatch.DBVersion != 1 {
-		t.Errorf("DBVersion = %d, want 1", mismatch.DBVersion)
-	}
-	if mismatch.FileVersion != 2 {
-		t.Errorf("FileVersion = %d, want 2", mismatch.FileVersion)
-	}
-
-	// Verify the error message contains both versions.
-	if mismatch.Error() == "" {
-		t.Error("error message is empty")
+	if value != "2" {
+		t.Errorf("schema_version = %q, want 2", value)
 	}
 }
 

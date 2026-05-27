@@ -533,42 +533,34 @@ func TestGenRemoveProperty_RebuildSequence(t *testing.T) {
 		Property:  "z",
 	}})
 
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6 (PRAGMA OFF, CREATE, INSERT, DROP, RENAME, PRAGMA ON)", len(stmts))
+	// PRAGMAs are no longer in the generator output — they are handled by
+	// MigrationRunner outside the transaction (SQLite ignores them inside one).
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4 (CREATE, INSERT, DROP, RENAME)", len(stmts))
 	}
 
-	// Statement 0: PRAGMA foreign_keys = OFF
-	if !stmts[0].Destructive {
-		t.Error("stmt 0 (PRAGMA OFF) Destructive = false, want true")
-	}
-	if stmts[0].SQL != "PRAGMA foreign_keys = OFF" {
-		t.Errorf("stmt 0 SQL = %q, want %q", stmts[0].SQL, "PRAGMA foreign_keys = OFF")
-	}
-
-	// Statement 1: CREATE TABLE comp_position_new
-	assertContainsDDL(t, stmts[1].SQL, "CREATE TABLE")
-	assertContainsDDL(t, stmts[1].SQL, "comp_position_new")
+	// Statement 0: CREATE TABLE comp_position_new
+	assertContainsDDL(t, stmts[0].SQL, "CREATE TABLE")
+	assertContainsDDL(t, stmts[0].SQL, "comp_position_new")
 	// Should have x and y but NOT z.
+	assertContainsDDL(t, stmts[0].SQL, "x")
+	assertContainsDDL(t, stmts[0].SQL, "y")
+	assertNotContainsDDL(t, stmts[0].SQL, "z")
+
+	// Statement 1: INSERT preserves entity_id and all retained columns.
+	assertContainsDDL(t, stmts[1].SQL, "INSERT INTO comp_position_new")
+	assertContainsDDL(t, stmts[1].SQL, "entity_id")
 	assertContainsDDL(t, stmts[1].SQL, "x")
 	assertContainsDDL(t, stmts[1].SQL, "y")
+	// z was removed — must not appear in SELECT.
 	assertNotContainsDDL(t, stmts[1].SQL, "z")
+	assertContainsDDL(t, stmts[1].SQL, "FROM comp_position")
 
-	// Statement 2: INSERT INTO ... SELECT (skips entity_id PK)
-	assertContainsDDL(t, stmts[2].SQL, "INSERT INTO comp_position_new")
-	assertContainsDDL(t, stmts[2].SQL, "SELECT x, y FROM comp_position")
-	// Should NOT select z
-	assertNotContainsDDL(t, stmts[2].SQL, "z")
+	// Statement 2: DROP TABLE comp_position
+	assertContainsDDL(t, stmts[2].SQL, "DROP TABLE comp_position")
 
-	// Statement 3: DROP TABLE comp_position
-	assertContainsDDL(t, stmts[3].SQL, "DROP TABLE comp_position")
-
-	// Statement 4: RENAME
-	assertContainsDDL(t, stmts[4].SQL, "ALTER TABLE comp_position_new RENAME TO comp_position")
-
-	// Statement 5: PRAGMA foreign_keys = ON
-	if stmts[5].SQL != "PRAGMA foreign_keys = ON" {
-		t.Errorf("stmt 5 SQL = %q, want %q", stmts[5].SQL, "PRAGMA foreign_keys = ON")
-	}
+	// Statement 3: RENAME
+	assertContainsDDL(t, stmts[3].SQL, "ALTER TABLE comp_position_new RENAME TO comp_position")
 
 	// All statements should be destructive.
 	for i, s := range stmts {
@@ -678,12 +670,14 @@ func TestGenChangePropertyType_RebuildSequence(t *testing.T) {
 		NewType:   "REAL",
 	}})
 
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6", len(stmts))
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4 (CREATE, INSERT, DROP, RENAME)", len(stmts))
 	}
 	// The new table should have x as REAL, not TEXT.
-	assertContainsDDL(t, stmts[1].SQL, "x REAL NOT NULL")
-	assertContainsDDL(t, stmts[1].SQL, "y REAL NOT NULL")
+	assertContainsDDL(t, stmts[0].SQL, "x REAL NOT NULL")
+	assertContainsDDL(t, stmts[0].SQL, "y REAL NOT NULL")
+	// INSERT must include entity_id.
+	assertContainsDDL(t, stmts[1].SQL, "entity_id")
 	// All statements should be destructive.
 	for i, s := range stmts {
 		if !s.Destructive {
@@ -956,10 +950,10 @@ func TestGenChangePropertyType_ScalarRebuild_EntityRef(t *testing.T) {
 	}})
 
 	// Even if types match, changed_type change produces a rebuild.
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6", len(stmts))
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4", len(stmts))
 	}
-	assertContainsDDL(t, stmts[1].SQL, "target_entity_id")
+	assertContainsDDL(t, stmts[0].SQL, "target_entity_id")
 }
 
 func TestGenChangePropertyType_ScalarRebuild_String(t *testing.T) {
@@ -987,10 +981,10 @@ func TestGenChangePropertyType_ScalarRebuild_String(t *testing.T) {
 		NewType:   "TEXT",
 	}})
 
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6", len(stmts))
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4", len(stmts))
 	}
-	assertContainsDDL(t, stmts[1].SQL, "value TEXT NOT NULL DEFAULT ''")
+	assertContainsDDL(t, stmts[0].SQL, "value TEXT NOT NULL DEFAULT ''")
 }
 
 func TestGenChangePropertyType_ScalarRebuild_Array(t *testing.T) {
@@ -1018,10 +1012,10 @@ func TestGenChangePropertyType_ScalarRebuild_Array(t *testing.T) {
 		NewType:   "TEXT",
 	}})
 
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6", len(stmts))
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4", len(stmts))
 	}
-	assertContainsDDL(t, stmts[1].SQL, "value TEXT NOT NULL DEFAULT '[]'")
+	assertContainsDDL(t, stmts[0].SQL, "value TEXT NOT NULL DEFAULT '[]'")
 }
 
 func TestGenChangePropertyType_ScalarRebuild_Number(t *testing.T) {
@@ -1049,10 +1043,10 @@ func TestGenChangePropertyType_ScalarRebuild_Number(t *testing.T) {
 		NewType:   "REAL",
 	}})
 
-	if len(stmts) != 6 {
-		t.Fatalf("got %d statements, want 6", len(stmts))
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4", len(stmts))
 	}
-	assertContainsDDL(t, stmts[1].SQL, "value REAL NOT NULL DEFAULT 0.0")
+	assertContainsDDL(t, stmts[0].SQL, "value REAL NOT NULL DEFAULT 0.0")
 }
 
 // ── Mixed scenario test ─────────────────────────────────────────────

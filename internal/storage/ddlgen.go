@@ -224,9 +224,8 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		}}
 	}
 
-	// Look up domain (DB) component to get current columns.
-	dbComp, ok := g.domain.Components[compName]
-	if !ok {
+	// Look up domain (DB) component to verify the table exists before rebuilding.
+	if _, ok := g.domain.Components[compName]; !ok {
 		return []Statement{{
 			Kind:        "error",
 			Destructive: true,
@@ -238,29 +237,25 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 	// Build the new column list from the file schema.
 	newCols := buildNewColumns(comp)
 
-	// Build the SELECT column list from the DB schema, excluding the
-	// removed/skipped property.
-	skipProp := ""
-	if change.Kind == schema.ChangeRemovedProperty {
-		skipProp = change.Property
+	// Build the named column list for INSERT ... SELECT. We derive column
+	// names from the new table layout (entity_id first, then the new schema's
+	// properties in sorted order). Using named columns ensures entity_id is
+	// preserved and column ordering mismatches between old and new tables
+	// cannot cause data to land in the wrong column.
+	colNames := make([]string, 0, len(newCols))
+	for _, colDef := range newCols {
+		colNames = append(colNames, strings.Fields(colDef)[0])
 	}
-	selectCols := buildSelectCols(dbComp.Columns, skipProp)
+	colList := strings.Join(colNames, ", ")
 
 	tableName := "comp_" + compName
 	tempName := tableName + "_new"
 
-	stmts := make([]Statement, 0, 6)
+	stmts := make([]Statement, 0, 4)
 
-	// 1. PRAGMA foreign_keys = OFF
-	stmts = append(stmts, Statement{
-		SQL:         "PRAGMA foreign_keys = OFF",
-		Kind:        "rebuild_table",
-		Destructive: true,
-		Component:   compName,
-		Description: "Disable foreign keys for rebuild of " + tableName,
-	})
-
-	// 2. CREATE TABLE comp_<name>_new (...)
+	// 1. CREATE TABLE comp_<name>_new (...)
+	// PRAGMA foreign_keys toggle is handled by the caller (MigrationRunner)
+	// outside the transaction, since SQLite ignores it inside a transaction.
 	createSQL := buildCreateTable(tempName, compName, newCols)
 	stmts = append(stmts, Statement{
 		SQL:         createSQL,
@@ -270,9 +265,10 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		Description: "Create temp table " + tempName,
 	})
 
-	// 3. INSERT INTO comp_<name>_new SELECT <cols> FROM comp_<name>
-	selectSQL := fmt.Sprintf("INSERT INTO %s SELECT %s FROM %s",
-		tempName, strings.Join(selectCols, ", "), tableName)
+	// 2. INSERT INTO comp_<name>_new (cols) SELECT cols FROM comp_<name>
+	// Named columns preserve entity_id and survive column-order differences.
+	selectSQL := fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s",
+		tempName, colList, colList, tableName)
 	stmts = append(stmts, Statement{
 		SQL:         selectSQL,
 		Kind:        "rebuild_table",
@@ -281,7 +277,7 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		Description: "Copy data from " + tableName,
 	})
 
-	// 4. DROP TABLE comp_<name>
+	// 3. DROP TABLE comp_<name>
 	stmts = append(stmts, Statement{
 		SQL:         "DROP TABLE " + tableName,
 		Kind:        "rebuild_table",
@@ -290,22 +286,13 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		Description: "Drop old table " + tableName,
 	})
 
-	// 5. ALTER TABLE comp_<name>_new RENAME TO comp_<name>
+	// 4. ALTER TABLE comp_<name>_new RENAME TO comp_<name>
 	stmts = append(stmts, Statement{
 		SQL:         "ALTER TABLE " + tempName + " RENAME TO " + tableName,
 		Kind:        "rebuild_table",
 		Destructive: true,
 		Component:   compName,
 		Description: "Rename temp table to " + tableName,
-	})
-
-	// 6. PRAGMA foreign_keys = ON
-	stmts = append(stmts, Statement{
-		SQL:         "PRAGMA foreign_keys = ON",
-		Kind:        "rebuild_table",
-		Destructive: true,
-		Component:   compName,
-		Description: "Re-enable foreign keys for " + tableName,
 	})
 
 	return stmts
@@ -343,22 +330,6 @@ func buildNewColumns(comp schema.Component) []string {
 		cols = append(cols, "value REAL NOT NULL DEFAULT 0.0")
 	}
 
-	return cols
-}
-
-// buildSelectCols returns the column names to SELECT from the old table,
-// excluding the skipped property and entity_id.
-func buildSelectCols(dbCols []DomainColumn, skipProp string) []string {
-	cols := []string{}
-	for _, c := range dbCols {
-		if c.IsPK {
-			continue // skip entity_id
-		}
-		if strings.EqualFold(c.Name, skipProp) {
-			continue
-		}
-		cols = append(cols, c.Name)
-	}
 	return cols
 }
 

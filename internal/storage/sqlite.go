@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,20 +19,50 @@ type SQLiteStore struct {
 	schema schema.DatabaseSchema
 }
 
-// NewSQLiteStore opens or creates a SQLite database at the given path and
-// initialises the fixed + generated tables from the schema.
+// StoreConfig holds all options for opening or creating a SQLite store.
+type StoreConfig struct {
+	// Schema is the current schema.json representation.
+	Schema schema.DatabaseSchema
+	// SchemaHash is an optional SHA-256 hex digest of the schema.json bytes.
+	// Pass "" to omit it from meta.
+	SchemaHash string
+	// MigrationPolicy controls whether destructive migrations run automatically
+	// (MigrationAuto, the default) or require confirmation (MigrationConfirm).
+	MigrationPolicy MigrationPolicy
+	// Logger receives structured migration events. Nil defaults to NopLogger.
+	Logger MigrationLogger
+}
+
+// NewSQLiteStore opens or creates a SQLite database at dbPath using the
+// provided schema. On version mismatch the runner auto-migrates (MigrationAuto).
+// This is the backward-compatible 3-argument form; use NewSQLiteStoreWithConfig
+// for full control over migration policy and logging.
+//
+// schemaHash is an optional SHA-256 hex digest of the schema.json bytes.
+func NewSQLiteStore(dbPath string, s schema.DatabaseSchema, schemaHash string) (*SQLiteStore, error) {
+	return NewSQLiteStoreWithConfig(dbPath, StoreConfig{
+		Schema:          s,
+		SchemaHash:      schemaHash,
+		MigrationPolicy: MigrationAuto,
+		Logger:          NopLogger(),
+	})
+}
+
+// NewSQLiteStoreWithConfig opens or creates a SQLite database at dbPath.
 //
 // On first run (no tables exist), it creates all tables and writes
 // schema_version, build_time, and optionally schema_hash to the meta table.
 //
 // On subsequent opens (tables exist), it compares the stored schema_version
-// against the provided schema.DatabaseSchema. If versions differ, it returns
-// *SchemaVersionMismatchError — the caller must handle this (e.g., trigger
-// migrations). If versions match, existing data is preserved.
-//
-// schemaHash is an optional SHA-256 hex digest of the schema.json bytes.
-// Pass "" to omit it from meta.
-func NewSQLiteStore(dbPath string, s schema.DatabaseSchema, schemaHash string) (*SQLiteStore, error) {
+// against the schema in cfg. If versions match, existing data is preserved.
+// If versions differ, the migration runner runs: introspect → diff → DDL →
+// execute in one transaction → update meta. Returns an error only on failure
+// or when cfg.MigrationPolicy = MigrationConfirm and destructive changes exist.
+func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, error) {
+	if cfg.Logger == nil {
+		cfg.Logger = NopLogger()
+	}
+
 	// Ensure directory exists
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
@@ -71,20 +102,20 @@ func NewSQLiteStore(dbPath string, s schema.DatabaseSchema, schemaHash string) (
 	}
 
 	if existing {
-		// Existing database — verify schema version matches.
-		if err := checkSchemaVersion(db, s.SchemaVersion); err != nil {
+		// Existing database — check version and migrate if needed.
+		if err := checkAndMigrate(db, cfg); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
 	} else {
 		// Fresh database — create all tables and write meta.
-		if err := bootstrapDatabase(db, s, schemaHash); err != nil {
+		if err := bootstrapDatabase(db, cfg.Schema, cfg.SchemaHash); err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("bootstrapping database: %w", err)
 		}
 	}
 
-	return &SQLiteStore{db: db, schema: s}, nil
+	return &SQLiteStore{db: db, schema: cfg.Schema}, nil
 }
 
 // Close closes the database connection
@@ -139,6 +170,26 @@ func checkSchemaVersion(db *sql.DB, currentVersion int) error {
 		}
 	}
 	return nil
+}
+
+// checkAndMigrate reads the stored version. If it matches the config schema
+// version, it returns nil immediately. On mismatch, it runs the migration
+// runner according to the policy in cfg.
+func checkAndMigrate(db *sql.DB, cfg StoreConfig) error {
+	err := checkSchemaVersion(db, cfg.Schema.SchemaVersion)
+	if err == nil {
+		return nil // versions match, nothing to do
+	}
+
+	// Only proceed if the error is a version mismatch; other errors are fatal.
+	var mismatch *SchemaVersionMismatchError
+	if !errors.As(err, &mismatch) {
+		return err
+	}
+
+	// Run the migration pipeline.
+	runner := NewMigrationRunner(db, cfg.Schema, cfg.MigrationPolicy, cfg.Logger)
+	return runner.Run()
 }
 
 // bootstrapDatabase creates all tables and writes initial meta rows
