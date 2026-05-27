@@ -395,7 +395,8 @@ func TestGenAddProperty_EntityRef(t *testing.T) {
 	if len(stmts) != 1 {
 		t.Fatalf("got %d statements, want 1", len(stmts))
 	}
-	assertContainsDDL(t, stmts[0].SQL, "ALTER TABLE comp_rel ADD COLUMN parent INTEGER NOT NULL DEFAULT 0")
+	assertContainsDDL(t, stmts[0].SQL, "ALTER TABLE comp_rel ADD COLUMN parent INTEGER NOT NULL DEFAULT NULL")
+	assertContainsDDL(t, stmts[0].SQL, "REFERENCES entities(id)")
 }
 
 func TestGenAddProperty_UnknownPropertySkips(t *testing.T) {
@@ -1161,8 +1162,8 @@ func TestDefaultValueForProperty_Boolean(t *testing.T) {
 
 func TestDefaultValueForProperty_EntityRef(t *testing.T) {
 	d := defaultValueForProperty(schema.Property{Type: schema.PropertyTypeEntityRef})
-	if d != "0" {
-		t.Errorf("entity-ref default = %q, want 0", d)
+	if d != "NULL" {
+		t.Errorf("entity-ref default = %q, want NULL", d)
 	}
 }
 
@@ -1181,5 +1182,111 @@ func TestDefaultValueForProperty_Unknown(t *testing.T) {
 	d := defaultValueForProperty(schema.Property{Type: "bogus"})
 	if d != "NULL" {
 		t.Errorf("unknown default = %q, want NULL", d)
+	}
+}
+
+// ── buildCreateTable tests ───────────────────────────────────────────
+
+func TestBuildCreateTable_NoIfExists(t *testing.T) {
+	// Rebuild temp tables must not use IF NOT EXISTS; if the temp
+	// table somehow exists we want the command to fail loudly rather
+	// than silently producing an empty table and corrupting data.
+	cols := []string{
+		"entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE",
+		"x REAL NOT NULL",
+	}
+	sql := buildCreateTable("comp_position_new", "position", cols)
+	assertNotContainsDDL(t, sql, "IF NOT EXISTS")
+	assertContainsDDL(t, sql, "CREATE TABLE comp_position_new")
+	assertContainsDDL(t, sql, "entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE")
+	assertContainsDDL(t, sql, "x REAL NOT NULL")
+}
+
+// ── buildNewColumns: unknown component type ───────────────────────────
+
+func TestBuildNewColumns_UnknownComponentType(t *testing.T) {
+	comp := schema.Component{
+		Type: "bogus",
+	}
+	cols := buildNewColumns(comp)
+	// Only the PK column should exist; no data column for unknown type.
+	if len(cols) != 1 {
+		t.Errorf("got %d columns, want 1 (entity_id only)", len(cols))
+	}
+	assertContainsDDL(t, cols[0], "entity_id")
+	assertContainsDDL(t, cols[0], "REFERENCES entities(id)")
+}
+
+func TestBuildNewColumns_Integer(t *testing.T) {
+	comp := schema.Component{Type: schema.ComponentTypeInteger}
+	cols := buildNewColumns(comp)
+	if len(cols) != 2 {
+		t.Fatalf("got %d columns, want 2", len(cols))
+	}
+	assertContainsDDL(t, cols[1], "value INTEGER NOT NULL DEFAULT 0")
+}
+
+func TestBuildNewColumns_Boolean(t *testing.T) {
+	comp := schema.Component{Type: schema.ComponentTypeBoolean}
+	cols := buildNewColumns(comp)
+	if len(cols) != 2 {
+		t.Fatalf("got %d columns, want 2", len(cols))
+	}
+	assertContainsDDL(t, cols[1], "value INTEGER NOT NULL DEFAULT 0")
+}
+
+func TestBuildNewColumns_ObjectPropertyNamesLowerCase(t *testing.T) {
+	// buildNewColumns must lowercase property names to match
+	// componentTableSQL's behavior; otherwise rebuilds produce
+	// inconsistent column casing.
+	comp := schema.Component{
+		Type: schema.ComponentTypeObject,
+		Properties: map[string]schema.Property{
+			"ImageId": {Type: schema.PropertyTypeString},
+			"ScaleX":  {Type: schema.PropertyTypeNumber},
+		},
+	}
+	cols := buildNewColumns(comp)
+	// Should have entity_id + 2 property columns = 3 total.
+	if len(cols) != 3 {
+		t.Fatalf("got %d columns, want 3", len(cols))
+	}
+	// Columns must be lowercase even though file schema uses mixed case.
+	// After alphabetical sort: imageid at [1], scalex at [2].
+	assertContainsDDL(t, cols[1], "imageid TEXT NOT NULL")
+	assertContainsDDL(t, cols[2], "scalex REAL NOT NULL")
+}
+
+// ── genRebuild: component missing from domain map ─────────────────────
+
+func TestGenRebuild_ComponentMissingFromDomainMap(t *testing.T) {
+	// g.domain is non-nil but the specific component is absent from
+	// its Components map — a different path than g.domain == nil.
+	file := &schema.DatabaseSchema{
+		Components: map[string]schema.Component{
+			"Test": {
+				Type: schema.ComponentTypeObject,
+				Properties: map[string]schema.Property{
+					"x": {Type: schema.PropertyTypeNumber},
+				},
+			},
+		},
+	}
+	domain := &DomainSchema{
+		Components: map[string]DomainComponent{}, // "test" not present
+	}
+	g := NewGenerator(file, domain, Config{StrictDrop: true})
+
+	stmts := g.Generate([]schema.Change{{
+		Kind:      schema.ChangeRemovedProperty,
+		Component: "test",
+		Property:  "y",
+	}})
+
+	if len(stmts) != 1 {
+		t.Fatalf("got %d statements, want 1", len(stmts))
+	}
+	if !strings.Contains(stmts[0].Description, "not found in domain schema") {
+		t.Errorf("Description = %q, want 'not found in domain schema'", stmts[0].Description)
 	}
 }

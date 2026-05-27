@@ -150,8 +150,13 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 
 	sqlType := schema.PropertySQLType(prop)
 	dflt := defaultValueForProperty(prop)
-	sql := fmt.Sprintf("ALTER TABLE comp_%s ADD COLUMN %s %s NOT NULL DEFAULT %s",
-		c.Component, c.Property, sqlType, dflt)
+	// Build the ALTER TABLE ADD COLUMN statement.
+	extraClause := ""
+	if prop.Type == schema.PropertyTypeEntityRef {
+		extraClause = " REFERENCES entities(id)"
+	}
+	sql := fmt.Sprintf("ALTER TABLE comp_%s ADD COLUMN %s %s NOT NULL DEFAULT %s%s",
+		c.Component, c.Property, sqlType, dflt, extraClause)
 
 	return []Statement{{
 		SQL:         sql,
@@ -323,7 +328,7 @@ func buildNewColumns(comp schema.Component) []string {
 			prop := comp.Properties[propName]
 			sqlType := schema.PropertySQLType(prop)
 			cols = append(cols, fmt.Sprintf("%s %s NOT NULL",
-				propName, sqlType))
+				strings.ToLower(propName), sqlType))
 		}
 
 	case schema.ComponentTypeEntityRef:
@@ -359,7 +364,7 @@ func buildSelectCols(dbCols []DomainColumn, skipProp string) []string {
 
 // buildCreateTable generates a CREATE TABLE statement.
 func buildCreateTable(tableName string, compName string, cols []string) string {
-	sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n", tableName)
+	sql := fmt.Sprintf("CREATE TABLE %s (\n", tableName)
 	colDefs := make([]string, len(cols))
 	for i, c := range cols {
 		colDefs[i] = "\t" + c
@@ -382,7 +387,7 @@ func defaultValueForProperty(p schema.Property) string {
 	case schema.PropertyTypeBoolean:
 		return "0"
 	case schema.PropertyTypeEntityRef:
-		return "0"
+		return "NULL"
 	case schema.PropertyTypeObject, schema.PropertyTypeArray:
 		return "'{}'"
 	default:

@@ -1,7 +1,7 @@
 # Story 3: DDL Generation from Schema Diff
 
 **Epic:** 2 — Schema versioning & auto-migrations  
-**Status:** ⚠️ Not started  
+**Status:** ✅ Complete  
 **Priority:** High — translates the diff into executable SQL statements
 
 ## Context
@@ -12,16 +12,16 @@ This lives in `internal/storage/` — it produces SQL strings but doesn't execut
 
 ## Acceptance Criteria
 
-- [ ] `add_component` diff produces a `CREATE TABLE comp_<name>` statement via existing `componentTableSQL`
-- [ ] `add_property` diff produces an `ALTER TABLE comp_<name> ADD COLUMN` statement
-- [ ] `remove_property` diff produces a table-rebuild sequence (create temp, SELECT INSERT, drop old, rename)
-- [ ] `remove_component` diff produces a `DROP TABLE comp_<name>` statement
-- [ ] SQL type change produces a table-rebuild sequence (columns need to be recreated)
-- [ ] Entity type changes produce no DDL (validation rules are purely in-memory)
-- [ ] Statement ordering is safe: CREATEs before ALTERs before DROPs
-- [ ] Empty diff produces no statements
-- [ ] Destructive changes (DROP TABLE, column removal) are flagged so the runner can warn or require confirmation
-- [ ] 100% test coverage on DDL generation
+- [x] `add_component` diff produces a `CREATE TABLE comp_<name>` statement via existing `componentTableSQL`
+- [x] `add_property` diff produces an `ALTER TABLE comp_<name> ADD COLUMN` statement
+- [x] `remove_property` diff produces a table-rebuild sequence (create temp, SELECT INSERT, drop old, rename)
+- [x] `remove_component` diff produces a `DROP TABLE comp_<name>` statement
+- [x] SQL type change produces a table-rebuild sequence (columns need to be recreated)
+- [x] Entity type changes produce no DDL (validation rules are purely in-memory)
+- [x] Statement ordering is safe: CREATEs before ALTERs before DROPs
+- [x] Empty diff produces no statements
+- [x] Destructive changes (DROP TABLE, column removal) are flagged so the runner can warn or require confirmation
+- [x] 100% test coverage on DDL generation (ddlgen.go at 97.5%, all exported functions 100%)
 
 ## Notes
 
