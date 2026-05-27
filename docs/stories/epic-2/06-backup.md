@@ -1,7 +1,7 @@
 # Story 6: Backup Before Migrate
 
 **Epic:** 2 — Schema versioning & auto-migrations  
-**Status:** ⚠️ Not started  
+**Status:** ✅ Complete  
 **Priority:** Medium — cheap insurance, but migrations must work without it
 
 **Depends on:** Story 4 (auto-migration runner)
@@ -13,11 +13,11 @@ Before applying auto-generated migration DDL to a database that contains real ga
 ## Acceptance Criteria
 
 - [x] Database is copied before migration DDL begins
-- [ ] Backup path follows the pattern `{basename}.bak.v{version}`
-- [ ] If backup fails, migration proceeds with a warning (migration safety > backup completeness)
+- [x] Backup path follows the pattern `{basename}.bak.v{version}`
+- [x] If backup fails, migration proceeds with a warning (migration safety > backup completeness)
 - [x] Retention configurable: keep last N backups, older ones are deleted
 - [x] The backup file is a valid SQLite database (can be opened and queried)
-- [ ] 100% test coverage on backup creation and retention logic
+- [x] 100% test coverage on backup creation and retention logic
 
 ## Notes
 

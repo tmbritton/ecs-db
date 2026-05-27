@@ -68,33 +68,34 @@ Refined into stories: See [`docs/stories/epic-2/`](docs/stories/epic-2/).
   - Read `schema_version` from `meta`
   - Entity types are NOT introspectable (metadata-only in `schema.json`)
 
-- [ ] **Schema diff computation** — Compare the as-built database schema against `schema.json`.
+- [x] **Schema diff computation** — Compare the as-built database schema against `schema.json`.
   - Detect new/removed components, added/removed properties, SQL type changes
   - Detect entity type changes (new, removed, requirement changes — metadata only)
   - Produce a deterministic, safely-ordered list of changes
 
-- [ ] **DDL generation from diff** — Translate each change type into SQL.
+- [x] **DDL generation from diff** — Translate each change type into SQL.
   - New components → `CREATE TABLE` (reuse existing `componentTableSQL`)
   - New properties → `ALTER TABLE ADD COLUMN`
   - Removed properties / type changes → table-rebuild sequence (SQLite lacks `DROP COLUMN`)
   - Removed components → `DROP TABLE`
   - Destructive changes flagged for configurable warning/confirmation
 
-- [ ] **Auto-migration runner** — Integrate into `NewSQLiteStore` startup flow.
+- [x] **Auto-migration runner** — Integrate into `NewSQLiteStore` startup flow.
   - On version mismatch: introspect → diff → generate DDL → execute in one transaction
   - Update `meta.schema_version` and `meta.build_time` on success
   - Structured error reporting on failure (which change, which statement)
   - `MigrationPolicy` (`auto` / `confirm`) controls destructive change behavior
 
-- [ ] **Smoke test: round-trip a migration** — Prove the full pipeline works.
+- [x] **Smoke test: round-trip a migration** — Prove the full pipeline works.
   - Create DB at version 1 with an entity, add a component in version 2
   - Reopen with new schema, verify table created, original data intact, `meta` updated
   - Second test: add a property to an existing component, verify column added
 
-- [ ] **Backup before migrate** — Cheap insurance.
+- [x] **Backup before migrate** — Cheap insurance.
   - Copy `world.sqlite` to `world.sqlite.bak.v{version}` before applying DDL
   - Configurable retention (keep last N backups)
   - Backup failure → warning logged, migration proceeds
+  - Coverage: `storage` 89.3%
 
 ---
 
