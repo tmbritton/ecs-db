@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -31,6 +32,9 @@ type StoreConfig struct {
 	MigrationPolicy MigrationPolicy
 	// Logger receives structured migration events. Nil defaults to NopLogger.
 	Logger MigrationLogger
+	// BackupRetention is the number of versioned backups to keep before migration.
+	// 0 (the default) disables backup. A positive value enables backup and retention.
+	BackupRetention int
 }
 
 // NewSQLiteStore opens or creates a SQLite database at dbPath using the
@@ -103,7 +107,7 @@ func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, err
 
 	if existing {
 		// Existing database — check version and migrate if needed.
-		if err := checkAndMigrate(db, cfg); err != nil {
+		if err := checkAndMigrate(db, dbPath, cfg); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -172,10 +176,16 @@ func checkSchemaVersion(db *sql.DB, currentVersion int) error {
 	return nil
 }
 
+// isMemoryDB reports whether dbPath refers to an in-memory SQLite database,
+// for which file-based backup is not applicable.
+func isMemoryDB(path string) bool {
+	return path == "" || strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory")
+}
+
 // checkAndMigrate reads the stored version. If it matches the config schema
-// version, it returns nil immediately. On mismatch, it runs the migration
-// runner according to the policy in cfg.
-func checkAndMigrate(db *sql.DB, cfg StoreConfig) error {
+// version, it returns nil immediately. On mismatch, it optionally backs up
+// the database (when cfg.BackupRetention > 0) then runs the migration runner.
+func checkAndMigrate(db *sql.DB, dbPath string, cfg StoreConfig) error {
 	err := checkSchemaVersion(db, cfg.Schema.SchemaVersion)
 	if err == nil {
 		return nil // versions match, nothing to do
@@ -185,6 +195,17 @@ func checkAndMigrate(db *sql.DB, cfg StoreConfig) error {
 	var mismatch *SchemaVersionMismatchError
 	if !errors.As(err, &mismatch) {
 		return err
+	}
+
+	// Back up before migration so the user has a restore point.
+	if cfg.BackupRetention > 0 && !isMemoryDB(dbPath) {
+		backupPath, backupErr := backupDatabase(db, dbPath, mismatch.DBVersion)
+		if backupErr != nil {
+			cfg.Logger.Warnf("backup failed (migration will proceed): %v", backupErr)
+		} else {
+			cfg.Logger.Infof("backup created: %s", backupPath)
+			pruneBackups(dbPath, cfg.BackupRetention, cfg.Logger)
+		}
 	}
 
 	// Run the migration pipeline.

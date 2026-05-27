@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"database/sql"
+	"os"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -180,5 +182,99 @@ func TestSmoke_AddColumn_RoundTrip(t *testing.T) {
 
 	if got := readMetaValue(t, db2, "schema_version"); got != "2" {
 		t.Errorf("schema_version = %q, want 2", got)
+	}
+}
+
+// TestSmoke_BackupCreatedBeforeMigration exercises the full backup pipeline:
+// bootstrap v1 with backup enabled → insert data → reopen as v2 → assert
+// backup file exists and is a valid pre-migration SQLite database.
+func TestSmoke_BackupCreatedBeforeMigration(t *testing.T) {
+	path := t.TempDir() + "/world.sqlite"
+
+	s1 := schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]schema.Component{
+			"Position": {
+				Type: schema.ComponentTypeObject,
+				Properties: map[string]schema.Property{
+					"x": {Type: schema.PropertyTypeNumber},
+				},
+			},
+		},
+		EntityTypes: map[string]schema.EntityType{},
+	}
+
+	// --- v1: bootstrap and seed ---
+	store1, err := NewSQLiteStoreWithConfig(path, StoreConfig{
+		Schema:          s1,
+		MigrationPolicy: MigrationAuto,
+		Logger:          NopLogger(),
+		BackupRetention: 3,
+	})
+	if err != nil {
+		t.Fatalf("v1 open: %v", err)
+	}
+	db1 := store1.DB()
+
+	res, err := db1.Exec("INSERT INTO entities (entity_type, created_tick) VALUES ('Player', 0)")
+	if err != nil {
+		t.Fatalf("inserting entity: %v", err)
+	}
+	entityID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("LastInsertId: %v", err)
+	}
+	if _, err := db1.Exec(
+		"INSERT INTO comp_position (entity_id, x) VALUES (?, ?)", entityID, 5.0,
+	); err != nil {
+		t.Fatalf("inserting comp_position: %v", err)
+	}
+	_ = store1.Close()
+
+	// --- v2: add y property (triggers migration and backup) ---
+	s2 := schema.DatabaseSchema{
+		SchemaVersion: 2,
+		Components: map[string]schema.Component{
+			"Position": {
+				Type: schema.ComponentTypeObject,
+				Properties: map[string]schema.Property{
+					"x": {Type: schema.PropertyTypeNumber},
+					"y": {Type: schema.PropertyTypeNumber},
+				},
+			},
+		},
+		EntityTypes: map[string]schema.EntityType{},
+	}
+
+	store2, err := NewSQLiteStoreWithConfig(path, StoreConfig{
+		Schema:          s2,
+		MigrationPolicy: MigrationAuto,
+		Logger:          NopLogger(),
+		BackupRetention: 3,
+	})
+	if err != nil {
+		t.Fatalf("v2 open (migration): %v", err)
+	}
+	t.Cleanup(func() { _ = store2.Close() })
+
+	// Assert backup file exists.
+	backupPath := path + ".bak.v1"
+	if _, err := os.Stat(backupPath); err != nil {
+		t.Fatalf("backup file %s not found: %v", backupPath, err)
+	}
+
+	// Assert backup is a valid SQLite database with the pre-migration schema version.
+	bdb, err := sql.Open("sqlite", backupPath)
+	if err != nil {
+		t.Fatalf("opening backup: %v", err)
+	}
+	defer func() { _ = bdb.Close() }()
+
+	var gotVersion string
+	if err := bdb.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&gotVersion); err != nil {
+		t.Fatalf("querying backup schema_version: %v", err)
+	}
+	if gotVersion != "1" {
+		t.Errorf("backup schema_version = %q, want 1 (pre-migration state)", gotVersion)
 	}
 }
