@@ -430,8 +430,9 @@ func TestInferComponentType(t *testing.T) {
 			want: "integer", // BOOLEAN → INTEGER; indistinguishable from numeric integer at the SQL level
 		},
 		{
+			// SQLite stores DEFAULT '[]' and PRAGMA table_info returns '[]' (with single quotes).
 			name: "array",
-			cols: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT", Default: "[]"}},
+			cols: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT", Default: "'[]'"}},
 			want: "array",
 		},
 		{

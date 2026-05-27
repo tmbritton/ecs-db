@@ -66,6 +66,9 @@ func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, err
 	if cfg.Logger == nil {
 		cfg.Logger = NopLogger()
 	}
+	if cfg.MigrationPolicy == "" {
+		cfg.MigrationPolicy = MigrationAuto
+	}
 
 	// Ensure directory exists
 	dbDir := filepath.Dir(dbPath)

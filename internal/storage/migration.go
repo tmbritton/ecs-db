@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -140,9 +141,11 @@ func (r *MigrationRunner) Run() error {
 		}
 	}
 
-	// 5. If any statement is a table rebuild, disable foreign keys on the
-	// connection before the transaction. SQLite ignores PRAGMA foreign_keys
-	// inside a transaction, so it must be set at the connection level.
+	// 5. If any statement is a table rebuild, PRAGMA foreign_keys must be
+	// toggled on the same connection that runs the transaction. PRAGMA
+	// foreign_keys is per-connection and database/sql uses a pool, so issuing
+	// it on *sql.DB and then calling Begin() may land on different underlying
+	// connections, leaving FK enforcement active during the DROP TABLE.
 	needsFKToggle := false
 	for _, s := range stmts {
 		if s.Kind == "rebuild_table" {
@@ -150,17 +153,33 @@ func (r *MigrationRunner) Run() error {
 			break
 		}
 	}
-	if needsFKToggle {
-		if _, err := r.db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
-			return fmt.Errorf("disabling foreign keys for rebuild: %w", err)
-		}
-		defer func() { _, _ = r.db.Exec("PRAGMA foreign_keys = ON") }()
-	}
 
 	// 6. Begin transaction — all DDL + meta update commit atomically.
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("beginning migration transaction: %w", err)
+	var tx *sql.Tx
+	if needsFKToggle {
+		conn, err := r.db.Conn(context.Background())
+		if err != nil {
+			return fmt.Errorf("acquiring pinned connection for rebuild: %w", err)
+		}
+		defer func() { _ = conn.Close() }()
+		if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF"); err != nil {
+			return fmt.Errorf("disabling foreign keys for rebuild: %w", err)
+		}
+		defer func() {
+			if _, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON"); err != nil {
+				r.logger.Warnf("re-enabling foreign keys after rebuild: %v", err)
+			}
+		}()
+		tx, err = conn.BeginTx(context.Background(), nil)
+		if err != nil {
+			return fmt.Errorf("beginning migration transaction: %w", err)
+		}
+	} else {
+		var err error
+		tx, err = r.db.Begin()
+		if err != nil {
+			return fmt.Errorf("beginning migration transaction: %w", err)
+		}
 	}
 
 	// 7. Execute each DDL statement.
@@ -180,12 +199,17 @@ func (r *MigrationRunner) Run() error {
 	}
 
 	// 8. Update meta inside the same transaction.
-	if _, err := tx.Exec(
+	versionRes, err := tx.Exec(
 		"UPDATE meta SET value = ? WHERE key = 'schema_version'",
 		fmt.Sprintf("%d", r.file.SchemaVersion),
-	); err != nil {
+	)
+	if err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("updating meta schema_version: %w", err)
+	}
+	if n, _ := versionRes.RowsAffected(); n == 0 {
+		_ = tx.Rollback()
+		return fmt.Errorf("updating meta schema_version: row missing — database may be corrupt")
 	}
 	if _, err := tx.Exec(
 		"UPDATE meta SET value = ? WHERE key = 'build_time'",

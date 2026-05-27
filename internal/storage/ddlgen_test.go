@@ -395,8 +395,11 @@ func TestGenAddProperty_EntityRef(t *testing.T) {
 	if len(stmts) != 1 {
 		t.Fatalf("got %d statements, want 1", len(stmts))
 	}
-	assertContainsDDL(t, stmts[0].SQL, "ALTER TABLE comp_rel ADD COLUMN parent INTEGER NOT NULL DEFAULT NULL")
+	// entity-ref columns must be nullable on ALTER TABLE ADD COLUMN (NOT NULL
+	// DEFAULT NULL is rejected by SQLite when the table already has rows).
+	assertContainsDDL(t, stmts[0].SQL, "ALTER TABLE comp_rel ADD COLUMN parent INTEGER DEFAULT NULL")
 	assertContainsDDL(t, stmts[0].SQL, "REFERENCES entities(id)")
+	assertNotContainsDDL(t, stmts[0].SQL, "NOT NULL")
 }
 
 func TestGenAddProperty_UnknownPropertySkips(t *testing.T) {
@@ -754,6 +757,55 @@ func TestGenerate_StructuralChangeDropBeforeCreate(t *testing.T) {
 		t.Errorf("stmts[0].SQL = %q, want DROP TABLE IF EXISTS comp_data", stmts[0].SQL)
 	}
 	assertContainsDDL(t, stmts[1].SQL, "CREATE TABLE")
+}
+
+func TestGenerate_StructuralChangeTwoComponents(t *testing.T) {
+	// Two components simultaneously undergo structural incompatibility.
+	// Both CREATEs appear before their paired DROPs; reorder must handle both.
+	file := &schema.DatabaseSchema{
+		Components: map[string]schema.Component{
+			"Alpha": {
+				Type: schema.ComponentTypeObject,
+				Properties: map[string]schema.Property{
+					"v": {Type: schema.PropertyTypeString},
+				},
+			},
+			"Beta": {
+				Type: schema.ComponentTypeObject,
+				Properties: map[string]schema.Property{
+					"v": {Type: schema.PropertyTypeString},
+				},
+			},
+		},
+	}
+	g := NewGenerator(file, nil, Config{StrictDrop: true})
+
+	changes := []schema.Change{
+		{Kind: schema.ChangeAddedComponent, Component: "alpha"},
+		{Kind: schema.ChangeAddedComponent, Component: "beta"},
+		{Kind: schema.ChangeRemovedComponent, Component: "alpha"},
+		{Kind: schema.ChangeRemovedComponent, Component: "beta"},
+	}
+
+	stmts := g.Generate(changes)
+	if len(stmts) != 4 {
+		t.Fatalf("got %d statements, want 4", len(stmts))
+	}
+	// Each DROP must immediately precede its paired CREATE.
+	// Acceptable orders: [DROP_alpha, CREATE_alpha, DROP_beta, CREATE_beta]
+	// or                  [DROP_beta, CREATE_beta, DROP_alpha, CREATE_alpha].
+	for i := 0; i+1 < len(stmts); i += 2 {
+		if stmts[i].Kind != "drop_table" {
+			t.Errorf("stmts[%d].Kind = %q, want drop_table", i, stmts[i].Kind)
+		}
+		if stmts[i+1].Kind != "create_table" {
+			t.Errorf("stmts[%d].Kind = %q, want create_table", i+1, stmts[i+1].Kind)
+		}
+		if stmts[i].Component != stmts[i+1].Component {
+			t.Errorf("stmts[%d] DROP component %q != stmts[%d] CREATE component %q",
+				i, stmts[i].Component, i+1, stmts[i+1].Component)
+		}
+	}
 }
 
 func TestGenerate_StructuralChangeAlreadyOrdered(t *testing.T) {
@@ -1167,8 +1219,8 @@ func TestDefaultValueForProperty_ObjectArray(t *testing.T) {
 		t.Errorf("object default = %q, want '{}''", d)
 	}
 	d = defaultValueForProperty(schema.Property{Type: schema.PropertyTypeArray})
-	if d != "'{}'" {
-		t.Errorf("array default = %q, want '{}''", d)
+	if d != "'[]'" {
+		t.Errorf("array default = %q, want '[]'", d)
 	}
 }
 

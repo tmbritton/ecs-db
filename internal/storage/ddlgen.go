@@ -150,13 +150,18 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 
 	sqlType := schema.PropertySQLType(prop)
 	dflt := defaultValueForProperty(prop)
-	// Build the ALTER TABLE ADD COLUMN statement.
+	// entity-ref columns must be nullable when added to an existing table:
+	// SQLite rejects NOT NULL DEFAULT NULL on ALTER TABLE ADD COLUMN when rows exist.
+	notNullClause := " NOT NULL"
+	if prop.Type == schema.PropertyTypeEntityRef {
+		notNullClause = ""
+	}
 	extraClause := ""
 	if prop.Type == schema.PropertyTypeEntityRef {
 		extraClause = " REFERENCES entities(id)"
 	}
-	sql := fmt.Sprintf("ALTER TABLE comp_%s ADD COLUMN %s %s NOT NULL DEFAULT %s%s",
-		c.Component, c.Property, sqlType, dflt, extraClause)
+	sql := fmt.Sprintf("ALTER TABLE comp_%s ADD COLUMN %s %s%s DEFAULT %s%s",
+		c.Component, c.Property, sqlType, notNullClause, dflt, extraClause)
 
 	return []Statement{{
 		SQL:         sql,
@@ -359,8 +364,10 @@ func defaultValueForProperty(p schema.Property) string {
 		return "0"
 	case schema.PropertyTypeEntityRef:
 		return "NULL"
-	case schema.PropertyTypeObject, schema.PropertyTypeArray:
+	case schema.PropertyTypeObject:
 		return "'{}'"
+	case schema.PropertyTypeArray:
+		return "'[]'"
 	default:
 		return "NULL"
 	}
@@ -370,32 +377,48 @@ func defaultValueForProperty(p schema.Property) string {
 // DROP TABLE comes before CREATE TABLE. This handles the case where
 // schema.Diff() emits a structural incompatibility (object↔scalar) as
 // remove+add but phase ordering puts add before remove.
+//
+// The algorithm handles multiple simultaneous structural incompatibilities
+// correctly by collecting which DROPs need to move, then doing a single
+// output pass rather than mutating positions incrementally.
 func reorderStructuralChanges(stmts []Statement) []Statement {
-	// Collect DROP positions by component.
+	// Map component name → DROP statement index.
 	dropIdx := map[string]int{}
+	// Map component name → CREATE statement index.
+	createIdx := map[string]int{}
 	for i, s := range stmts {
-		if s.Kind == "drop_table" {
+		switch s.Kind {
+		case "drop_table":
 			dropIdx[s.Component] = i
+		case "create_table":
+			createIdx[s.Component] = i
 		}
 	}
 
-	// Find CREATEs that have a matching DROP but appear before it.
-	reordered := make([]Statement, len(stmts))
-	copy(reordered, stmts)
+	// Identify DROPs that must be hoisted before their paired CREATE.
+	// These are DROPs whose original position is after the paired CREATE.
+	hoistedDrops := map[int]bool{}
+	for comp, ci := range createIdx {
+		di, hasDrop := dropIdx[comp]
+		if hasDrop && di > ci {
+			hoistedDrops[di] = true
+		}
+	}
 
+	// Single output pass: skip hoisted DROPs at their original position;
+	// emit each hoisted DROP immediately before its paired CREATE.
+	reordered := make([]Statement, 0, len(stmts))
 	for i, s := range stmts {
-		if s.Kind != "create_table" {
-			continue
+		if hoistedDrops[i] {
+			continue // already emitted before its CREATE
 		}
-		di, ok := dropIdx[s.Component]
-		if !ok || di < i {
-			continue // no DROP, or DROP already before CREATE
+		if s.Kind == "create_table" {
+			di, hasDrop := dropIdx[s.Component]
+			if hasDrop && di > i {
+				reordered = append(reordered, stmts[di]) // DROP first
+			}
 		}
-		// Move DROP to position i, shift everything between i and di up.
-		reordered[i] = stmts[di] // DROP goes first
-		for j := i; j < di; j++ {
-			reordered[j+1] = stmts[j]
-		}
+		reordered = append(reordered, s)
 	}
 	return reordered
 }

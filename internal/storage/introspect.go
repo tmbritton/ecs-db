@@ -78,7 +78,10 @@ func ReadSchemaVersion(db *sql.DB) (int, error) {
 // IntrospectComponentTable returns the column definitions for a single
 // component table via PRAGMA table_info.
 func IntrospectComponentTable(db *sql.DB, tableName string) ([]DomainColumn, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	// Double-quote the identifier to handle names with special characters and
+	// prevent SQL injection through attacker-controlled table names.
+	quotedName := `"` + strings.ReplaceAll(tableName, `"`, `""`) + `"`
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", quotedName))
 	if err != nil {
 		return nil, fmt.Errorf("PRAGMA table_info(%s): %w", tableName, err)
 	}
@@ -150,7 +153,7 @@ func InferComponentType(cols []DomainColumn) string {
 	case 1:
 		col := dataCols[0]
 		switch {
-		case col.Name == "value" && col.SQLType == "TEXT" && strings.Contains(col.DefaultVal(), "["):
+		case col.Name == "value" && col.SQLType == "TEXT" && strings.HasPrefix(col.DefaultVal(), "'["):
 			return "array"
 		case col.Name == "value" && col.SQLType == "TEXT":
 			return "string"
