@@ -364,3 +364,27 @@ func equalStringSliceSets(a, b []string) bool {
 	}
 	return true
 }
+
+// ComponentByName looks up a Component from a DatabaseSchema by its
+// lowercase name. Returns the component, the canonical (original-case)
+// name, and whether it was found.
+func ComponentByName(db *DatabaseSchema, name string) (Component, string) {
+	lower := strings.ToLower(name)
+	for k, c := range db.Components {
+		if strings.ToLower(k) == lower {
+			return c, k
+		}
+	}
+	return Component{}, ""
+}
+
+// PropertyByName looks up a Property by lowercase name from a map.
+func PropertyByName(props map[string]Property, name string) (Property, bool) {
+	lower := strings.ToLower(name)
+	for k, p := range props {
+		if strings.ToLower(k) == lower {
+			return p, true
+		}
+	}
+	return Property{}, false
+}

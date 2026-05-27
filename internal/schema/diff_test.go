@@ -1090,3 +1090,92 @@ func TestDiff_ChangedEntityType_SameLength_DifferentValues(t *testing.T) {
 		t.Fatalf("expected ChangedEntityType for Player, got: %+v", changes)
 	}
 }
+
+// ── Lookup helpers ──────────────────────────────────────────────────
+
+func TestComponentByName_Found(t *testing.T) {
+	db := &DatabaseSchema{
+		Components: map[string]Component{
+			"Position": {Type: ComponentTypeObject},
+		},
+	}
+	comp, name := ComponentByName(db, "position")
+	if name != "Position" {
+		t.Errorf("name = %q, want %q", name, "Position")
+	}
+	if comp.Type != ComponentTypeObject {
+		t.Errorf("comp.Type = %q, want %q", comp.Type, ComponentTypeObject)
+	}
+}
+
+func TestComponentByName_CaseInsensitive(t *testing.T) {
+	db := &DatabaseSchema{
+		Components: map[string]Component{
+			"Health": {Type: ComponentTypeInteger},
+		},
+	}
+	comp, name := ComponentByName(db, "HEALTH")
+	if name != "Health" {
+		t.Errorf("name = %q, want %q", name, "Health")
+	}
+	if comp.Type != ComponentTypeInteger {
+		t.Errorf("comp.Type = %q, want %q", comp.Type, ComponentTypeInteger)
+	}
+}
+
+func TestComponentByName_NotFound(t *testing.T) {
+	db := &DatabaseSchema{
+		Components: map[string]Component{},
+	}
+	comp, name := ComponentByName(db, "missing")
+	if name != "" {
+		t.Errorf("name = %q, want empty", name)
+	}
+	if comp.Type != "" {
+		t.Errorf("comp.Type = %q, want empty", comp.Type)
+	}
+}
+
+func TestPropertyByName_Found(t *testing.T) {
+	props := map[string]Property{
+		"x": {Type: PropertyTypeNumber},
+	}
+	p, ok := PropertyByName(props, "x")
+	if !ok {
+		t.Fatal("PropertyByName returned false")
+	}
+	if p.Type != PropertyTypeNumber {
+		t.Errorf("p.Type = %q, want %q", p.Type, PropertyTypeNumber)
+	}
+}
+
+func TestPropertyByName_CaseInsensitive(t *testing.T) {
+	props := map[string]Property{
+		"imageId": {Type: PropertyTypeString},
+	}
+	p, ok := PropertyByName(props, "IMAGEID")
+	if !ok {
+		t.Fatal("PropertyByName returned false")
+	}
+	if p.Type != PropertyTypeString {
+		t.Errorf("p.Type = %q, want %q", p.Type, PropertyTypeString)
+	}
+}
+
+func TestPropertyByName_NotFound(t *testing.T) {
+	props := map[string]Property{
+		"x": {Type: PropertyTypeNumber},
+	}
+	_, ok := PropertyByName(props, "y")
+	if ok {
+		t.Error("PropertyByName returned true for missing property")
+	}
+}
+
+func TestPropertyByName_EmptyMap(t *testing.T) {
+	props := map[string]Property{}
+	_, ok := PropertyByName(props, "x")
+	if ok {
+		t.Error("PropertyByName returned true on empty map")
+	}
+}
