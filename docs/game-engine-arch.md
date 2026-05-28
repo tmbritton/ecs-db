@@ -95,16 +95,6 @@ The schema is intended to evolve during development. Adding new components or en
         "frame": { "type": "integer" }
       }
     },
-    "Behavior": {
-      "type": "object",
-      "properties": {
-        "machineId": { "type": "string" },
-        "currentState": { "type": "string" },
-        "stateEnteredAt": { "type": "integer" },
-        "context": { "type": "object" },
-        "timers": { "type": "object" }
-      }
-    },
     "Inventory": {
       "type": "array",
       "items": { "type": "entity-ref" }
@@ -116,13 +106,14 @@ The schema is intended to evolve during development. Adding new components or en
   "entityTypes": {
     "Player": {
       "requiredComponents": ["Position", "Health", "Sprite", "Inventory"],
-      "optionalComponents": ["Velocity", "Behavior"],
+      "optionalComponents": ["Velocity"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
     "Goblin": {
-      "requiredComponents": ["Position", "Health", "Sprite", "Behavior"],
+      "requiredComponents": ["Position", "Health", "Sprite"],
       "optionalComponents": ["Velocity", "Wielder"],
+      "behavior": "wandering_goblin",
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
@@ -142,7 +133,7 @@ The schema is intended to evolve during development. Adding new components or en
 }
 ```
 
-A `Weapon` exists in the world (has `Position`) when it's on the ground, or has a `Wielder` (no `Position`) when it's held. A `Goblin` always has `Behavior` because goblins act on their own; a `Player` optionally has `Behavior` (for autopilot or AI-controlled modes) but usually doesn't. The schema captures these design intentions and lets the interpreter enforce them.
+A `Weapon` exists in the world (has `Position`) when it's on the ground, or has a `Wielder` (no `Position`) when it's held. A `Goblin` declares `"behavior": "wandering_goblin"` — the interpreter activates that machine automatically when a Goblin entity is created. `"Behavior"` is a reserved name; schema validation rejects any user-defined component with that name.
 
 ## The contract
 
@@ -165,8 +156,9 @@ The SQLite schema is the IPC contract. Changes are versioned. Every process chec
 |`meta`|init/migrate|all|Schema version, build info|
 |`world`|interpreter|all|Current tick, world_version watermark|
 |`entities`|interpreter|renderer, debugger|Entity registry with entity type|
-|`comp_*`|interpreter|renderer, debugger|Component data (one table per component)|
-|`event_queue`|interpreter|(drained by interpreter)|Internal game events|
+|`comp_*`|interpreter|renderer, debugger|Component data (one table per component, generated from schema.json)|
+|`behavior_components`|interpreter|renderer, debugger|Active machine state per entity; interpreter-managed, not in schema.json|
+|`event_queue`|interpreter|(drained by interpreter)|Internal game events and scheduled `after` timers|
 |`input_events`|renderer|interpreter (drains)|Raw input from user|
 |`transitions`|interpreter|debugger, renderer (effects)|Audit trail of every state transition|
 
@@ -208,15 +200,18 @@ CREATE TABLE comp_sprite (
     image_id TEXT NOT NULL,
     frame INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE comp_behavior (
-    entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
-    machine_id TEXT NOT NULL,           -- which behavior JSON
-    current_state TEXT NOT NULL,
-    state_entered_at INTEGER NOT NULL,
-    context TEXT NOT NULL DEFAULT '{}',
-    timers TEXT NOT NULL DEFAULT '{}'
-);
 -- ... one table per component declared in schema.json
+
+-- behavior_components is interpreter-managed, NOT generated from schema.json.
+-- Composite PK supports multiple concurrent machines per entity.
+-- "Behavior" is a reserved name; user components with that name are rejected.
+CREATE TABLE behavior_components (
+    entity_id      INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    machine_id     TEXT NOT NULL,
+    current_states TEXT NOT NULL,        -- JSON array of active state IDs
+    updated_at     INTEGER NOT NULL,     -- tick
+    PRIMARY KEY (entity_id, machine_id)
+);
 
 CREATE TABLE event_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -236,27 +231,57 @@ CREATE TABLE input_events (
 
 -- The debugging goldmine. Every state transition is recorded with why.
 -- Also the source of presentation effects (see Effects).
+-- from_states/to_states are JSON arrays to support hierarchical and parallel states.
 CREATE TABLE transitions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tick INTEGER NOT NULL,
-    wall_ms INTEGER NOT NULL,
-    entity_id INTEGER NOT NULL,
-    machine_id TEXT NOT NULL,
-    from_state TEXT NOT NULL,
-    to_state TEXT NOT NULL,
-    event TEXT NOT NULL,
-    guard_result TEXT,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    tick        INTEGER NOT NULL,
+    wall_ms     INTEGER NOT NULL,
+    entity_id   INTEGER NOT NULL,
+    machine_id  TEXT NOT NULL,
+    from_states TEXT NOT NULL,          -- JSON array of active state IDs
+    to_states   TEXT NOT NULL,          -- JSON array of active state IDs
+    event       TEXT NOT NULL,
+    cond_result INTEGER,                -- 1/0/NULL
     actions_run TEXT                    -- JSON array of action names
 );
 ```
 
 ## Agents: behavior as data
 
-Game behavior is defined per-entity by JSON state machines, called **agents**. An agent definition conforms to a subset of the XState spec: states, transitions, guards, actions, context, entry/exit actions, and delayed (`after`) transitions. Hierarchical and parallel states are future work.
+Game behavior is defined per-entity by JSON state machines, called **agents**. Agent definitions conform to the XState v4 spec (excluding `invoke`): states, transitions, conditions (`cond`), actions, context, entry/exit actions, delayed (`after`) transitions, hierarchical states, parallel states, final states, and history states.
 
-Agent definitions live in `mods/behaviors/*.json`. A filesystem watcher reloads them in-process when files change. Entities with a `Behavior` component pick up the new definition on their next state evaluation. If a hot reload removes a state an entity is currently in, the entity resets to the machine's initial state.
+Agent definitions live in `mods/behaviors/*.json`. Agent files are valid XState v4 input and can be authored in Stately Studio — export from Stately and drop the file in; no manual editing required.
 
-Agent files are valid input to Stately Studio, the visual XState editor. Modders can design agents graphically and export the JSON the engine consumes — a non-trivial UX win from adopting an existing format rather than inventing one.
+### Machines and entities
+
+A machine maps 1:1 to an entity and defines all behavior for that entity. An entity runs one **primary machine** (declared on its entity type) plus zero or more **behavior-component machines** activated when certain components are attached.
+
+`Behavior` is a reserved engine-managed concept. The interpreter maintains its own `behavior_components` table (not generated from `schema.json`) with a composite primary key of `(entity_id, machine_id)`, allowing multiple machines to run concurrently per entity.
+
+### Component-machine binding
+
+A component in `schema.json` can declare an optional `"behavior"` field naming a machine file:
+
+```json
+{
+  "name": "Burning",
+  "behavior": "burning",
+  "fields": [
+    { "name": "burn_damage",     "type": "integer", "nullable": false },
+    { "name": "ticks_remaining", "type": "integer", "nullable": false }
+  ]
+}
+```
+
+When `attachComponent("Burning")` fires for an entity, the interpreter activates `mods/behaviors/burning.json` for that entity. When the burning machine reaches a final state, the interpreter detaches the component. Lifecycle is bidirectional. Components without `"behavior"` are pure data.
+
+### Context as component manifest
+
+The machine JSON's `context` block is the complete manifest of components this machine manages. Each context key is matched by field name to a component field in `schema.json`. At machine startup the interpreter attaches any declared component the entity doesn't yet have, seeded with the initial value from the `context` block. Components already present are left unchanged.
+
+This means machine state is fully observable: there is no private context blob. Everything lives in component tables, readable by the renderer and debugger.
+
+Cross-entity writes (e.g. `dealDamage` writing to a target entity's `Health`) use an explicit entity ID and are not declared in the context manifest.
 
 ### Example agent
 
@@ -277,7 +302,7 @@ Agent files are valid input to Stately Studio, the visual XState editor. Modders
         "TICK": [
           {
             "target": "wandering",
-            "guard": { "type": "timerExpired", "params": { "key": "patience" } }
+            "cond": { "type": "timerExpired", "params": { "key": "patience" } }
           }
         ],
         "PLAYER_NEARBY": "pursuing"
@@ -287,7 +312,7 @@ Agent files are valid input to Stately Studio, the visual XState editor. Modders
       "entry": [{ "type": "pickRandomTarget", "params": { "radius": 100 } }],
       "on": {
         "TICK": [
-          { "target": "idle", "guard": "atTarget" },
+          { "target": "idle", "cond": "atTarget" },
           { "actions": [{ "type": "moveTowardTarget" }] }
         ],
         "PLAYER_NEARBY": "pursuing"
@@ -299,7 +324,7 @@ Agent files are valid input to Stately Studio, the visual XState editor. Modders
         "TICK": [
           {
             "target": "attacking",
-            "guard": { "type": "inRange", "params": { "distance": 16 } }
+            "cond": { "type": "inRange", "params": { "distance": 16 } }
           },
           { "actions": [{ "type": "moveTowardTarget", "params": { "speed_mult": 1.5 } }] }
         ],
@@ -319,13 +344,15 @@ Agent files are valid input to Stately Studio, the visual XState editor. Modders
 
 ### Actions and guards
 
-Agents reference actions and guards by name (`"moveTowardTarget"`, `"timerExpired"`). The interpreter holds two registries — action functions and guard predicates — populated at startup with built-in implementations. Actions and guards are implementation code, not data; they live in the interpreter source, not in `schema.json` or any other JSON file.
+Agents reference actions and guards by name (`"moveTowardTarget"`, `"timerExpired"`). The interpreter holds two registries — action handlers and guard predicates — populated at startup with built-in implementations. Actions and guards are implementation code, not data; they live in the interpreter source.
 
-Each action runs in a context that includes: the current entity, the current tick, a database connection inside the active transaction, the entity's machine context, the action's static params from the JSON, and the triggering event's payload. Guards have the same context but cannot mutate.
+Each action receives: the current entity ID, the current tick, a domain-level world-write interface (`WorldWriter`) backed by the active transaction, the action's static params from the JSON, and the triggering event payload. Guards receive the same minus the write interface (they get a read-only `WorldReader`). Neither receives a raw machine context object — all state is read and written through the world interfaces, which map to component tables.
 
-Built-in actions handle the common cases (move toward target, deal damage, spawn entity, attach component, set timer, log). Built-in guards handle the common predicates (timer expired, at target, in range, has component, has health above threshold). Game-specific actions and guards are registered by the host application before the interpreter starts.
+Built-in actions handle the common cases (move toward target, deal damage, spawn entity, attach/detach component, set timer, log). Built-in guards handle the common predicates (timer expired, at target, in range, has component, health above threshold). Game-specific actions and guards are registered by the host application before the interpreter starts.
 
-Critically: **agents cannot execute arbitrary code.** They can only invoke actions and guards that have been registered. This makes them sandboxed by construction — no need for WASM isolation. A modder cannot write an agent that exfiltrates data, opens a socket, or crashes the engine.
+The registry also stores metadata for each action and guard (description, parameter schema). This introspection surface supports tooling — a future visual editor can enumerate available actions and guards directly from the running interpreter.
+
+Critically: **agents cannot execute arbitrary code.** They can only invoke actions and guards that have been registered. This makes them sandboxed by construction — no WASM isolation needed. A modder cannot write an agent that exfiltrates data, opens a socket, or crashes the engine.
 
 ## Component responsibilities
 
@@ -335,18 +362,19 @@ The interpreter is the sole writer of world state and the only process that know
 
 On startup the interpreter:
 
-1. Loads `schema.json` and validates it.
-2. Opens or creates `world.sqlite`. If creating, generates the SQL DDL from the schema and runs it. If opening, compares the database's recorded `schema_version` against `schema.json`; refuses to run on mismatch.
-3. Loads all `mods/behaviors/*.json` files and validates them against the registered action and guard names. Reports errors loudly.
-4. Starts the filesystem watcher for hot reload.
-5. Enters its tick loop.
+1. Loads `schema.json` and validates it. Rejects any component named "Behavior" (reserved).
+2. Opens or creates `world.sqlite`. Generates SQL DDL from the schema if creating; checks `schema_version` on open. Creates interpreter-managed tables (`behavior_components`, `transitions`, `event_queue`) with `CREATE TABLE IF NOT EXISTS`.
+3. Loads all `mods/behaviors/*.json` and validates them against registered actions, guards, and `schema.json` component fields. Reports errors loudly; skips invalid files.
+4. For each entity type that declares `"behavior"`, ensures active entities of that type have a corresponding `behavior_components` row.
+5. Starts the filesystem watcher for hot reload.
+6. Enters its tick loop.
 
 Its tick loop:
 
 1. Drain unconsumed rows from `input_events`. For each, dispatch to a game-specific handler that translates raw input into game events.
-2. Drain due events from `event_queue`.
-3. For each entity with a `Behavior` component, deliver a `TICK` event.
-4. For each delivered event, look up the entity's current state in its agent definition, find matching transitions, evaluate guards, run exit actions of the old state, transition actions, and entry actions of the new state. Persist the new state and updated context. Append a row to `transitions`.
+2. Drain due events from `event_queue` (where `target_tick` ≤ current tick).
+3. For each entity with an active machine in `behavior_components`, deliver a `TICK` event to each of its machines.
+4. For each delivered event, run the SCXML microstep: evaluate guards, compute exit and entry sets, run exit → transition → entry actions, write new active states to `behavior_components`, append a row to `transitions`. All mutations in one SQLite transaction per event.
 5. Advance the world tick. Bump `world_version`.
 
 All mutations inside a single event delivery run in one SQLite transaction. Either the entity moves cleanly to its new state or nothing changes. Crash mid-tick and the database is consistent on restart.
@@ -470,8 +498,6 @@ The architecture is splittable but should not be split prematurely. Premature sp
 **Browser deployment via WASM.** The interpreter is pure logic with one well-defined dependency (SQLite). It compiles unchanged to `wasm32` and runs in a browser tab alongside a SQLite-WASM build and a JavaScript renderer such as Phaser. Same `schema.json`, same agents, same contract — the renderer process is simply replaced by a JavaScript runtime. Free web playable demos of any game built on the engine.
 
 **WASM for custom actions.** When a modder wants a behavior the built-in action library can't express, load a WASM module that exports named functions and register them as additional actions. Agents reference them by name (`"type": "mymod::cast_spell"`) and it just works. A narrow, well-justified use of WASM: extending the action library, not replacing the behavior language.
-
-**Hierarchical states.** XState supports compound states (`"combat.lunging"`). Add when game AI gets complex enough to need them; not before.
 
 **Replay and time-travel debug.** The `transitions` table plus the `event_queue` history is a complete log of what happened. A debugger mode that re-runs a recorded session against a checkpoint database would be a powerful debugging tool — a free feature given the architecture already records everything.
 

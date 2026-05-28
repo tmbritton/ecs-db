@@ -101,36 +101,52 @@ Refined into stories: See [`docs/stories/epic-2/`](docs/stories/epic-2/).
 
 ## Epic 3: Agents (behavior-as-data) runtime
 
-XState-subset state machine interpreter. Agents are sandboxed by construction: they can only invoke registered actions and guards, so a modder's JSON can never execute arbitrary code. This epic delivers the runtime; hot reload and the tick loop come in epics 4 and 5.
+Full XState v4 state machine interpreter (minus `invoke`). Uses `cond` terminology; Stately Studio v4 exports work with zero manual editing. Agents are sandboxed by construction: they can only invoke registered actions and guards, so a modder's JSON can never execute arbitrary code. This epic delivers the runtime; hot reload and the tick loop come in epics 4 and 5.
 
-- [ ] **Parse XState-subset agent JSON** — Lock the supported feature set.
-  - Supported: `states`, `initial`, `on`, `entry`, `exit`, `after`, `guard`, `target`, `actions`, `context`
-  - Out of scope (for now): hierarchical states, parallel states, invoked services
-  - Stately Studio export must round-trip through the parser
+Design spec: [`docs/superpowers/specs/2026-05-27-epic3-state-machine-design.md`](superpowers/specs/2026-05-27-epic3-state-machine-design.md)
 
-- [ ] **Action registry** — Code lives in the interpreter, never in JSON.
-  - Built-ins: `moveTowardTarget`, `dealDamage`, `spawnEntity`, `attachComponent`, `setTimer`, `log`, `pickRandomTarget`, `setPursueTarget`
-  - Host app registers game-specific actions before interpreter starts
-  - Action call context: entity id, current tick, active DB transaction, machine context, static params, triggering event payload
+- [ ] **Interpreter-managed tables and schema extensions** — Foundation for everything else.
+  - Create `behavior_components` (composite PK `entity_id, machine_id`), `transitions`, `event_queue` at interpreter startup (`CREATE TABLE IF NOT EXISTS`), not via schema.json DDL path
+  - Add `"behavior"` field support to component and entity type definitions in schema.json
+  - Schema validation: reject any user component named `"Behavior"`; if `"behavior"` declared on a component, verify the machine file exists at startup
+  - Entity types with `"behavior"` activate their primary machine on entity creation
 
-- [ ] **Guard registry** — Same shape, read-only.
-  - Built-ins: `timerExpired`, `atTarget`, `inRange`, `hasComponent`, `healthAbove`
-  - Same context as actions but mutations are rejected
-  - Guards return bool; the result is recorded in `transitions.guard_result`
+- [ ] **Machine parser and StateNode tree** — Parse full XState v4 JSON into an in-memory tree.
+  - Support all node types: atomic, compound (hierarchical), parallel, final, history
+  - Reject `invoke` at any level with a clear error
+  - Tolerate unknown top-level fields (Stately adds `description`, `meta`, `tags`)
 
-- [ ] **Agent validation at load time** — Fail loud, fail early.
-  - Every `actions[].type` and `guard.type` name exists in the registries
-  - Every transition `target` resolves to a defined state in the same machine
+- [ ] **Registry and context types** — The action/guard dispatch layer.
+  - `ActionHandler` / `GuardHandler` interfaces (not bare func types — enables future Lua handlers)
+  - Registry stores metadata (description, param schemas) for future visual editor introspection
+  - `WorldWriter` / `WorldReader` domain-level interfaces — actions/guards never call raw SQL
+  - `ActionContext` and `GuardContext` carry entity ID, tick, world interface, static params, event
+
+- [ ] **Load-time validator** — Fail loud, fail early.
+  - Every `cond.type` and action `type` exists in the registries
+  - Every transition `target` resolves to a defined state
+  - Every `context` key matches exactly one component field in schema.json (ambiguous = error)
   - Malformed file: log warning, skip, retain previous in-memory version — game keeps running
 
-- [ ] **State machine execution** — One transactional unit per event.
-  - On event delivery: evaluate guards in declared order, run exit/transition/entry actions, persist new state and context
+- [ ] **SCXML microstep interpreter** — One transactional unit per event.
+  - Full SCXML microstep algorithm: exit set, entry set, parallel regions, history restoration
+  - Machine startup: attach missing context-declared components, seed initial values
+  - Component-machine lifecycle: `attachComponent` activates behavior machine if declared; machine reaching final state triggers component detach
   - Wrap one event delivery in one SQLite transaction — crash mid-event leaves DB consistent
-  - Append a row to `transitions` with `from_state`, `to_state`, `event`, `guard_result`, `actions_run`
+  - Write `behavior_components` and `transitions` rows per event
 
 - [ ] **Delayed transitions (`after`)** — Behaviors need timers.
-  - Schedule into `event_queue` with target tick
-  - Cancel pending timers on state exit so a stale `after` doesn't fire after the state has changed
+  - Schedule into `event_queue` with target tick; cancel on state exit
+  - `after` durations converted to tick counts at load time
+
+- [ ] **Built-in actions and guards** — Standard library via WorldWriter/WorldReader (never raw SQL).
+  - Actions: `moveTowardTarget`, `dealDamage`, `spawnEntity`, `attachComponent`, `detachComponent`, `setTimer`, `log`, `pickRandomTarget`, `setPursueTarget`
+  - Guards: `timerExpired`, `atTarget`, `inRange`, `hasComponent`, `healthAbove`
+
+- [ ] **Integration tests and Stately round-trip** — Prove it works end-to-end.
+  - `wandering_goblin` fixture: load → deliver events → assert `behavior_components` and `transitions`
+  - Component lifecycle: attach behavior-bearing component → machine activates; final state → detach
+  - Real Stately v4 export in `testdata/`, parsed and validated in CI
 
 ---
 
@@ -322,8 +338,8 @@ Future-directions material from the architecture doc. Listed here so they aren't
 
 - WASM browser deployment (interpreter to wasm32, SQLite-WASM, JS renderer like Phaser)
 - WASM custom actions to extend the action library for mods
-- Hierarchical and parallel states in agents
+- Lua actions and guards (registry already designed for this; add `LuaActionHandler`)
+- Visual state machine editor (web UI; introspects registry and schema.json for action/guard pickers)
 - Replay and time-travel debugging from the `transitions` + `event_queue` log
-- Visual behavior editor with live state overlay on top of Stately's renderer
 - Schema visual editor with automatic migration generation
 - Networked multiplayer via replicated `event_queue` and deterministic lockstep
