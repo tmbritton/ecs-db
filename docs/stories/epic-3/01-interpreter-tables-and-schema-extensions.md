@@ -1,7 +1,7 @@
 # Story 1: Interpreter-Managed Tables and Schema Extensions
 
 **Epic:** 3 — Agents (behavior-as-data) runtime  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** Critical blocker — everything else in Epic 3 depends on the database tables and schema shape
 
 ## Context

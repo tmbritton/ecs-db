@@ -717,6 +717,301 @@ func TestEntityType_EmptyValidationLevelDefaultsToStrict(t *testing.T) {
 	}
 }
 
+// ── Behavior field on Component ───────────────────────────────
+
+func TestLoadSchema_ComponentWithBehavior(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Burning": {
+				"type": "object",
+				"behavior": "burning",
+				"properties": {
+					"ticks_remaining": {"type": "integer"}
+				}
+			}
+		},
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Burning"]}
+		}
+	}`
+	s, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("LoadSchema() error = %v", err)
+	}
+	comp := s.Components["Burning"]
+	if comp.Behavior != "burning" {
+		t.Errorf("Behavior = %q, want %q", comp.Behavior, "burning")
+	}
+}
+
+func TestLoadSchema_ComponentWithoutBehavior(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {
+				"type": "object",
+				"properties": {"x": {"type": "number"}}
+			}
+		},
+		"entityTypes": {
+			"Thing": {"requiredComponents": ["Position"]}
+		}
+	}`
+	s, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("LoadSchema() error = %v", err)
+	}
+	if got := s.Components["Position"].Behavior; got != "" {
+		t.Errorf("Behavior = %q, want empty string", got)
+	}
+}
+
+// ── Behavior field on EntityType ──────────────────────────────
+
+func TestLoadSchema_EntityTypeWithBehavior(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {
+				"type": "object",
+				"properties": {"x": {"type": "number"}}
+			}
+		},
+		"entityTypes": {
+			"Goblin": {
+				"requiredComponents": ["Position"],
+				"behavior": "wandering_goblin"
+			}
+		}
+	}`
+	s, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("LoadSchema() error = %v", err)
+	}
+	if got := s.EntityTypes["Goblin"].Behavior; got != "wandering_goblin" {
+		t.Errorf("Behavior = %q, want %q", got, "wandering_goblin")
+	}
+}
+
+func TestLoadSchema_EntityTypeWithoutBehavior(t *testing.T) {
+	json := `{
+		"schemaVersion": 1,
+		"components": {
+			"Position": {
+				"type": "object",
+				"properties": {"x": {"type": "number"}}
+			}
+		},
+		"entityTypes": {
+			"Player": {"requiredComponents": ["Position"]}
+		}
+	}`
+	s, err := LoadSchema([]byte(json))
+	if err != nil {
+		t.Fatalf("LoadSchema() error = %v", err)
+	}
+	if got := s.EntityTypes["Player"].Behavior; got != "" {
+		t.Errorf("Behavior = %q, want empty string", got)
+	}
+}
+
+// ── Reserved "Behavior" component name ───────────────────────
+
+func TestValidateSchema_BehaviorComponentNameRejected(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"Behavior": {Type: ComponentTypeString},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"Behavior"}, ValidationLevel: ValidationStrict},
+		},
+	}
+	err := ValidateSchema(s)
+	if err == nil {
+		t.Fatal("expected error for reserved component name 'Behavior', got nil")
+	}
+	if !strings.Contains(err.Error(), "'Behavior' is a reserved component name") {
+		t.Errorf("error should mention reserved name: %v", err)
+	}
+}
+
+func TestValidateSchema_BehaviorLowercaseRejected(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"behavior": {Type: ComponentTypeString},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"behavior"}, ValidationLevel: ValidationStrict},
+		},
+	}
+	err := ValidateSchema(s)
+	if err == nil {
+		t.Fatal("expected error for lowercase 'behavior' component name, got nil")
+	}
+	if !strings.Contains(err.Error(), "'Behavior' is a reserved component name") {
+		t.Errorf("error should mention reserved name: %v", err)
+	}
+}
+
+func TestValidateSchema_BehaviorMixedCaseRejected(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"BEHAVIOR": {Type: ComponentTypeString},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"BEHAVIOR"}, ValidationLevel: ValidationStrict},
+		},
+	}
+	err := ValidateSchema(s)
+	if err == nil {
+		t.Fatal("expected error for 'BEHAVIOR' component name, got nil")
+	}
+	if !strings.Contains(err.Error(), "'Behavior' is a reserved component name") {
+		t.Errorf("error should mention reserved name: %v", err)
+	}
+}
+
+func TestValidateSchema_NonBehaviorComponentAccepted(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"BehaviorData": {Type: ComponentTypeString},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"BehaviorData"}, ValidationLevel: ValidationStrict},
+		},
+	}
+	if err := ValidateSchema(s); err != nil {
+		t.Errorf("ValidateSchema rejected 'BehaviorData' (should only reject exact 'Behavior'): %v", err)
+	}
+}
+
+// ── ValidateBehaviorRefs ──────────────────────────────────────
+
+func TestValidateBehaviorRefs_AllFilesExist(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFile(filepath.Join(dir, "burning.json"), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(dir, "wandering_goblin.json"), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	s := DatabaseSchema{
+		Components: map[string]Component{
+			"Burning": {Type: ComponentTypeString, Behavior: "burning"},
+		},
+		EntityTypes: map[string]EntityType{
+			"Goblin": {Behavior: "wandering_goblin"},
+		},
+	}
+	if err := ValidateBehaviorRefs(s, dir); err != nil {
+		t.Errorf("ValidateBehaviorRefs() unexpected error: %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_MissingComponentBehavior(t *testing.T) {
+	dir := t.TempDir()
+	s := DatabaseSchema{
+		Components: map[string]Component{
+			"Burning": {Type: ComponentTypeString, Behavior: "burning"},
+		},
+		EntityTypes: map[string]EntityType{},
+	}
+	err := ValidateBehaviorRefs(s, dir)
+	if err == nil {
+		t.Fatal("expected error for missing burning.json, got nil")
+	}
+	if !strings.Contains(err.Error(), "burning.json") {
+		t.Errorf("error should mention filename: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found': %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_MissingEntityTypeBehavior(t *testing.T) {
+	dir := t.TempDir()
+	s := DatabaseSchema{
+		Components: map[string]Component{},
+		EntityTypes: map[string]EntityType{
+			"Goblin": {Behavior: "wandering_goblin"},
+		},
+	}
+	err := ValidateBehaviorRefs(s, dir)
+	if err == nil {
+		t.Fatal("expected error for missing wandering_goblin.json, got nil")
+	}
+	if !strings.Contains(err.Error(), "wandering_goblin.json") {
+		t.Errorf("error should mention filename: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found': %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_NoBehaviorFields(t *testing.T) {
+	dir := t.TempDir()
+	s := DatabaseSchema{
+		Components: map[string]Component{
+			"Position": {Type: ComponentTypeString},
+		},
+		EntityTypes: map[string]EntityType{
+			"Player": {},
+		},
+	}
+	if err := ValidateBehaviorRefs(s, dir); err != nil {
+		t.Errorf("ValidateBehaviorRefs() unexpected error with no behavior fields: %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_EmptyBehaviorsDir(t *testing.T) {
+	s := DatabaseSchema{
+		Components:  map[string]Component{},
+		EntityTypes: map[string]EntityType{},
+	}
+	// Non-existent dir is fine when schema has no behavior refs.
+	if err := ValidateBehaviorRefs(s, "/nonexistent/path/mods/behaviors"); err != nil {
+		t.Errorf("ValidateBehaviorRefs() unexpected error with no behavior refs: %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_EmptyDirWithRefs_ReturnsError(t *testing.T) {
+	s := DatabaseSchema{
+		Components: map[string]Component{
+			"Burning": {Type: ComponentTypeString, Behavior: "burning"},
+		},
+		EntityTypes: map[string]EntityType{},
+	}
+	err := ValidateBehaviorRefs(s, "")
+	if err == nil {
+		t.Fatal("expected error when behaviorsDir is empty but behavior refs exist, got nil")
+	}
+	if !strings.Contains(err.Error(), "behaviorsDir is empty") {
+		t.Errorf("error should mention empty behaviorsDir: %v", err)
+	}
+}
+
+func TestValidateBehaviorRefs_PathTraversal_ReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	s := DatabaseSchema{
+		Components: map[string]Component{
+			"Evil": {Type: ComponentTypeString, Behavior: "../../../etc/passwd"},
+		},
+		EntityTypes: map[string]EntityType{},
+	}
+	err := ValidateBehaviorRefs(s, dir)
+	if err == nil {
+		t.Fatal("expected error for path traversal in behavior name, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not contain path separators") {
+		t.Errorf("error should mention path separators: %v", err)
+	}
+}
+
 // ── Helper functions ─────────────────────────────────────────
 
 func writeFile(path, content string) error {

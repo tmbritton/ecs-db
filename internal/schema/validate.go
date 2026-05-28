@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -208,6 +209,11 @@ func validateStructure(s DatabaseSchema) error {
 	if len(s.Components) == 0 {
 		return fmt.Errorf("components: at least one component must be declared")
 	}
+	for name := range s.Components {
+		if strings.EqualFold(name, "Behavior") {
+			return fmt.Errorf("'Behavior' is a reserved component name")
+		}
+	}
 	if len(s.EntityTypes) == 0 {
 		return fmt.Errorf("entityTypes: at least one entity type must be declared")
 	}
@@ -256,6 +262,45 @@ func validateSQLCompatibility(s DatabaseSchema) error {
 		if !knownSQLComponentTypes[comp.Type] {
 			return fmt.Errorf("component %q uses type %q which has no SQL mapping",
 				name, comp.Type)
+		}
+	}
+	return nil
+}
+
+// ValidateBehaviorRefs checks that every "behavior" field declared on a
+// component or entity type names a machine file that exists in behaviorsDir.
+// behaviorsDir is the path to the mods/behaviors/ directory.
+//
+// This is Step 2 of interpreter startup validation — call it after ValidateSchema.
+// If behaviorsDir is empty or does not exist and no behavior refs are declared,
+// no error is returned.
+func ValidateBehaviorRefs(s DatabaseSchema, behaviorsDir string) error {
+	check := func(kind, ownerName, behavior string) error {
+		if behavior == "" {
+			return nil
+		}
+		// Reject names that contain path separators — filepath.Base strips
+		// any directory component, so a mismatch means traversal was attempted.
+		if filepath.Base(behavior) != behavior {
+			return fmt.Errorf("%s %q: behavior name %q must not contain path separators", kind, ownerName, behavior)
+		}
+		if behaviorsDir == "" {
+			return fmt.Errorf("%s %q declares behavior %q but behaviorsDir is empty", kind, ownerName, behavior)
+		}
+		path := filepath.Join(behaviorsDir, behavior+".json")
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("%s %q: behavior machine file %q not found", kind, ownerName, path)
+		}
+		return nil
+	}
+	for name, comp := range s.Components {
+		if err := check("component", name, comp.Behavior); err != nil {
+			return err
+		}
+	}
+	for name, et := range s.EntityTypes {
+		if err := check("entity type", name, et.Behavior); err != nil {
+			return err
 		}
 	}
 	return nil

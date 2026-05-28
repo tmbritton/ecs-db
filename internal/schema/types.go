@@ -20,6 +20,7 @@ type DatabaseSchema struct {
 // that type must have, may have, and whether additional components are
 // permitted after creation.
 type EntityType struct {
+	Behavior             string          `json:"behavior,omitempty"`
 	RequiredComponents   []string        `json:"requiredComponents"`
 	OptionalComponents   []string        `json:"optionalComponents"`
 	AllowExtraComponents bool            `json:"allowExtraComponents"`

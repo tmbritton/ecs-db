@@ -30,6 +30,7 @@ var supportedComponentTypes = map[string]bool{
 // schema.json. It is unmarshalled polymorphically based on the "type" field.
 type Component struct {
 	Type       string              `json:"type"`
+	Behavior   string              `json:"behavior,omitempty"`
 	Properties map[string]Property `json:"properties,omitempty"`
 	Items      *Property           `json:"items,omitempty"`
 }
