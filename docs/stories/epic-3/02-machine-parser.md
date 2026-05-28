@@ -1,7 +1,7 @@
 # Story 2: Machine Parser and StateNode Tree
 
 **Epic:** 3 — Agents (behavior-as-data) runtime  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** Critical blocker — the interpreter and validator both operate on the parsed tree
 
 **Depends on:** Story 1 (schema extensions needed to resolve context keys against schema.json)
