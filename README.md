@@ -52,39 +52,7 @@ Three key ideas:
 
 From this single file, the interpreter produces the full SQLite schema: fixed system tables (`meta`, `world`, `entities`, `event_queue`, `input_events`, `transitions`) plus generated `comp_*` tables for each declared component. Every process checks `meta.schema_version` on startup to ensure compatibility.
 
-## Project Status
-
-🚧 **Epic 1: Schema-driven data foundation** — see detailed plan in [`docs/plan.md`](docs/plan.md), refined stories in [`docs/stories/epic-1/`](docs/stories/epic-1/).
-
-### Epic 1 Stories
-
-| # | Story | Status |
-|---|-------|--------|
-| 1 | Define schema.json document shape | ⚠️ Partially done |
-| 2 | schema.json loader & validator | ⚠️ Partially done |
-| 3 | SQL DDL generation | ⚠️ Partially done |
-| 4 | Entity creation with type validation | ❌ Not started |
-| 5 | Component attach/detach with type validation | ❌ Not started |
-| 6 | world.sqlite bootstrap & version management | ⚠️ Partially done |
-
-What's in the codebase is not yet aligned with the architecture doc's format — the current `schema.json` and loader use a different shape than the one specified in the architecture. Story 1 must be resolved first.
-
 ## Full Roadmap
-
-Epic 1 work must complete before anything else runs. After that the milestones are intentionally sequenced to produce working software early and split processes incrementally:
-
-| Epic | Scope |
-|------|-------|
-| 1 | Schema-driven data foundation — `schema.json`, DDL generation, validation, bootstrap |
-| 2 | Schema versioning & migrations — versioned migrations, mod compatibility, backup before migrate |
-| 3 | Agents runtime — XState-subset interpreter, action/guard registries, state machine execution |
-| 4 | Behavior hot reload — filesystem watcher, debounce, hot-swap agent definitions |
-| 5 | Tick loop & monolithic prototype — end-to-end working prototype in a single process |
-| 6 | Extract debugger process — HTTP server, read-only SQLite, transition audit UI |
-| 7 | Extract renderer process — multi-language renderer, `world_version` polling, input capture |
-| 8 | Effects system — renderer interprets `transitions` audit log for visual/audio effects |
-| 9 | Second renderer — terminal ASCII or minimap, proving multi-renderer thesis |
-| 10 | Process supervision & packaging — dev supervisor, shipped launcher, cross-process logging |
 
 See [`docs/plan.md`](docs/plan.md) for details and [`docs/game-engine-arch.md`](docs/game-engine-arch.md) for the full architecture document.
 
