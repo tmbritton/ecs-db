@@ -14,8 +14,6 @@ type WorldWriter interface {
 	SpawnEntity(entityType string) (int64, error)
 	AttachComponent(entityID int64, compName string, values map[string]any) error
 	DetachComponent(entityID int64, compName string) error
-	// SetComponentValue writes a single field on an existing component row.
-	// Actions that need to update multiple fields call it once per field.
 	SetComponentValue(entityID int64, compName, field string, value any) error
 }
 
@@ -36,8 +34,7 @@ type GuardHandler interface {
 	Evaluate(GuardContext) bool
 }
 
-// ActionContext is passed to ActionHandler.Run. World is write-capable because
-// actions are side-effecting by definition.
+// ActionContext is passed to ActionHandler.Run.
 type ActionContext struct {
 	EntityID int64
 	Tick     int64
@@ -46,8 +43,7 @@ type ActionContext struct {
 	Event    Event
 }
 
-// GuardContext is passed to GuardHandler.Evaluate. World is read-only because
-// guards must not produce side effects.
+// GuardContext is passed to GuardHandler.Evaluate.
 type GuardContext struct {
 	EntityID int64
 	Tick     int64
