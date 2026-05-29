@@ -105,30 +105,30 @@ Full XState v4 state machine interpreter (minus `invoke`). Uses `cond` terminolo
 
 Design spec: [`docs/superpowers/specs/2026-05-27-epic3-state-machine-design.md`](superpowers/specs/2026-05-27-epic3-state-machine-design.md)
 
-- [ ] **Interpreter-managed tables and schema extensions** — Foundation for everything else.
+- [x] **Interpreter-managed tables and schema extensions** — Foundation for everything else.
   - Create `behavior_components` (composite PK `entity_id, machine_id`), `transitions`, `event_queue` at interpreter startup (`CREATE TABLE IF NOT EXISTS`), not via schema.json DDL path
   - Add `"behavior"` field support to component and entity type definitions in schema.json
   - Schema validation: reject any user component named `"Behavior"`; if `"behavior"` declared on a component, verify the machine file exists at startup
   - Entity types with `"behavior"` activate their primary machine on entity creation
 
-- [ ] **Machine parser and StateNode tree** — Parse full XState v4 JSON into an in-memory tree.
+- [x] **Machine parser and StateNode tree** — Parse full XState v4 JSON into an in-memory tree.
   - Support all node types: atomic, compound (hierarchical), parallel, final, history
   - Reject `invoke` at any level with a clear error
   - Tolerate unknown top-level fields (Stately adds `description`, `meta`, `tags`)
 
-- [ ] **Registry and context types** — The action/guard dispatch layer.
+- [x] **Registry and context types** — The action/guard dispatch layer.
   - `ActionHandler` / `GuardHandler` interfaces (not bare func types — enables future Lua handlers)
   - Registry stores metadata (description, param schemas) for future visual editor introspection
   - `WorldWriter` / `WorldReader` domain-level interfaces — actions/guards never call raw SQL
   - `ActionContext` and `GuardContext` carry entity ID, tick, world interface, static params, event
 
-- [ ] **Load-time validator** — Fail loud, fail early.
+- [x] **Load-time validator** — Fail loud, fail early.
   - Every `cond.type` and action `type` exists in the registries
   - Every transition `target` resolves to a defined state
   - Every `context` key matches exactly one component field in schema.json (ambiguous = error)
   - Malformed file: log warning, skip, retain previous in-memory version — game keeps running
 
-- [ ] **SCXML microstep interpreter** — One transactional unit per event.
+- [x] **SCXML microstep interpreter** — One transactional unit per event.
   - Full SCXML microstep algorithm: exit set, entry set, parallel regions, history restoration
   - Machine startup: attach missing context-declared components, seed initial values
   - Component-machine lifecycle: `attachComponent` activates behavior machine if declared; machine reaching final state triggers component detach
