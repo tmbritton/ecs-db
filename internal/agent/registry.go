@@ -47,7 +47,6 @@ type Registry struct {
 	guards  map[string]guardEntry
 }
 
-// NewRegistry returns an empty Registry ready for registration.
 func NewRegistry() *Registry {
 	return &Registry{
 		actions: make(map[string]actionEntry),
@@ -55,8 +54,7 @@ func NewRegistry() *Registry {
 	}
 }
 
-// RegisterAction adds an action to the registry.
-// Panics if an action with the same name is already registered.
+// RegisterAction panics if an action with the same name is already registered.
 func (r *Registry) RegisterAction(meta ActionMeta, handler ActionHandler) {
 	if _, exists := r.actions[meta.Name]; exists {
 		panic(fmt.Sprintf("agent registry: action %q already registered", meta.Name))
@@ -64,8 +62,7 @@ func (r *Registry) RegisterAction(meta ActionMeta, handler ActionHandler) {
 	r.actions[meta.Name] = actionEntry{meta: meta, handler: handler}
 }
 
-// RegisterGuard adds a guard to the registry.
-// Panics if a guard with the same name is already registered.
+// RegisterGuard panics if a guard with the same name is already registered.
 func (r *Registry) RegisterGuard(meta GuardMeta, handler GuardHandler) {
 	if _, exists := r.guards[meta.Name]; exists {
 		panic(fmt.Sprintf("agent registry: guard %q already registered", meta.Name))
@@ -73,7 +70,6 @@ func (r *Registry) RegisterGuard(meta GuardMeta, handler GuardHandler) {
 	r.guards[meta.Name] = guardEntry{meta: meta, handler: handler}
 }
 
-// GetAction returns the handler for the named action, or (nil, false) if absent.
 func (r *Registry) GetAction(name string) (ActionHandler, bool) {
 	e, ok := r.actions[name]
 	if !ok {
@@ -82,7 +78,6 @@ func (r *Registry) GetAction(name string) (ActionHandler, bool) {
 	return e.handler, true
 }
 
-// GetGuard returns the handler for the named guard, or (nil, false) if absent.
 func (r *Registry) GetGuard(name string) (GuardHandler, bool) {
 	e, ok := r.guards[name]
 	if !ok {
