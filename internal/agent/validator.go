@@ -62,13 +62,15 @@ func ValidateMachine(def *MachineDefinition, registry *Registry, s schema.Databa
 		errs = append(errs, validateStateNode(def.ID, node, registry, knownStates)...)
 	}
 
-	manifest := make(map[string]string, len(def.Context))
-	for key := range def.Context {
-		if comps := fieldIndex[key]; len(comps) == 1 {
-			manifest[key] = comps[0]
+	if len(errs) == 0 {
+		manifest := make(map[string]string, len(def.Context))
+		for key := range def.Context {
+			if comps := fieldIndex[key]; len(comps) == 1 {
+				manifest[key] = comps[0]
+			}
 		}
+		def.ContextManifest = manifest
 	}
-	def.ContextManifest = manifest
 
 	return errs
 }

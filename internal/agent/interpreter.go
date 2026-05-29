@@ -14,14 +14,9 @@ type selectedTransition struct {
 	CondResult *bool // nil = unconditional
 }
 
-// SendEvent runs the SCXML microstep algorithm for one event delivery.
-// Returns nil immediately if no eligible transition exists.
-// All state mutations (world and machine) happen through the provided interfaces;
-// no SQL is written inside this function.
 func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world WorldWriter, reader WorldReader, mw MachineWriter) error {
 	fromStates := nodeIDs(agent.Configuration)
 
-	// 1. Select eligible transitions.
 	transitions, err := selectEligibleTransitions(agent, event, registry, reader, tick)
 	if err != nil {
 		return fmt.Errorf("SendEvent: %w", err)
@@ -30,13 +25,12 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		return nil
 	}
 
-	// 2. Compute exit set (unordered).
 	exitSet := computeExitSet(agent.Configuration, transitions, agent.Definition)
 
-	// 3. Record history before any state exits.
+	// Record history before exits fire so the snapshot reflects pre-exit state.
 	recordHistoryNodes(agent, exitSet)
 
-	// 4. Exit actions + cancel after events (leaf→root).
+	// Exit leaf→root: cancel after-timers before running exit actions.
 	actionsRun := []string{}
 	for _, state := range sortByDepthDesc(exitSet) {
 		if err := mw.CancelAfterEvents(agent.EntityID, agent.Definition.ID, []string{state.ID}); err != nil {
@@ -51,10 +45,13 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		actionsRun = append(actionsRun, ran...)
 	}
 
-	// 5. Transition actions + capture cond result.
+	// Transition actions run between exit and entry. For parallel machines with
+	// multiple transitions, condResult records the first guarded result encountered.
 	var condResult *bool
 	for _, sel := range transitions {
-		condResult = sel.CondResult
+		if condResult == nil && sel.CondResult != nil {
+			condResult = sel.CondResult
+		}
 		ran, err := runActionList(sel.Transition.Actions, ActionContext{
 			EntityID: agent.EntityID, Tick: tick, World: world, Event: event,
 		}, registry)
@@ -64,10 +61,9 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		actionsRun = append(actionsRun, ran...)
 	}
 
-	// 6. Compute entry set.
 	entrySet := computeEntrySet(agent.Definition, transitions, agent.History)
 
-	// 7. Entry actions + schedule after events (root→leaf).
+	// Entry root→leaf: run entry actions then schedule after-timers.
 	for _, state := range sortByDepthAsc(entrySet) {
 		if state.Type == StateTypeHistory {
 			continue
@@ -87,7 +83,6 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		}
 	}
 
-	// 8. Final-state lifecycle.
 	for _, state := range entrySet {
 		if state.Type == StateTypeFinal && agent.ActivatedByComponent != "" {
 			if err := world.DetachComponent(agent.EntityID, agent.ActivatedByComponent); err != nil {
@@ -97,10 +92,8 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		}
 	}
 
-	// 9. Update configuration.
 	agent.Configuration = atomicStates(entrySet)
 
-	// 10. Persist.
 	toStates := nodeIDs(agent.Configuration)
 	if err := mw.SetMachineState(agent.EntityID, agent.Definition.ID, toStates, tick); err != nil {
 		return fmt.Errorf("SendEvent: SetMachineState: %w", err)
@@ -129,10 +122,6 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 			continue
 		}
 		for cur := atom; cur != nil; cur = cur.Parent {
-			if cur.Type == StateTypeParallel {
-				break // each parallel region selects independently
-			}
-			// Check event transitions then after-event transitions.
 			var candidates []Transition
 			if ts, ok := cur.On[event.Type]; ok {
 				candidates = ts
@@ -147,8 +136,13 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 				}
 				if eligible {
 					selected = append(selected, selectedTransition{Source: cur, Transition: t, CondResult: condResult})
-					for mark := atom; mark != cur.Parent; mark = mark.Parent {
-						handled[mark] = true
+					// Mark all active atoms that are descendants of cur as handled.
+					// This prevents sibling parallel-region atoms from firing the
+					// same transition a second time when cur is a parallel ancestor.
+					for _, otherAtom := range agent.Configuration {
+						if isDescendant(otherAtom, cur) {
+							handled[otherAtom] = true
+						}
 					}
 					found = true
 					break
@@ -180,9 +174,6 @@ func evaluateTransition(t Transition, entityID, tick int64, event Event, registr
 
 // ── Exit set ──────────────────────────────────────────────────────────────────
 
-// computeExitSet computes all states that must be exited for the selected transitions.
-// For each transition, active states that are descendants of the LCA(source, target)
-// are added to the exit set, along with all their ancestors up to (not including) the LCA.
 func computeExitSet(config []*StateNode, transitions []selectedTransition, def *MachineDefinition) []*StateNode {
 	exit := make(map[*StateNode]bool)
 	for _, sel := range transitions {
@@ -217,30 +208,24 @@ func isDescendantOrRoot(s, ancestor *StateNode) bool {
 	return isDescendant(s, ancestor)
 }
 
-// lcaNode returns the Lowest Common Ancestor of nodes a and b for the purpose
-// of computing the exit set. For external transitions (including self-transitions),
-// this is the deepest ancestor that is a proper ancestor of both source and target.
-// When source == target (self-transition), returns source.Parent.
+// lcaNode returns the Lowest Common Ancestor of a and b.
+// Self-transitions (a == b) return a.Parent so the state exits and re-enters.
 func lcaNode(a, b *StateNode) *StateNode {
 	if a == nil || b == nil {
 		return nil
 	}
-	// Self-transition: exit and re-enter the state itself; LCA is its parent.
 	if a == b {
 		return a.Parent
 	}
-	// Build ancestor set for a (proper ancestors only, not a itself).
 	aAnc := make(map[*StateNode]bool)
 	for cur := a.Parent; cur != nil; cur = cur.Parent {
 		aAnc[cur] = true
 	}
-	// Walk up from b (proper ancestors) to find deepest common ancestor.
 	for cur := b.Parent; cur != nil; cur = cur.Parent {
 		if aAnc[cur] {
 			return cur
 		}
 	}
-	// a and b are siblings at top level (their common ancestor is nil/root).
 	return nil
 }
 
@@ -301,12 +286,9 @@ func resolveTarget(target string, def *MachineDefinition) *StateNode {
 }
 
 // findState resolves a target string to a StateNode.
-// Targets may be:
-//   - a simple name ("b") matched against map keys
-//   - a dot-separated path ("c.h") traversed segment by segment
-//   - a full node ID ("m.b") matched against node.ID
+// Dot-separated paths ("c.h") are traversed segment-by-segment before falling
+// back to full-tree name/ID search, matching XState v4 target notation.
 func findState(states map[string]*StateNode, target string) *StateNode {
-	// Try dot-separated path traversal first (e.g., "c.h" → states["c"].Children["h"]).
 	if idx := strings.Index(target, "."); idx >= 0 {
 		head, tail := target[:idx], target[idx+1:]
 		if parent, ok := states[head]; ok {
@@ -315,13 +297,11 @@ func findState(states map[string]*StateNode, target string) *StateNode {
 			}
 		}
 	}
-	// Try direct name or ID match at this level.
 	for name, node := range states {
 		if name == target || node.ID == target {
 			return node
 		}
 	}
-	// Recurse into children for full-tree search.
 	for _, node := range states {
 		if found := findState(node.Children, target); found != nil {
 			return found

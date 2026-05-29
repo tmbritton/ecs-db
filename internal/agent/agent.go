@@ -129,8 +129,7 @@ func nodeIDs(nodes []*StateNode) []string {
 }
 
 // nodeDepth counts how many ancestors a node has (root = 0).
-// Used by interpreter.go (Story 5 Task 2+).
-func nodeDepth(n *StateNode) int { //nolint:unused
+func nodeDepth(n *StateNode) int {
 	depth := 0
 	for p := n.Parent; p != nil; p = p.Parent {
 		depth++
@@ -139,8 +138,7 @@ func nodeDepth(n *StateNode) int { //nolint:unused
 }
 
 // isDescendant reports whether s is equal to ancestor or a descendant of it.
-// Used by interpreter.go (Story 5 Task 2+).
-func isDescendant(s, ancestor *StateNode) bool { //nolint:unused
+func isDescendant(s, ancestor *StateNode) bool {
 	for cur := s; cur != nil; cur = cur.Parent {
 		if cur == ancestor {
 			return true
