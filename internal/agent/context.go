@@ -51,3 +51,27 @@ type GuardContext struct {
 	Params   map[string]any // static params from the machine JSON cond spec
 	Event    Event
 }
+
+// TransitionRecord is the data written to the transitions table after each microstep.
+type TransitionRecord struct {
+	Tick       int64
+	WallMs     int64
+	EntityID   int64
+	MachineID  string
+	FromStates []string
+	ToStates   []string
+	Event      string
+	CondResult *bool // nil = unconditional; true = guard passed; false = guard failed
+	ActionsRun []string
+}
+
+// MachineWriter is the write-side interface for interpreter-owned tables
+// (behavior_components, transitions, event_queue).
+// The concrete implementation (backed by *sql.Tx) lives in internal/storage.
+// Agent code never imports storage directly.
+type MachineWriter interface {
+	SetMachineState(entityID int64, machineID string, states []string, tick int64) error
+	AppendTransition(rec TransitionRecord) error
+	ScheduleAfterEvent(entityID int64, machineID, eventType string, targetTick int64) error
+	CancelAfterEvents(entityID int64, machineID string, stateIDs []string) error
+}

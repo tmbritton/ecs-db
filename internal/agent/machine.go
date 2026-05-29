@@ -52,10 +52,11 @@ type StateNode struct {
 
 // MachineDefinition is the parsed in-memory representation of an XState v4 machine.
 type MachineDefinition struct {
-	ID      string
-	Initial string
-	Context map[string]any
-	States  map[string]*StateNode // top-level states
+	ID              string
+	Initial         string
+	Context         map[string]any
+	States          map[string]*StateNode // top-level states
+	ContextManifest map[string]string     // field → component name; populated by ValidateMachine
 }
 
 // ── Raw JSON structs ──────────────────────────────────────────────────────────
