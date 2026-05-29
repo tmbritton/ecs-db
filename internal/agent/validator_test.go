@@ -207,6 +207,22 @@ func TestValidateMachine_KnownTargetByID_NoError(t *testing.T) {
 	}
 }
 
+func TestValidateMachine_TargetNestedChildByBareName_NoError(t *testing.T) {
+	// Verifies collectStateIDs recurses into children so a nested state's bare
+	// name is a valid transition target from outside the compound state.
+	def := mustParse(t, `{"id":"m","initial":"outer","states":{
+		"outer":{
+			"type":"compound","initial":"inner",
+			"states":{"inner":{}}
+		},
+		"other":{"on":{"E":"inner"}}
+	}}`)
+	errs := ValidateMachine(def, testRegistry(), testSchema())
+	if len(errs) != 0 {
+		t.Errorf("expected 0 errors, got %d: %v", len(errs), errs)
+	}
+}
+
 // -- History node target --
 
 func TestValidateMachine_HistoryDefaultTarget_Unknown(t *testing.T) {
@@ -295,8 +311,17 @@ func TestValidateMachine_MultipleErrors(t *testing.T) {
 		}
 	}}`)
 	errs := ValidateMachine(def, testRegistry(), testSchema())
-	if len(errs) < 3 {
-		t.Fatalf("expected at least 3 errors, got %d: %v", len(errs), errs)
+	if len(errs) != 3 {
+		t.Fatalf("expected exactly 3 errors, got %d: %v", len(errs), errs)
+	}
+	fields := map[string]bool{}
+	for _, e := range errs {
+		fields[e.Field] = true
+	}
+	for _, want := range []string{"ghost", "badAction", "nowhere"} {
+		if !fields[want] {
+			t.Errorf("expected error for field %q, not found in %v", want, errs)
+		}
 	}
 }
 
