@@ -1,56 +1,56 @@
-# ECS Database
+# ECS-in-SQLite: A Game Engine with Declarative Behaviors
 
-A game engine where **SQLite is the IPC contract**. Game state lives in a database. Behaviors are JSON state machines. The interpreter, renderer, and debugger are separate processes that never call each other — they read and write tables. The schema is the API. The result is crash-isolated, language-polyglot, moddable with a text editor.
+SQLite is the game state. Behaviors are JSON state machines. The result is a game engine where **the save file is the running database**, state is inspectable with any SQL client, and behaviors are authored with a text editor.
 
-## Thesis
+## Architecture
 
 ```
-┌─────────────────────────┐  writes input_events
-│  Renderer               │ ─────────────────────┐
-│  any language           │                      │
-│  any graphics lib       │ ◄── reads world ─────┤
-└─────────────────────────┘                      │
-                                                 ▼
-┌─────────────────────────┐                ┌──────────────────┐
-│  Interpreter            │ ◄── reads ─────│  world.sqlite    │
-│  state machine engine   │     input      │                  │
-│  writes world state     │ ──── writes ──►│  (one writer     │
-└─────────────────────────┘     world      │   per table)     │
-        │                                  └──────────────────┘
-        │ reads schema + behaviors
-        ▼
-┌─────────────────────────┐
-│  mods/                  │
-│   ├── schema.json       │
-│   └── behaviors/*.json  │
-└─────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Game Process (Go binary)                               │
+│                                                         │
+│  Interpreter (state machines, sole world writer)        │
+│      │ Update() — runs tick, writes world state         │
+│      ▼                                                  │
+│  Renderer (Ebitengine, reads entities + components;     │
+│            writes input_events synchronously)           │
+└──────────────────────────────┬──────────────────────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │   world.sqlite      │
+                    └─────────────────────┘
+                               ▲
+                               │ read-only
+                    ┌─────────────────────┐
+                    │   Debugger          │
+                    │   separate process  │
+                    │   HTTP + web UI     │
+                    └─────────────────────┘
 ```
 
-Three key ideas:
+Two key ideas:
 
-1. **The database is the contract.** Every process opens the same `world.sqlite` file. No HTTP, no gRPC, no message bus. Cross-process communication is a SQL query.
-2. **The schema is the mod surface.** A single `schema.json` file declares components and entity types. The interpreter derives the SQLite DDL from it. Modders change the schema and behavior JSON files — no compilation needed.
-3. **Behaviors are JSON state machines.** Agents conform to a subset of XState: states, transitions, guards, actions, timers. Modders design in Stately Studio and drop the exported JSON into `mods/behaviors/`. The interpreter validates and runs them.
+1. **SQLite is the game state.** A single `world.sqlite` file holds everything: entities, component data, behavior machine state, and a complete audit log of every transition ever made. The save file is just the database. Inspecting state is a SQL query. Time-travel debugging is replaying the `transitions` log.
+2. **Behaviors are JSON state machines.** Agents conform to a subset of XState v4: states, transitions, guards, actions, timers, history. Modders design in Stately Studio and drop the exported JSON into `mods/behaviors/`. The interpreter validates and runs them. A modder cannot write an agent that executes arbitrary code — only registered actions and guards can fire.
 
 ## Why This Architecture?
 
 | Benefit | How |
 |---------|-----|
-| **Crash isolation** | Renderer segfault doesn't lose game state. Interpreter panic doesn't blank the screen. Restart one process, the others don't notice. |
-| **Language polyglot for real** | Renderer in the language with the best graphics bindings. Interpreter in the language best for state machines. Debugger in the language with the easiest HTTP story. |
-| **Modding with a text editor** | Edit `schema.json` and a behavior JSON, save, the interpreter picks up the change. No toolchain, no compilation. |
-| **WAL mode means parallel readers** | Renderer reads while interpreter writes. Neither blocks the other on most frames. |
-| **Multiple renderers simultaneously** | A 2D view AND a terminal ASCII view AND a minimap — three processes, one world file. |
-| **Remote debugging by default** | The debugger is HTTP and SQLite is read-only-shareable. Tunnel over SSH or Tailscale, inspect from your phone. |
+| **Trivial save games** | The database file is the save. Copy it. Open it later. Done. |
+| **Time-travel debugging** | `transitions` is an append-only audit log. Replay any session from a checkpoint. |
+| **Fully inspectable state** | `sqlite3 world.sqlite` shows everything. No binary format to decode. |
+| **Clockwork determinism** | Every guard result and action stored. Same inputs always produce same outputs. |
+| **Moddable with a text editor** | Edit `schema.json` and behavior JSON, save, the interpreter picks up the change. No toolchain, no compilation. |
+| **Remote debugging by default** | The debugger is HTTP. Tunnel over SSH or Tailscale, inspect from a phone. |
 
 ## The Data Model
 
 `schema.json` is the declarative source of truth. It declares:
 
-- **Components** — strongly typed data that can be attached to entities. The interpreter generates one `comp_*` table per component with columns derived from the component's property types.
-- **Entity types** — named templates that declare which components are required, which are optional, whether extras are allowed, and whether violations are hard errors or warnings.
+- **Components** — strongly typed data attached to entities. The interpreter generates one `comp_*` table per component with typed columns.
+- **Entity types** — named templates declaring which components are required, optional, or disallowed.
 
-From this single file, the interpreter produces the full SQLite schema: fixed system tables (`meta`, `world`, `entities`, `event_queue`, `input_events`, `transitions`) plus generated `comp_*` tables for each declared component. Every process checks `meta.schema_version` on startup to ensure compatibility.
+From this single file the interpreter produces the full SQLite schema: fixed system tables (`meta`, `world`, `entities`, `event_queue`, `input_events`, `transitions`, `behavior_components`) plus generated `comp_*` tables for each declared component.
 
 ## Full Roadmap
 
@@ -68,17 +68,14 @@ make build
 ./bin/ecs-db
 ```
 
-This loads `schema.json`, creates (or opens) the SQLite database with generated tables, and exits. The CLI is still early — command processing, entity operations, and a full tick loop come in later epics.
+This loads `schema.json`, creates (or opens) the SQLite database with generated tables, and exits. The CLI is still early — the full tick loop and Ebitengine renderer come in Epic 5.
 
 ## Why Go?
 
-This project is built in Go for several key reasons:
 - **Fast iteration**: Simple build, no external runtime, compiles to a single binary
-- **SQLite support**: Mature, battle-tested driver (`database/sql` + `go-sqlite3`)
+- **SQLite support**: Mature driver (`modernc.org/sqlite`, pure Go — no CGo)
 - **Portability**: Compiles to native Linux, macOS, Windows binaries and to WASM
-- **Performance**: More than fast enough for single-process game simulation at 20-60Hz
-
-The architecture explicitly leaves the renderer and debugger languages open — Odin + Raylib, Rust + Macroquad, or a TypeScript + Phaser web renderer are all valid.
+- **Ebitengine**: First-class Go game library, same binary as the interpreter
 
 ## Project Structure
 
@@ -86,13 +83,14 @@ The architecture explicitly leaves the renderer and debugger languages open — 
 ecs-db/
 ├── docs/
 │   ├── game-engine-arch.md    # Full architecture document
-│   └── plan.md                # Implementation roadmap (10 epics)
+│   ├── plan.md                # Implementation roadmap
 │   └── stories/               # Refined story files per epic
-│       └── epic-1/            # Epic 1 stories with acceptance criteria
 ├── cmd/cli/main.go            # CLI entry point
 ├── internal/
+│   ├── agent/                 # State machine interpreter (parser, registry, SCXML engine)
 │   ├── schema/                # Schema loading, validation, type definitions
-│   └── storage/               # SQLite operations, DDL generation
+│   ├── storage/               # SQLite operations, DDL generation, MachineWriter
+│   └── world/                 # Domain interfaces (WorldWriter, WorldReader, Tx)
 ├── schema.json                # Declarative game data model (source of truth)
 ├── Makefile
 └── README.md

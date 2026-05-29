@@ -1,8 +1,6 @@
-# Plan: Process-separated, database-as-contract game engine
+# Plan: ECS-in-SQLite game engine with declarative behaviors
 
-Implementation plan derived from the architecture doc. Build the schema system as a complete unit first, then the agents runtime, then a monolithic prototype, then split processes one at a time, then polish. Each epic will be refined into concrete tasks in a follow-up pass.
-
-Language-agnostic by intent — interpreter language (Go/Rust) and renderer language (Odin/Rust/JS/Python) are decisions deferred to the relevant epic.
+Implementation plan derived from the architecture doc. Build the schema system as a complete unit first, then the agents runtime, then a working monolithic game (interpreter + Ebitengine renderer in one binary), then the debugger as the one natural process boundary, then time-travel, effects, and polish. Each epic will be refined into concrete tasks in a follow-up pass.
 
 ---
 
@@ -166,62 +164,69 @@ Filesystem watcher so editing `mods/behaviors/*.json` updates the running game w
 
 ---
 
-## Epic 5: Interpreter tick loop & monolithic prototype
+## Epic 5: Interpreter tick loop & Ebitengine monolith
 
-End-to-end working prototype in a single process. The renderer is embedded for now — it will be extracted in Epic 7. Goal: one entity wandering on screen, and editing its agent JSON visibly changes the behavior.
+End-to-end working game in a single binary: interpreter and Ebitengine renderer together. Goal: one entity wandering on screen, editing its agent JSON visibly changes behavior.
 
-- [ ] **Tick loop skeleton** — The interpreter's heartbeat.
-  - Drain unconsumed `input_events` → dispatch to a game-specific input-to-event mapper
-  - Drain due `event_queue` rows (where tick ≤ current_tick)
-  - Deliver `TICK` to every entity with a `Behavior` component
+- [ ] **Tick loop skeleton** — The interpreter's heartbeat, driven by Ebitengine's `Update()`.
+  - Drain `input_events` written by the renderer in the same `Update()` call
+  - Dispatch raw input to a game-specific input-to-event mapper → write to `event_queue`
+  - Drain due `event_queue` rows (where `target_tick` ≤ `current_tick`)
+  - Deliver `TICK` to every entity with an active `behavior_components` row
   - Advance `world.current_tick`, bump `world.world_version`
 
-- [ ] **Input-to-game-event mapping layer** — Keep this in the interpreter, by design.
-  - Game-specific module reads raw `input_events`, writes meaningful game events to `event_queue`
-  - Mark `input_events.consumed = 1` after dispatch
-  - Renderer never interprets input — it only records
+- [ ] **Input capture layer** — Renderer writes, interpreter drains, same tick.
+  - Ebitengine input callbacks write to `input_events` (kind, payload JSON, wall_ms) before interpreter tick runs
+  - Game-specific mapper translates raw input rows into game events; marks `consumed = 1`
+  - Table doubles as an append-only audit log useful for replay
 
-- [ ] **Transitions audit table writes** — The debugging goldmine.
-  - Every successful transition: `tick`, `wall_ms`, `entity_id`, `machine_id`, `from_state`, `to_state`, `event`, `guard_result`, `actions_run`
+- [ ] **Transitions audit table writes** — Every successful transition recorded.
+  - `tick`, `wall_ms`, `entity_id`, `machine_id`, `from_states`, `to_states`, `event`, `cond_result`, `actions_run`
   - `actions_run` is a JSON array of action names — feeds Epic 8 effects
 
-- [ ] **Embedded stub renderer** — Just enough to see things move.
-  - Minimal in-process renderer; whatever's fastest to wire
-  - Reads entities + drawable components keyed off `world_version`
-  - Explicit non-goal: production-quality rendering. This gets replaced in Epic 7.
+- [ ] **Ebitengine renderer** — Draw entities from the database each frame.
+  - `Draw()` queries entities joined with drawable components after `Update()` completes
+  - Default: draw sprite at position for any entity with `Position` + `Sprite`
+  - No `world_version` polling — renderer reads directly from the shared SQLite connection after writes
+  - Placeholder visual for unrecognized entity types
 
 - [ ] **Smoke test: wandering goblin** — The prototype passes when this works end-to-end.
-  - Schema: `Position`, `Sprite`, `Behavior` declared; `Goblin` entity type
+  - Schema: `Position`, `Sprite` declared; `Goblin` entity type with `behavior: wandering_goblin`
   - One `Goblin` running the `wandering_goblin` agent from the architecture doc
   - Visibly wanders, idles, repeats
   - Edit the agent JSON, save, see behavior change without restart
 
 ---
 
-## Epic 6: Extract debugger process
+## Epic 6: Debugger process
 
-The easiest split: read-only, no write contention. Validates the database-as-contract claim with low risk before tackling the renderer split. Small HTTP server + a single HTML page.
+The one natural process boundary: read-only, different lifecycle, optional in shipped builds, remotely accessible. This is where the "SQLite as game state" benefits become most tangible. The debugger is where you answer "what happened and why?" without touching the game.
 
-- [ ] **HTTP server binary** — Whatever language has the easiest HTTP story (Go is the natural choice).
+- [ ] **HTTP server binary** — Go, using standard library `net/http` and a pure-Go SQLite driver.
   - Opens `world.sqlite` read-only with WAL
+  - Polls `world_version` on each refresh; skips full query when unchanged
   - Refuses to start on `schema_version` mismatch
 
 - [ ] **Endpoint: entities** — Roster view.
-  - All entities with their type and a summary of attached components
+  - All entities with type and a summary of attached components
 
 - [ ] **Endpoint: components** — Per-entity drill-down.
-  - Full component data for a given entity_id
+  - Full component data for a given `entity_id`
 
 - [ ] **Endpoint: transitions** — The "why did the goblin attack?" view.
-  - Most recent N, newest first, filterable by `entity_id` and `machine_id`
-  - Include `context` snapshot if cheap
+  - Most recent N, newest first, filterable by `entity_id`, `machine_id`, event type
+  - Shows `from_states`, `to_states`, `cond_result`, `actions_run`
 
 - [ ] **Endpoint: schema** — Reference data.
-  - Serve current `schema.json` contents verbatim
+  - Serve current `schema.json` verbatim
+
+- [ ] **Endpoint: ASCII view** — Terminal-style live world view.
+  - Entity positions, types, and key component values rendered as text
+  - Replaces a separate "second renderer process" — same information, one HTTP route
+  - Works with `curl` and `watch` for zero-setup monitoring
 
 - [ ] **Single-page HTML UI** — Polls the endpoints, no build step.
-  - Auto-refreshes
-  - Per-entity drill-in: state, context, recent transitions
+  - Auto-refreshes; per-entity drill-in: state, context, recent transitions
   - Filter transitions by entity / machine / event
 
 - [ ] **Remote debugging verified** — A claim only worth making if tested.
@@ -229,39 +234,36 @@ The easiest split: read-only, no write contention. Validates the database-as-con
 
 ---
 
-## Epic 7: Extract renderer process
+## Epic 7: Time-travel debugging
 
-The bigger split: input flow becomes asynchronous, the renderer gets its own language and graphics library choice, and the three-process architecture is real. After this epic, crash isolation is no longer a claim.
+Promoted from "future directions" to a headline capability. The `transitions` table is a complete, append-only audit trail of every state change the engine has ever made. This epic turns that log into an interactive debugging tool: checkpoint the database, replay sessions forward, and scrub the timeline in the debugger UI.
 
-- [ ] **Choose renderer language + graphics library** — Make and document the call.
-  - Candidates: Odin + Raylib, Rust + Macroquad, JS + Phaser (browser path), Python (terminal)
-  - Document the decision and the constraints that drove it
+- [ ] **Checkpoint infrastructure** — Periodic database snapshots the replay engine can start from.
+  - Interpreter writes checkpoint files (SQLite backup API) at configurable tick intervals
+  - Checkpoints stored alongside `world.sqlite`; retention policy configurable (keep last N)
+  - Checkpoint metadata table: `tick`, `wall_ms`, `file_path`
 
-- [ ] **Renderer binary opens `world.sqlite` as WAL reader** — One connection per process.
-  - Schema_version check on startup
+- [ ] **Replay engine** — Re-run a session from a checkpoint through the `transitions` log.
+  - Open a checkpoint as a read-only base
+  - Walk `transitions` rows in tick order, applying each to reconstruct world state at any tick
+  - Expose as a debugger-callable interface: `replay(checkpoint, target_tick) → world_snapshot`
 
-- [ ] **`world_version` polling loop** — Cheap watermark, expensive query only when needed.
-  - Each frame: read `world_version`; if unchanged, redraw last snapshot
-  - On change: query entities joined with drawable components, rebuild local snapshot
+- [ ] **Debugger timeline endpoint** — Query replay state.
+  - `GET /timeline` — List available checkpoints with tick ranges
+  - `GET /timeline/:tick` — Reconstruct and return world snapshot at given tick
+  - `GET /timeline/:tick/entities` — Entity roster at that tick
+  - `GET /timeline/:tick/transitions?entity_id=N` — Transitions around that tick
 
-- [ ] **Generic drawing from entity type + Sprite** — Renderer is dumb on purpose.
-  - Default: draw sprite at position for any entity with `Position` + `Sprite`
-  - Placeholder visual for entity types the renderer doesn't recognize specifically
-  - No game-logic awareness beyond entity type and components
+- [ ] **Debugger timeline UI** — Scrubber and step controls.
+  - Timeline scrubber showing tick range and checkpoint markers
+  - Step forward / backward through transitions for a selected entity
+  - Entity state panel updates to match selected tick
+  - Works without pausing the live game
 
-- [ ] **Input capture to `input_events`** — Record, don't interpret.
-  - Each input gets `wall_ms` timestamp, `kind`, `payload` JSON, `consumed=0`
-  - Renderer is the sole writer of `input_events`
-
-- [ ] **Dev supervisor wiring** — Run all three processes together.
-  - Procfile / overmind / foreman / systemd user units
-  - Interleaved logs with wall-clock timestamps for cross-process correlation
-  - Restarting one process leaves the others running
-
-- [ ] **Verify crash isolation** — The whole pitch hinges on this.
-  - Kill renderer → interpreter keeps simulating, debugger keeps showing state, restart catches up via `world_version`
-  - Kill interpreter → renderer keeps last frame up, debugger keeps serving last DB state
-  - Document the recovery semantics
+- [ ] **Smoke test: reproduce a bug via replay** — The capability only counts if it works.
+  - Record a session; identify a tick where an entity entered an unexpected state
+  - Replay from checkpoint to that tick; confirm entity state matches live recording
+  - Step through preceding transitions to find the cause
 
 ---
 
@@ -293,53 +295,35 @@ Visual and audio effects as the renderer's interpretation of the `transitions` a
 
 ---
 
-## Epic 9: Second renderer
+## Epic 9: Process supervision & packaging
 
-Prove the multi-renderer thesis. Also a genuinely useful debugging tool — a terminal ASCII view next to the main view tells you what the game thinks is happening regardless of sprite or shader bugs.
+Run reliably during development; ship cleanly. Two processes: the game binary and the optional debugger.
 
-- [ ] **Pick the second renderer type** — Decide what gives the most leverage.
-  - Candidates: terminal ASCII view, top-down minimap, headless screenshot-on-tick renderer for tests
-
-- [ ] **Implement against the same contract** — No new IPC.
-  - Same `world_version` polling, same component queries
-  - Same `input_events` writes if interactive
-
-- [ ] **Run both renderers simultaneously** — The actual proof.
-  - Both see consistent world state
-  - Both can write inputs without contention (within the one-writer-per-table rule)
-  - Document any caveats discovered
-
----
-
-## Epic 10: Process supervision & packaging
-
-Run reliably during development; ship cleanly. Small but unglamorous work that decides whether the architecture is pleasant to live with day to day.
-
-- [ ] **Dev supervisor config** — Already wired in Epic 7, polish here.
-  - Procfile or systemd user unit, whichever fits the dev environment
-  - Interleaved logs with consistent wall-clock timestamps
+- [ ] **Dev supervisor config** — Two processes, one command.
+  - Procfile or systemd user unit for game + debugger
+  - Interleaved logs with consistent wall-clock timestamps and per-process tags
+  - Restarting the debugger leaves the game running
 
 - [ ] **Launcher binary for shipped builds** — One executable the user double-clicks.
-  - Spawns interpreter and renderer subprocesses
-  - Tears down children cleanly on exit / crash
-  - Debugger optional and off by default in shipped builds
+  - Spawns the game binary; debugger is off by default
+  - Tears down cleanly on exit / crash
+  - Optional `--debug` flag to launch the debugger sidecar
 
-- [ ] **Startup schema-check coordination** — All three processes refuse mismatched DBs with the same clear error.
+- [ ] **Startup schema-check coordination** — Both processes refuse mismatched DBs with the same clear error.
 
-- [ ] **Logging conventions** — Cross-process correlation should be a grep, not a forensics project.
+- [ ] **Logging conventions** — Cross-process correlation should be a grep.
   - `wall_ms` on every log line and on every cross-process-relevant DB row
-  - Per-process tag in log output
+  - Per-process tag in log output (`[game]`, `[debugger]`)
 
 ---
 
 ## Deferred / not yet epics
 
-Future-directions material from the architecture doc. Listed here so they aren't forgotten, but explicitly out of scope until earlier epics are real:
+Listed here so they aren't forgotten, but explicitly out of scope until earlier epics are real:
 
+- **Extract renderer process** — The "database as contract" convention within the monolith can be promoted to an enforced process boundary if a concrete need surfaces (different graphics language, crash isolation requirements, multi-renderer). The architecture supports it; it is not currently scheduled.
 - WASM browser deployment (interpreter to wasm32, SQLite-WASM, JS renderer like Phaser)
-- WASM custom actions to extend the action library for mods
-- Lua actions and guards (registry already designed for this; add `LuaActionHandler`)
+- Lua actions and guards — extend the action library for mods without WASM; registry already designed for this (`LuaActionHandler` implements `ActionHandler`)
 - Visual state machine editor (web UI; introspects registry and schema.json for action/guard pickers)
-- Replay and time-travel debugging from the `transitions` + `event_queue` log
 - Schema visual editor with automatic migration generation
 - Networked multiplayer via replicated `event_queue` and deterministic lockstep

@@ -1,38 +1,46 @@
-# Architecture: A process-separated, database-as-contract game engine
+# Architecture: An ECS-in-SQLite game engine with declarative behaviors
 
 ## Thesis
 
-Game state lives in a SQLite database with structure defined by a declarative `schema.json` file. Game behavior is JSON state machines (XState-compatible) attached per-entity. Each component of the engine — interpreter, renderer, debugger, tooling — is a separate OS process communicating only through the database. The schema is the API. The JSON behaviors and schema are the mod surface. Everything else is replaceable.
+SQLite is the game state substrate. Game behavior is JSON state machines (XState-compatible) attached per-entity. The engine ships as a single Go binary — interpreter and Ebitengine renderer in the same process — with the debugger as an optional, separate read-only process.
 
-The result is an engine that is local-first, fully inspectable, moddable with a text editor, language-polyglot by design, crash-isolated between components, and built from boring, long-lived technology (SQLite, JSON, a graphics library, plus one process per language of choice).
+The engine follows the Dwarf Fortress tradition: simulation-first, presentation-as-a-view. Headline capabilities that fall out for free: **trivial save games** (the database file is the save), **time-travel debugging** (replay any session from the `transitions` audit log), **fully inspectable state** (SQL queries against live game data), **moddable with a text editor** (schema and behaviors are JSON), and **clockwork determinism** (every transition recorded, every guard result stored).
 
-This document is language-agnostic. Go and Rust are both reasonable implementation choices for the interpreter; renderers can be written in whatever pairs well with the chosen graphics library (Odin with Raylib, Rust with Macroquad, JavaScript with Phaser, etc.).
+The database-as-contract discipline is maintained within the monolith by convention — interpreter code writes world state, renderer code reads it — rather than enforced by process boundaries. Process separation is reserved for the debugger, where it genuinely earns its keep: read-only, different lifecycle, optional in shipped builds, and accessible remotely.
 
 ## Architecture
 
 ```
-┌─────────────────────────┐  writes input_events
-│  Renderer               │ ─────────────────────┐
-│  graphics library +     │                      │
-│  any language           │ ◄── reads world ─────┤
-└─────────────────────────┘                      │
-                                                 ▼
-┌─────────────────────────┐                ┌──────────────────┐
-│  Interpreter            │ ◄── reads ─────│  world.sqlite    │
-│  state machine engine   │     input      │                  │
-│  writes world state     │ ──── writes ──►│  (one writer     │
-└─────────────────────────┘     world      │   per table)     │
-        │                                  │                  │
-        │ reads schema + behaviors         │                  │
-        ▼                                  └──────────────────┘
-┌─────────────────────────┐                       ▲
-│  mods/                  │                       │ reads transitions
-│   ├── schema.json       │                       │ reads world
-│   └── behaviors/*.json  │                       │
-│  hot-reloaded           │              ┌──────────────────┐
-└─────────────────────────┘              │ Debugger         │
-                                         │ web UI, terminal │
-                                         └──────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Game Process (Go binary)                               │
+│                                                         │
+│  Interpreter (state machines, sole world writer)        │
+│      │ Update() writes world state                      │
+│      ▼                                                  │
+│  Renderer (Ebitengine, reads entities + components;     │
+│            writes input_events synchronously)           │
+│      │ Draw() reads from same SQLite connection         │
+│      ▼                                                  │
+│  shared SQLite handle                                   │
+└──────────────────────────────┬──────────────────────────┘
+                               ▼
+                    ┌─────────────────────┐
+                    │   world.sqlite      │
+                    └─────────────────────┘
+                               ▲
+                               │ read-only
+                    ┌─────────────────────┐
+                    │   Debugger          │
+                    │   separate process  │
+                    │   HTTP + web UI     │
+                    └─────────────────────┘
+
+┌─────────────────────────┐
+│  mods/                  │
+│   ├── schema.json       │ ──loads──► Interpreter
+│   └── behaviors/*.json  │
+│  hot-reloaded           │
+└─────────────────────────┘
 ```
 
 ## The data model: ECS via schema.json
@@ -143,7 +151,7 @@ The SQLite schema is the IPC contract. Changes are versioned. Every process chec
 
 **WAL mode plus busy_timeout.** Many concurrent readers, a brief wait on contended writes. The renderer reads while the interpreter writes; neither blocks the other for normal operation.
 
-**A `world_version` watermark.** A single integer in the `world` table that increments on every world-state write. Pollers read this cheaply each frame and skip the full query when nothing has changed. Trades one tiny query for many large ones.
+**A `world_version` watermark.** A single integer in the `world` table that increments on every world-state write. The debugger polls this cheaply on each refresh and skips the full query when nothing has changed. The in-process renderer has no need to poll — it draws after the interpreter writes within the same tick.
 
 **JSON payloads for extensibility.** Structural fields (entity id, component type, event kind) are typed SQL columns. Per-feature data (event payload, machine context, action params) is a JSON column.
 
@@ -154,13 +162,13 @@ The SQLite schema is the IPC contract. Changes are versioned. Every process chec
 |Table|Writer|Readers|Purpose|
 |---|---|---|---|
 |`meta`|init/migrate|all|Schema version, build info|
-|`world`|interpreter|all|Current tick, world_version watermark|
-|`entities`|interpreter|renderer, debugger|Entity registry with entity type|
-|`comp_*`|interpreter|renderer, debugger|Component data (one table per component, generated from schema.json)|
-|`behavior_components`|interpreter|renderer, debugger|Active machine state per entity; interpreter-managed, not in schema.json|
+|`world`|interpreter|debugger|Current tick, world_version watermark|
+|`entities`|interpreter|renderer (in-process), debugger|Entity registry with entity type|
+|`comp_*`|interpreter|renderer (in-process), debugger|Component data (one table per component, generated from schema.json)|
+|`behavior_components`|interpreter|renderer (in-process), debugger|Active machine state per entity; interpreter-managed, not in schema.json|
 |`event_queue`|interpreter|(drained by interpreter)|Internal game events and scheduled `after` timers|
-|`input_events`|renderer|interpreter (drains)|Raw input from user|
-|`transitions`|interpreter|debugger, renderer (effects)|Audit trail of every state transition|
+|`input_events`|renderer (in-process)|interpreter (drains, same tick)|Append-only input log; synchronous within the game process; useful for replay|
+|`transitions`|interpreter|debugger, renderer (effects)|Audit trail of every state transition; source of truth for time-travel|
 
 ### Schema sketch
 
@@ -381,17 +389,11 @@ All mutations inside a single event delivery run in one SQLite transaction. Eith
 
 ### Renderer
 
-The renderer is intentionally dumb. It does three things:
+The renderer is Ebitengine, running in the same process as the interpreter. Ebitengine's lifecycle provides natural sequencing: `Update()` runs the interpreter tick (state machine evaluation, world writes, input drain), then `Draw()` queries the database and renders the result. No polling watermarks, no cross-process coordination — the renderer sees a consistent post-update snapshot every frame because it reads after the write within the same tick.
 
-1. Each frame, check `world_version`. If unchanged from last frame, skip the expensive query and redraw the last snapshot.
-2. If changed, query the world (entities joined with the components needed for drawing) and rebuild the local snapshot.
-3. Capture user input and write it to `input_events`.
+The renderer is intentionally dumb. It does not know what an entity _means_ beyond its type and components. It knows the schema: "entities of type Goblin have Position and Sprite, draw the sprite at the position." Add a new entity type in `schema.json` and the renderer handles it generically (draw the sprite) or shows a placeholder until you teach it something specific.
 
-The renderer does not know what an entity _means_ in game terms beyond its entity type and components. It knows the schema: "entities of type Goblin have Position and Sprite, draw the sprite at the position." Add a new entity type in `schema.json` and the renderer either handles it generically (draw the sprite) or shows a placeholder until you teach it something specific.
-
-The renderer can be written in any language with a SQLite binding and a graphics library. Odin with Raylib is a natural fit; so is Rust with Macroquad, or a terminal renderer in Python for headless debugging. Multiple renderer processes can run against the same database — a 2D top-down view and a terminal ASCII view side by side, both reading the same `world.sqlite`.
-
-A browser-based renderer is a special and useful case: Phaser (or any canvas/WebGL library) running in a tab, with a WASM build of SQLite holding the database in OPFS or memory, and the interpreter compiled to WASM running alongside. The renderer code is structurally identical to a native one — query entities, draw them, write inputs — just in JavaScript against SQLite-WASM instead of native SQLite. Same architecture, same agents, same contract.
+User input is captured in Ebitengine's `Update()` phase and written to the `input_events` table before the interpreter tick runs. The table is an append-only log rather than a purely ephemeral queue — the record survives to support replay and audit. The interpreter drains and processes it in the same tick.
 
 ### Effects: presentation as a view of the audit log
 
@@ -421,88 +423,84 @@ Behavior files with malformed JSON, references to unknown actions or guards, or 
 
 ### Debugger
 
-A small HTTP server (any language; Go is a natural choice for its standard library `net/http` and pure-Go SQLite drivers). Opens `world.sqlite` read-only, serves a single HTML page that polls a few endpoints:
+A separate HTTP server process — the one place process separation genuinely earns its keep. Read-only by construction, optional in shipped builds, different lifecycle from the game, and accessible remotely without any special client software.
 
-- **Entities**: current state of every entity, including type and machine context.
-- **Components**: per-entity component data.
-- **Transitions**: most recent N transitions, ordered newest first.
-- **Schema**: the current `schema.json`, for reference.
+Opens `world.sqlite` read-only. Polls `world_version` on each refresh; skips the full query when nothing has changed. Serves a web UI from a single binary with no build step for the frontend.
 
-The page auto-refreshes. The "why did the goblin attack?" question becomes one click: filter transitions to that entity, see the sequence of state changes with the triggering events. Combined with the `context` column you can see what the entity was thinking at every step.
+**Endpoints:**
+- **Entities** — Roster of every entity with type and attached component summary.
+- **Components** — Per-entity drill-down of full component data.
+- **Transitions** — The "why did the goblin attack?" view. Most recent N, filterable by `entity_id`, `machine_id`, event type. Shows `from_states`, `to_states`, guard result, and `actions_run`.
+- **Schema** — Current `schema.json` verbatim, for reference.
+- **ASCII view** — Terminal-style live view: entity positions, types, and health rendered as text. Serves the multi-renderer use case (visual cross-check) without a second runtime process.
 
-Because the debugger is HTTP and the database is read-only-shareable, remote debugging is trivial: tunnel the port over SSH or Tailscale and inspect a game running on another machine from your phone.
+**Remote debugging** is trivial: tunnel the port over SSH or Tailscale and inspect a game running on another machine from a phone. No special client — it's a web page.
 
-The debugger is the easiest component to extend. A behavior visualizer (render the active state machine as a graph using Stately's renderer), a time-travel UI (jump to any past tick), a component diff viewer, a schema inspector — all additions to the debugger, none requiring changes to the interpreter or renderer.
+**Time-travel** is the headline investment: the `transitions` log is a complete audit trail of every state change since the game started. The debugger exposes a timeline scrubber that replays from any checkpoint database snapshot. Jump to tick 4,312, see exactly what the goblin was doing, then step forward. See _Milestone order_ for the full scope.
 
 ## Process supervision
 
-In development, a Procfile-style supervisor (overmind, foreman, or systemd user units) brings the three processes up together and interleaves their logs. Restarting one process doesn't touch the others. Iterating on the renderer means restarting just the renderer while the interpreter keeps simulating — the renderer reopens the database and catches up via `world_version`.
+In development, a Procfile-style supervisor (overmind, foreman, or systemd user units) manages two processes: the game binary and the debugger. Logs are interleaved with wall-clock timestamps. The debugger can be restarted independently without touching the game process.
 
-In a packaged game, a small launcher binary spawns the interpreter and renderer subprocesses and tears them down on exit. No containers, no orchestration. The debugger is optional in shipped builds.
+In a packaged game, the launcher is simple: spawn the game binary. The debugger is an optional sidecar, off by default in shipped builds.
 
 ## Why this architecture is the move
 
-**Crash isolation.** Renderer segfault doesn't lose game state. Interpreter panic doesn't blank the screen — the last frame stays up until restart. Debugger crashes don't matter.
+**Trivial save games.** The database file is the save. Copy it and you have a save. Open it later and you resume. No serialization layer, no save-format versioning separate from the schema.
 
-**Language polyglot for real.** Renderer in the language with the best graphics bindings. Interpreter in the language that best fits its data-shuffling and state-machine workload. Debugger in the language with the easiest HTTP story. Each component in the language that fits.
+**Time-travel debugging.** The `transitions` table is a complete, append-only log of every state change the game has ever made. Replay any session from a checkpoint. Step forward tick by tick. This is a free feature given the architecture already records everything.
 
-**Parallel hardware.** WAL mode means the renderer reads while the interpreter writes. On a multi-core machine each process gets its own core for free.
+**Fully inspectable state.** At any moment, `sqlite3 world.sqlite` gives you the full game state as relational data. No binary format to decode, no proprietary tooling. Write a SQL query, understand the game.
 
-**Hot-swap a component.** Restart one process, the others don't notice. This is materially faster than monolithic-engine development.
+**Clockwork determinism.** Every guard result is recorded. Every action is named in `actions_run`. The same event sequence against the same state always produces the same outcome. Bugs are reproducible.
 
-**Multiple renderers simultaneously.** Run a 2D view AND a terminal ASCII view AND a top-down minimap — three processes, all reading the same world. No coordination needed.
+**Remote debugging by default.** The debugger is HTTP and the database is read-only-shareable. Tunnel over SSH or Tailscale and inspect a game running on another machine from a phone.
 
-**Remote debugging by default.** The debugger is HTTP. Over Tailscale, inspect a game running on another machine from your phone.
-
-**The contract is auditable.** Every IPC mechanism is a SQL query. No serialization formats, no RPC stubs, no protobuf compilation. The sqlite3 CLI is a debugger you already have.
+**The contract is auditable within the monolith.** Cross-subsystem communication is a SQL query, not a function call with hidden coupling. The sqlite3 CLI is a debugger you already have.
 
 **Mods need only a text editor.** No toolchain, no compilation. Edit `schema.json` and `behaviors/*.json`, save, see the change. The lowest possible barrier to participation.
 
-**The data model is declarative and readable.** `schema.json` is the ground truth of what the game is made of. A new contributor reads `schema.json` and the behaviors directory and understands the game's structure without diving into engine code.
+**The data model is declarative and readable.** `schema.json` is the ground truth of what the game is made of. A new contributor reads it and the behaviors directory and understands the game's structure without diving into engine code.
 
 ## Honest tradeoffs
 
-**Process startup cost.** Three processes to launch instead of one. Mitigated by a supervisor and the fact that you rarely cold-start during development.
+**Renderer and interpreter crash together.** Same process means a graphics panic or a runaway game loop kills everything. Unlike the process-separated design, there is no "renderer stays up while interpreter restarts." The debugger remains isolated and keeps serving the last DB state, but the game window goes dark. Acceptable for a single-developer project; the loss of crash isolation between interpreter and renderer is a deliberate tradeoff against simplicity.
 
-**SQLite writer contention.** Two processes writing the same database serialize through SQLite's file lock. The "one writer per table" convention keeps real contention rare, but the renderer (writing input_events) and the interpreter (writing world state) can occasionally hit the same lock. WAL plus a 5-second busy_timeout makes this invisible in practice for non-pathological write rates.
+**Renderer is Ebitengine-specific.** The multi-process design allowed the renderer to be written in any language. The monolith commits to Go + Ebitengine. The database-as-contract discipline is preserved internally, but the choice of graphics library is now fixed.
 
-**No push notifications.** SQLite has no LISTEN/NOTIFY. Renderers poll `world_version` every frame, the debugger polls every half-second. For real-time single-player games this is fine; if it ever isn't, a sidecar that watches the WAL and pushes deltas is a future option.
+**No push notifications.** SQLite has no LISTEN/NOTIFY. The debugger polls `world_version` each refresh. For a read-only inspector this is fine; if it ever isn't, a sidecar that watches the WAL and pushes deltas is a future option.
 
-**Input latency is at least one tick.** The renderer records input asynchronously; the interpreter consumes it on the next tick. At a 20Hz interpreter, that's 50ms minimum input-to-response. Acceptable for turn-based, simulation, and slow-action games. Bad for twitchy action games, which would require either a faster interpreter tick rate or local prediction in the renderer.
+**Input latency is at least one tick.** Input is captured and written to `input_events` synchronously within `Update()`, then the interpreter processes it in the same tick. At 20Hz that's still 50ms minimum for the next visual response after input. Acceptable for turn-based, simulation, and slow-action games; bad for twitchy action games.
 
-**Cross-process input-to-game-event mapping lives in the interpreter.** Correct (the interpreter owns world state) but means the renderer cannot interpret input itself. For predictive UI, the renderer needs its own local state.
+**Schema evolution requires migration discipline.** Adding components or entity types is easy. Renaming, restructuring, or removing them is a migration. The unified `schema.json` plus generated SQL means migrations must be expressed at both levels. Boring, correct, well-understood, but real work.
 
-**Schema evolution requires migration discipline.** Adding components or entity types is easy. Renaming, restructuring, or removing them is a migration. The unified `schema.json` plus generated SQL means migrations must be expressed at both levels — bump `schema.json` version, write the SQL DDL change, write any data backfill. Boring, correct, well-understood, but real work.
-
-**Three log streams to read when things go wrong.** A supervisor that interleaves them helps. Tagging every event with wall-clock timestamps (which `input_events` and `transitions` both do) lets you correlate across processes.
+**Two log streams.** Game process and debugger process. A supervisor that interleaves them helps. Wall-clock timestamps on every cross-subsystem DB row let you correlate across processes.
 
 ## Milestone order
 
-The architecture is splittable but should not be split prematurely. Premature splitting is a refactor without a working baseline.
+The architecture is intentionally monolithic first. Get a working game before adding complexity.
 
-1. **Monolithic prototype.** A single process containing interpreter, renderer, and behavior loading. Prove the schema-driven SQL generation works. Get one entity wandering. Hot-reload its behavior file. Edit `schema.json` and see the database change correctly on restart.
-    
-2. **Extract the debugger.** The easiest split: read-only, no contention concerns. A small HTTP binary serving an HTML page. The experience of splitting is small and rewarding and validates the "database as contract" claim.
-    
-3. **Extract the renderer.** The bigger split: input flow becomes asynchronous, the input-event table comes into use, the renderer gains its own language choice. Three processes, one game.
-    
-4. **Add effects.** Wire up the transitions-as-effect-source flow. Implement implicit effects first (transition-to-`dead` triggers death effect), then named effect actions, then effect rule files.
-    
-5. **Add a second renderer.** Terminal ASCII view or a minimap. Proves the multi-renderer thesis and gives a genuinely useful debugging tool.
-    
-6. **Schema versioning and migrations.** Once you've changed `schema.json` in anger a few times, you'll know what the migration story needs. Build it then.
-    
+1. **Interpreter tick loop + Ebitengine monolith.** Full working game: one entity wandering on screen via the `wandering_goblin` agent. Schema, behaviors, hot reload, and rendering all wired together. The prototype passes when the goblin wanders, and editing the agent JSON changes its behavior without a restart.
+
+2. **Debugger as a separate process.** The one natural process boundary. Read-only HTTP server with entity/component/transition endpoints and the ASCII view route. Validates the "database as contract" claim with low risk. Remote debugging verified over SSH.
+
+3. **Time-travel debugging.** Checkpoint the database at regular intervals. Debugger gains a timeline scrubber that replays a session from any checkpoint forward through the `transitions` log. The headline capability of the architecture, delivered as a debugger feature.
+
+4. **Effects system.** Wire the transitions-as-effect-source flow. Implicit effects first (transition-to-`dead` triggers death effect), then named effect actions in agent JSON, then effect rule files for reskinning.
+
+5. **Process supervision and packaging.** Polish the two-process dev experience (Procfile + supervisor). Launcher binary for shipped builds (game binary + optional debugger sidecar). Startup schema-check coordination.
+
 
 ## Future directions
 
-**Browser deployment via WASM.** The interpreter is pure logic with one well-defined dependency (SQLite). It compiles unchanged to `wasm32` and runs in a browser tab alongside a SQLite-WASM build and a JavaScript renderer such as Phaser. Same `schema.json`, same agents, same contract — the renderer process is simply replaced by a JavaScript runtime. Free web playable demos of any game built on the engine.
+**Process-separated renderer.** The "database as contract" discipline is maintained within the monolith by convention. Extracting the renderer into its own process is a well-defined future step if a concrete need surfaces (different language for graphics, crash isolation, multi-renderer). The architecture supports it; it is not currently scheduled.
 
-**WASM for custom actions.** When a modder wants a behavior the built-in action library can't express, load a WASM module that exports named functions and register them as additional actions. Agents reference them by name (`"type": "mymod::cast_spell"`) and it just works. A narrow, well-justified use of WASM: extending the action library, not replacing the behavior language.
+**Browser deployment via WASM.** The interpreter is pure logic with one well-defined dependency (SQLite). It compiles to `wasm32` and runs in a browser tab alongside a SQLite-WASM build and a JavaScript renderer. Same `schema.json`, same agents, same contract.
 
-**Replay and time-travel debug.** The `transitions` table plus the `event_queue` history is a complete log of what happened. A debugger mode that re-runs a recorded session against a checkpoint database would be a powerful debugging tool — a free feature given the architecture already records everything.
+**Lua for custom actions.** When a modder wants a behavior the built-in action library can't express, a Lua sandbox can expose named functions registered as additional actions. Agents reference them by name (`"type": "mymod::cast_spell"`). The `ActionHandler` and `GuardHandler` interfaces are already designed for this — a `LuaActionHandler` is a natural addition. Extending the action library without touching the behavior language or engine code.
 
 **Visual behavior editor.** Stately Studio works today for editing the JSON. A bespoke editor that also visualizes live game state on the machine graph would close the loop between authoring and observing.
 
 **Schema editor and visualizer.** `schema.json` is data; a tool that renders entity types as nodes with their component edges, lets modders edit visually, and generates migrations between versions, is a natural follow-on.
 
-**Networked multiplayer (lockstep).** The architecture has a natural seam for lockstep simulation: replicate the `event_queue` (not the world state) across machines, run identical interpreters on each, converge to the same world via deterministic action and guard execution. This is the database-as-replicated-log shape used by RTS engines and SpacetimeDB, arrived at from a different direction.
+**Networked multiplayer (lockstep).** Replicate the `event_queue` (not world state) across machines, run identical interpreters on each, converge via deterministic execution. The database-as-replicated-log shape used by RTS engines and SpacetimeDB, arrived at from a different direction.
