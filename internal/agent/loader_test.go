@@ -68,7 +68,9 @@ func TestLoader_LoadMachine_StoresDefinition(t *testing.T) {
 	path := writeTempFile(t, dir, "m.json", validMachineJSON)
 
 	l := NewLoader(testRegistry(), testSchema())
-	_, _ = l.LoadMachine(path)
+	if _, err := l.LoadMachine(path); err != nil {
+		t.Fatalf("LoadMachine: unexpected error: %v", err)
+	}
 
 	got, ok := l.Get("test_machine")
 	if !ok {
@@ -150,8 +152,8 @@ func TestLoader_LoadMachine_HotReload_FailureRetainsPrevious(t *testing.T) {
 	if !ok {
 		t.Fatal("Get: expected previous def to be retained after failed reload")
 	}
-	if retained.Initial != first.Initial {
-		t.Errorf("retained.Initial = %q, want %q", retained.Initial, first.Initial)
+	if retained != first {
+		t.Errorf("expected retained def to be the original pointer, got a different instance")
 	}
 }
 
