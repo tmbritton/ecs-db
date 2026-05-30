@@ -443,8 +443,9 @@ func TestSendEvent_AfterEntry_Scheduled(t *testing.T) {
 	if len(mw.scheduled) == 0 {
 		t.Error("ScheduleAfterEvent not called on entry to b")
 	}
-	if mw.scheduled[0].targetTick != 510 {
-		t.Errorf("targetTick = %d, want 510 (10+500)", mw.scheduled[0].targetTick)
+	// "500" means 500 ms; at 50 ms/tick that is 10 ticks. tick=10 → targetTick=20.
+	if mw.scheduled[0].targetTick != 20 {
+		t.Errorf("targetTick = %d, want 20 (10+10)", mw.scheduled[0].targetTick)
 	}
 }
 

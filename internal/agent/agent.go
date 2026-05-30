@@ -2,8 +2,6 @@ package agent
 
 import (
 	"fmt"
-	"strconv"
-	"strings"
 )
 
 // Agent is a running instance of a MachineDefinition bound to a specific entity.
@@ -73,7 +71,7 @@ func StartAgent(agent *Agent, registry *Registry, tick int64, world WorldWriter,
 			return fmt.Errorf("StartAgent: entry actions for %q: %w", state.ID, err)
 		}
 		for duration := range state.After {
-			targetTick := tick + parseDurationTicks(duration)
+			targetTick := tick + parseDurationTicks(duration, 50)
 			evType := afterEventType(duration, state.ID)
 			if err := mw.ScheduleAfterEvent(agent.EntityID, def.ID, evType, targetTick); err != nil {
 				return fmt.Errorf("StartAgent: scheduling after for %q: %w", state.ID, err)
@@ -163,22 +161,4 @@ func runActionList(actions []ActionSpec, ctx ActionContext, registry *Registry) 
 		ran = append(ran, spec.Type)
 	}
 	return ran, nil
-}
-
-// afterEventType returns the synthetic event type for an after-transition.
-// Format matches XState v4: xstate.after(N).STATE_ID
-func afterEventType(duration, stateID string) string {
-	return "xstate.after(" + duration + ")." + stateID
-}
-
-// parseDurationTicks converts an after-duration string to a tick count.
-// Treats the value as integer milliseconds (1 ms = 1 tick for Story 5).
-// Story 6 extends this with proper duration parsing.
-func parseDurationTicks(duration string) int64 {
-	s := strings.TrimSuffix(duration, "ms")
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0
-	}
-	return n
 }
