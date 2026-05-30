@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -79,6 +80,10 @@ type alwaysHasComponent struct{}
 func (r *alwaysHasComponent) GetComponentValue(int64, string, string) (any, error) { return nil, nil }
 
 func (r *alwaysHasComponent) HasComponent(int64, string) (bool, error) { return true, nil }
+
+func (r *alwaysHasComponent) FindEntityByType(entityType string) (int64, error) {
+	return 0, fmt.Errorf("alwaysHasComponent: no entities")
+}
 
 // actionFunc adapts a plain function to ActionHandler.
 type actionFunc func(ActionContext) error

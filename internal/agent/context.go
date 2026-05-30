@@ -17,11 +17,14 @@ type WorldWriter interface {
 	SetComponentValue(entityID int64, compName, field string, value any) error
 }
 
-// WorldReader is the read-side interface that guards use to inspect world state.
-// The concrete implementation (backed by *sql.DB) lives in internal/storage.
+// WorldReader is the read-side interface that guards (and read-capable actions) use
+// to inspect world state. The concrete implementation lives in internal/storage.
 type WorldReader interface {
 	GetComponentValue(entityID int64, compName, field string) (any, error)
 	HasComponent(entityID int64, compName string) (bool, error)
+	// FindEntityByType returns the ID of the first entity of the given type.
+	// Used to resolve the "$player" sentinel in dealDamage, inRange, setPursueTarget.
+	FindEntityByType(entityType string) (int64, error)
 }
 
 // ActionHandler is implemented by Go code that executes a named XState action.
@@ -36,20 +39,23 @@ type GuardHandler interface {
 
 // ActionContext is passed to ActionHandler.Run.
 type ActionContext struct {
-	EntityID int64
-	Tick     int64
-	World    WorldWriter
-	Params   map[string]any // static params from the machine JSON action spec
-	Event    Event
+	EntityID        int64
+	Tick            int64
+	World           WorldWriter
+	Reader          WorldReader    // read access for actions that need current component values
+	Params          map[string]any // static params from the machine JSON action spec
+	Event           Event
+	ContextManifest map[string]string // context key → component name; from MachineDefinition
 }
 
 // GuardContext is passed to GuardHandler.Evaluate.
 type GuardContext struct {
-	EntityID int64
-	Tick     int64
-	World    WorldReader
-	Params   map[string]any // static params from the machine JSON cond spec
-	Event    Event
+	EntityID        int64
+	Tick            int64
+	World           WorldReader
+	Params          map[string]any // static params from the machine JSON cond spec
+	Event           Event
+	ContextManifest map[string]string // context key → component name; from MachineDefinition
 }
 
 // TransitionRecord is the data written to the transitions table after each microstep.

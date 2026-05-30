@@ -72,7 +72,8 @@ func StartAgent(agent *Agent, registry *Registry, tick int64, world WorldWriter,
 			continue
 		}
 		if _, err := runActionList(state.Entry, ActionContext{
-			EntityID: agent.EntityID, Tick: tick, World: world, Event: initEvent,
+			EntityID: agent.EntityID, Tick: tick, World: world, Reader: reader,
+			Event: initEvent, ContextManifest: def.ContextManifest,
 		}, registry); err != nil {
 			return fmt.Errorf("StartAgent: entry actions for %q: %w", state.ID, err)
 		}

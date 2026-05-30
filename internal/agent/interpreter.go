@@ -37,7 +37,8 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 			return fmt.Errorf("SendEvent: cancel after for %q: %w", state.ID, err)
 		}
 		ran, err := runActionList(state.Exit, ActionContext{
-			EntityID: agent.EntityID, Tick: tick, World: world, Event: event,
+			EntityID: agent.EntityID, Tick: tick, World: world, Reader: reader,
+			Event: event, ContextManifest: agent.Definition.ContextManifest,
 		}, registry)
 		if err != nil {
 			return fmt.Errorf("SendEvent: exit actions for %q: %w", state.ID, err)
@@ -53,7 +54,8 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 			condResult = sel.CondResult
 		}
 		ran, err := runActionList(sel.Transition.Actions, ActionContext{
-			EntityID: agent.EntityID, Tick: tick, World: world, Event: event,
+			EntityID: agent.EntityID, Tick: tick, World: world, Reader: reader,
+			Event: event, ContextManifest: agent.Definition.ContextManifest,
 		}, registry)
 		if err != nil {
 			return fmt.Errorf("SendEvent: transition actions: %w", err)
@@ -69,7 +71,8 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 			continue
 		}
 		ran, err := runActionList(state.Entry, ActionContext{
-			EntityID: agent.EntityID, Tick: tick, World: world, Event: event,
+			EntityID: agent.EntityID, Tick: tick, World: world, Reader: reader,
+			Event: event, ContextManifest: agent.Definition.ContextManifest,
 		}, registry)
 		if err != nil {
 			return fmt.Errorf("SendEvent: entry actions for %q: %w", state.ID, err)
@@ -130,7 +133,7 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 			}
 			found := false
 			for _, t := range candidates {
-				eligible, condResult, err := evaluateTransition(t, agent.EntityID, tick, event, registry, reader)
+				eligible, condResult, err := evaluateTransition(t, agent.EntityID, tick, event, registry, reader, agent.Definition.ContextManifest)
 				if err != nil {
 					return nil, err
 				}
@@ -156,7 +159,7 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 	return selected, nil
 }
 
-func evaluateTransition(t Transition, entityID, tick int64, event Event, registry *Registry, reader WorldReader) (eligible bool, condResult *bool, err error) {
+func evaluateTransition(t Transition, entityID, tick int64, event Event, registry *Registry, reader WorldReader, contextManifest map[string]string) (eligible bool, condResult *bool, err error) {
 	if t.Cond == nil {
 		return true, nil, nil
 	}
@@ -167,6 +170,7 @@ func evaluateTransition(t Transition, entityID, tick int64, event Event, registr
 	result := handler.Evaluate(GuardContext{
 		EntityID: entityID, Tick: tick, World: reader,
 		Params: t.Cond.Params, Event: event,
+		ContextManifest: contextManifest,
 	})
 	b := result
 	return result, &b, nil

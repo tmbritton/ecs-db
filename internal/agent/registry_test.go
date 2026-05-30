@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // Compile-time interface satisfaction checks. These lines fail to compile if
 // any method signature is wrong — catching drift before runtime.
@@ -38,6 +41,10 @@ func (r *testWorldReader) GetComponentValue(entityID int64, compName, field stri
 
 func (r *testWorldReader) HasComponent(entityID int64, compName string) (bool, error) {
 	return false, nil
+}
+
+func (r *testWorldReader) FindEntityByType(entityType string) (int64, error) {
+	return 0, fmt.Errorf("testWorldReader: no entities")
 }
 
 func TestContextTypes_Compile(t *testing.T) {
