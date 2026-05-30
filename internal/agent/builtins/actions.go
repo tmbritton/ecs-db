@@ -36,6 +36,7 @@ func resolveTargetID(reader agent.WorldReader, targetParam any) (int64, bool) {
 			}
 			return id, true
 		}
+		fmt.Printf("[agent] resolveTargetID: unknown sentinel %q\n", v)
 	case float64:
 		return int64(v), true
 	case int64:
@@ -132,7 +133,7 @@ func (a *pickRandomTargetAction) Run(ctx agent.ActionContext) error {
 	radius := toFloat(ctx.Params["radius"])
 
 	angle := rand.Float64() * 2 * math.Pi
-	dist := rand.Float64() * radius
+	dist := math.Sqrt(rand.Float64()) * radius
 	newTX := toFloat(px) + dist*math.Cos(angle)
 	newTY := toFloat(py) + dist*math.Sin(angle)
 
@@ -182,7 +183,10 @@ func (a *dealDamageAction) Run(ctx agent.ActionContext) error {
 	if !ok {
 		return nil
 	}
-	hp, _ := ctx.Reader.GetComponentValue(targetID, "Health", "hp")
+	hp, err := ctx.Reader.GetComponentValue(targetID, "Health", "hp")
+	if err != nil {
+		return fmt.Errorf("dealDamage: read hp: %w", err)
+	}
 	return ctx.World.SetComponentValue(targetID, "Health", "hp", toFloat(hp)-amount)
 }
 
