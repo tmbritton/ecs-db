@@ -215,6 +215,26 @@ func TestStartAgent_RunsEntryActions(t *testing.T) {
 	}
 }
 
+func TestStartAgent_SchedulesAfterForInitialState(t *testing.T) {
+	def := mustParse(t, `{
+		"id":"m","initial":"a",
+		"states":{"a":{"after":{"500":[{"target":"a"}]}}}
+	}`)
+	def.ContextManifest = map[string]string{}
+	mw := &testMachineWriter{}
+	a := NewAgent(def, 1, "", 50)
+	if err := StartAgent(a, NewRegistry(), 10, &captureWorldWriter{}, &testWorldReader{}, mw); err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+	if len(mw.scheduled) == 0 {
+		t.Fatal("ScheduleAfterEvent not called for initial state with after transition")
+	}
+	// 500ms / 50ms per tick = 10 ticks; starting at tick 10 → targetTick 20
+	if mw.scheduled[0].targetTick != 20 {
+		t.Errorf("targetTick = %d, want 20", mw.scheduled[0].targetTick)
+	}
+}
+
 func TestNewAgent_TickDurationMs_Default(t *testing.T) {
 	def := &MachineDefinition{ID: "m", Initial: "a", States: map[string]*StateNode{}}
 	a := NewAgent(def, 1, "", 0)
