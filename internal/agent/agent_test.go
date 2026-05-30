@@ -82,7 +82,7 @@ func (r *alwaysHasComponent) GetComponentValue(int64, string, string) (any, erro
 func (r *alwaysHasComponent) HasComponent(int64, string) (bool, error) { return true, nil }
 
 func (r *alwaysHasComponent) FindEntityByType(entityType string) (int64, error) {
-	return 0, fmt.Errorf("alwaysHasComponent: no entities")
+	return 0, fmt.Errorf("FindEntityByType: not implemented in test stub")
 }
 
 // actionFunc adapts a plain function to ActionHandler.

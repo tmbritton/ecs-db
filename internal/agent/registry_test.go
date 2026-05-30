@@ -44,23 +44,26 @@ func (r *testWorldReader) HasComponent(entityID int64, compName string) (bool, e
 }
 
 func (r *testWorldReader) FindEntityByType(entityType string) (int64, error) {
-	return 0, fmt.Errorf("testWorldReader: no entities")
+	return 0, fmt.Errorf("FindEntityByType: not implemented in test stub")
 }
 
 func TestContextTypes_Compile(t *testing.T) {
 	ac := ActionContext{
-		EntityID: 1,
-		Tick:     10,
-		World:    &testWorldWriter{},
-		Params:   map[string]any{"k": "v"},
-		Event:    Event{Type: "TEST", Payload: map[string]any{"x": 1}},
+		EntityID:        1,
+		Tick:            10,
+		World:           &testWorldWriter{},
+		Reader:          &testWorldReader{},
+		Params:          map[string]any{"k": "v"},
+		Event:           Event{Type: "TEST", Payload: map[string]any{"x": 1}},
+		ContextManifest: map[string]string{},
 	}
 	gc := GuardContext{
-		EntityID: 1,
-		Tick:     10,
-		World:    &testWorldReader{},
-		Params:   map[string]any{},
-		Event:    Event{Type: "TEST"},
+		EntityID:        1,
+		Tick:            10,
+		World:           &testWorldReader{},
+		Params:          map[string]any{},
+		Event:           Event{Type: "TEST"},
+		ContextManifest: map[string]string{},
 	}
 	_ = ac
 	_ = gc
