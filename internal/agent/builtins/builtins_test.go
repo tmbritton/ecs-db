@@ -335,3 +335,197 @@ func TestAction_log(t *testing.T) {
 		t.Errorf("log: %v", err)
 	}
 }
+
+// ── Guard helpers ─────────────────────────────────────────────────────────────
+
+func gctx(entityID int64, reader agent.WorldReader, params map[string]any) agent.GuardContext {
+	return agent.GuardContext{
+		EntityID:        entityID,
+		Tick:            1,
+		World:           reader,
+		Params:          params,
+		Event:           agent.Event{Type: "TICK"},
+		ContextManifest: goblinManifest,
+	}
+}
+
+func readGuard(t *testing.T, db *sql.DB, fn func(r agent.WorldReader) bool) bool {
+	t.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	return fn(storage.NewTxWorldReader(tx))
+}
+
+// ── Guard tests ───────────────────────────────────────────────────────────────
+
+func TestGuard_timerExpired_True(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_goblinstats (entity_id, patience) VALUES (?, 0)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("timerExpired")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"key": "patience"}))
+	})
+	if !got {
+		t.Error("timerExpired(patience=0) = false, want true")
+	}
+}
+
+func TestGuard_timerExpired_False(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_goblinstats (entity_id, patience) VALUES (?, 10)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("timerExpired")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"key": "patience"}))
+	})
+	if got {
+		t.Error("timerExpired(patience=10) = true, want false")
+	}
+}
+
+func TestGuard_atTarget_True(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	// Position (5, 5), target (5.5, 5) → distance = 0.5 ≤ 1.0
+	db.Exec("INSERT INTO comp_position    (entity_id, x, y)               VALUES (?, 5, 5)", entityID)
+	db.Exec("INSERT INTO comp_goblinstats (entity_id, target_x, target_y) VALUES (?, 5.5, 5)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("atTarget")
+		return handler.Evaluate(gctx(entityID, rd, nil))
+	})
+	if !got {
+		t.Error("atTarget at distance 0.5 = false, want true")
+	}
+}
+
+func TestGuard_atTarget_False(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	// Position (0, 0), target (10, 0) → distance = 10 > 1.0
+	db.Exec("INSERT INTO comp_position    (entity_id, x, y)               VALUES (?, 0, 0)", entityID)
+	db.Exec("INSERT INTO comp_goblinstats (entity_id, target_x, target_y) VALUES (?, 10, 0)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("atTarget")
+		return handler.Evaluate(gctx(entityID, rd, nil))
+	})
+	if got {
+		t.Error("atTarget at distance 10 = true, want false")
+	}
+}
+
+func TestGuard_inRange_True(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	goblinID := insertEntity(t, db, "Goblin")
+	playerID := insertEntity(t, db, "Player")
+	// Goblin at (0,0), Player at (5,0) → dist=5 ≤ 10
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 5, 0)", playerID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		ctx := agent.GuardContext{
+			EntityID: goblinID, World: rd,
+			Params:          map[string]any{"target": "$player", "distance": float64(10)},
+			ContextManifest: goblinManifest,
+		}
+		handler, _ := r.GetGuard("inRange")
+		return handler.Evaluate(ctx)
+	})
+	if !got {
+		t.Error("inRange(dist=5, range=10) = false, want true")
+	}
+}
+
+func TestGuard_inRange_False(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	goblinID := insertEntity(t, db, "Goblin")
+	playerID := insertEntity(t, db, "Player")
+	// Goblin at (0,0), Player at (20,0) → dist=20 > 10
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 20, 0)", playerID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		ctx := agent.GuardContext{
+			EntityID: goblinID, World: rd,
+			Params:          map[string]any{"target": "$player", "distance": float64(10)},
+			ContextManifest: goblinManifest,
+		}
+		handler, _ := r.GetGuard("inRange")
+		return handler.Evaluate(ctx)
+	})
+	if got {
+		t.Error("inRange(dist=20, range=10) = true, want false")
+	}
+}
+
+func TestGuard_hasComponent_True(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_health (entity_id, hp) VALUES (?, 100)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("hasComponent")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"component": "Health"}))
+	})
+	if !got {
+		t.Error("hasComponent(Health) = false, want true")
+	}
+}
+
+func TestGuard_hasComponent_False(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("hasComponent")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"component": "Health"}))
+	})
+	if got {
+		t.Error("hasComponent(Health) on entity without Health = true, want false")
+	}
+}
+
+func TestGuard_healthAbove_True(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_health (entity_id, hp) VALUES (?, 80)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("healthAbove")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"threshold": float64(50)}))
+	})
+	if !got {
+		t.Error("healthAbove(hp=80, threshold=50) = false, want true")
+	}
+}
+
+func TestGuard_healthAbove_False(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_health (entity_id, hp) VALUES (?, 30)", entityID)
+
+	r := builtins.NewRegistry()
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("healthAbove")
+		return handler.Evaluate(gctx(entityID, rd, map[string]any{"threshold": float64(50)}))
+	})
+	if got {
+		t.Error("healthAbove(hp=30, threshold=50) = true, want false")
+	}
+}

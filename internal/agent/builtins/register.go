@@ -90,5 +90,41 @@ func registerActions(r *agent.Registry) {
 }
 
 func registerGuards(r *agent.Registry) {
-	// Guards are registered in Task 4 once guards.go is implemented.
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "timerExpired",
+		Description: "True when the named timer field is ≤ 0.",
+		Params: []agent.ParamSchema{
+			{Name: "key", Type: "string", Required: true},
+		},
+	}, &timerExpiredGuard{})
+
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "atTarget",
+		Description: "True when entity's Position is within 1 unit of target_x/target_y.",
+	}, &atTargetGuard{})
+
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "inRange",
+		Description: "True when distance between this entity and target is ≤ distance param.",
+		Params: []agent.ParamSchema{
+			{Name: "target", Type: "string", Required: true},
+			{Name: "distance", Type: "number", Required: true},
+		},
+	}, &inRangeGuard{})
+
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "hasComponent",
+		Description: "True when the entity has the named component attached.",
+		Params: []agent.ParamSchema{
+			{Name: "component", Type: "string", Required: true},
+		},
+	}, &hasComponentGuard{})
+
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "healthAbove",
+		Description: "True when Health.hp > threshold.",
+		Params: []agent.ParamSchema{
+			{Name: "threshold", Type: "number", Required: true},
+		},
+	}, &healthAboveGuard{})
 }
