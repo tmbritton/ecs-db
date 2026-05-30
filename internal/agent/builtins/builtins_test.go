@@ -529,3 +529,27 @@ func TestGuard_healthAbove_False(t *testing.T) {
 		t.Error("healthAbove(hp=30, threshold=50) = true, want false")
 	}
 }
+
+// ── Registration ──────────────────────────────────────────────────────────────
+
+func TestRegisterBuiltins_AllPresent(t *testing.T) {
+	r := builtins.NewRegistry()
+
+	wantActions := []string{
+		"attachComponent", "dealDamage", "detachComponent",
+		"log", "moveTowardTarget", "pickRandomTarget",
+		"setPursueTarget", "setTimer", "spawnEntity",
+	}
+	for _, name := range wantActions {
+		if _, ok := r.GetAction(name); !ok {
+			t.Errorf("action %q not registered", name)
+		}
+	}
+
+	wantGuards := []string{"atTarget", "hasComponent", "healthAbove", "inRange", "timerExpired"}
+	for _, name := range wantGuards {
+		if _, ok := r.GetGuard(name); !ok {
+			t.Errorf("guard %q not registered", name)
+		}
+	}
+}
