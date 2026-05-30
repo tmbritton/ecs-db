@@ -36,7 +36,7 @@ func startedAgent(t *testing.T, json string, entityID int64) (*Agent, *Registry,
 	r := interpreterRegistry()
 	world := &captureWorldWriter{}
 	mw := &testMachineWriter{}
-	a := NewAgent(def, entityID, "")
+	a := NewAgent(def, entityID, "", 0)
 	if err := StartAgent(a, r, 0, world, &testWorldReader{}, mw); err != nil {
 		t.Fatalf("StartAgent: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSendEvent_EntryExitActionsOrder(t *testing.T) {
 		}
 	}`)
 	def.ContextManifest = map[string]string{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -149,7 +149,7 @@ func TestSendEvent_TransitionActions(t *testing.T) {
 		"states":{"a":{"on":{"E":[{"actions":["doWork"]}]}}}
 	}`)
 	def.ContextManifest = map[string]string{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -172,7 +172,7 @@ func TestSendEvent_SelfTransition(t *testing.T) {
 		"states":{"a":{"entry":["onEnter"],"exit":["onExit"],"on":{"LOOP":"a"}}}
 	}`)
 	def.ContextManifest = map[string]string{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 	enterCount = 0 // reset; StartAgent fires entry once
@@ -265,7 +265,7 @@ func TestSendEvent_DepthPreemption(t *testing.T) {
 		}
 	}`)
 	def.ContextManifest = map[string]string{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -301,7 +301,7 @@ func TestSendEvent_ParallelRegions_BothTransition(t *testing.T) {
 		}
 	}`)
 	def.ContextManifest = map[string]string{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -339,7 +339,7 @@ func TestSendEvent_HistoryShallow_RestoresRecordedState(t *testing.T) {
 	}`)
 	def.ContextManifest = map[string]string{}
 	r := interpreterRegistry()
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -375,7 +375,7 @@ func TestSendEvent_HistoryShallow_DefaultTargetWhenNoHistory(t *testing.T) {
 	}`)
 	def.ContextManifest = map[string]string{}
 	r := interpreterRegistry()
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
 
@@ -397,7 +397,7 @@ func TestSendEvent_FinalState_DetachesActivatingComponent(t *testing.T) {
 	def.ContextManifest = map[string]string{}
 	r := interpreterRegistry()
 	world := &captureWorldWriter{}
-	a := NewAgent(def, 1, "StatusBuff")
+	a := NewAgent(def, 1, "StatusBuff", 0)
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, world, &testWorldReader{}, mw)
 
@@ -417,7 +417,7 @@ func TestSendEvent_FinalState_NoPrimaryDetach(t *testing.T) {
 	def.ContextManifest = map[string]string{}
 	r := interpreterRegistry()
 	world := &captureWorldWriter{}
-	a := NewAgent(def, 1, "") // primary machine — no component to detach
+	a := NewAgent(def, 1, "", 0) // primary machine — no component to detach
 	mw := &testMachineWriter{}
 	_ = StartAgent(a, r, 0, world, &testWorldReader{}, mw)
 
@@ -460,5 +460,33 @@ func TestSendEvent_AfterExit_Cancelled(t *testing.T) {
 	}
 	if len(mw.cancelled) == 0 {
 		t.Error("CancelAfterEvents not called on exit from a")
+	}
+}
+
+func TestSendEvent_AfterEventDelivery_Routed(t *testing.T) {
+	reached := false
+	r := NewRegistry()
+	r.RegisterAction(ActionMeta{Name: "onTimeout"}, actionFunc(func(ActionContext) error {
+		reached = true
+		return nil
+	}))
+
+	def := mustParse(t, `{
+		"id":"m","initial":"idle",
+		"states":{
+			"idle":{"after":{"500":[{"actions":["onTimeout"]}]}}
+		}
+	}`)
+	def.ContextManifest = map[string]string{}
+	a := NewAgent(def, 1, "", 50)
+	mw := &testMachineWriter{}
+	_ = StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw)
+
+	afterEv := Event{Type: afterEventType("500", "m.idle")}
+	if err := SendEvent(a, afterEv, 10, r, &captureWorldWriter{}, &testWorldReader{}, mw); err != nil {
+		t.Fatalf("SendEvent: %v", err)
+	}
+	if !reached {
+		t.Error("after-transition action not reached — event routing is broken")
 	}
 }

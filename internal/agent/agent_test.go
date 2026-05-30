@@ -89,7 +89,7 @@ func (f actionFunc) Run(ctx ActionContext) error { return f(ctx) }
 
 func TestNewAgent_Fields(t *testing.T) {
 	def := &MachineDefinition{ID: "m", Initial: "a", States: map[string]*StateNode{}}
-	a := NewAgent(def, 42, "StatusEffect")
+	a := NewAgent(def, 42, "StatusEffect", 0)
 	if a.Definition != def {
 		t.Error("Definition not set")
 	}
@@ -109,7 +109,7 @@ func TestNewAgent_Fields(t *testing.T) {
 
 func TestNewAgent_EmptyActivatedBy(t *testing.T) {
 	def := &MachineDefinition{ID: "m", Initial: "a", States: map[string]*StateNode{}}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	if a.ActivatedByComponent != "" {
 		t.Error("ActivatedByComponent should be empty for primary machine")
 	}
@@ -126,7 +126,7 @@ func TestStartAgent_SeedsContextComponents(t *testing.T) {
 	def.ContextManifest = map[string]string{"x": "Position", "hp": "Health"}
 
 	world := &captureWorldWriter{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	r := NewRegistry()
 	if err := StartAgent(a, r, 0, world, &testWorldReader{}, &testMachineWriter{}); err != nil {
 		t.Fatalf("StartAgent: %v", err)
@@ -149,7 +149,7 @@ func TestStartAgent_SkipsExistingComponents(t *testing.T) {
 	def.ContextManifest = map[string]string{"hp": "Health"}
 
 	world := &captureWorldWriter{}
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	r := NewRegistry()
 	if err := StartAgent(a, r, 0, world, &alwaysHasComponent{}, &testMachineWriter{}); err != nil {
 		t.Fatalf("StartAgent: %v", err)
@@ -166,7 +166,7 @@ func TestStartAgent_SetsInitialConfiguration(t *testing.T) {
 	def := mustParse(t, `{"id":"m","initial":"idle","states":{"idle":{},"active":{}}}`)
 	def.ContextManifest = map[string]string{}
 
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	r := NewRegistry()
 	if err := StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, &testMachineWriter{}); err != nil {
 		t.Fatalf("StartAgent: %v", err)
@@ -185,7 +185,7 @@ func TestStartAgent_PersistsMachineState(t *testing.T) {
 	def.ContextManifest = map[string]string{}
 
 	mw := &testMachineWriter{}
-	a := NewAgent(def, 7, "")
+	a := NewAgent(def, 7, "", 0)
 	r := NewRegistry()
 	if err := StartAgent(a, r, 5, &captureWorldWriter{}, &testWorldReader{}, mw); err != nil {
 		t.Fatalf("StartAgent: %v", err)
@@ -206,11 +206,27 @@ func TestStartAgent_RunsEntryActions(t *testing.T) {
 	def := mustParse(t, `{"id":"m","initial":"idle","states":{"idle":{"entry":["onEnter"]}}}`)
 	def.ContextManifest = map[string]string{}
 
-	a := NewAgent(def, 1, "")
+	a := NewAgent(def, 1, "", 0)
 	if err := StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, &testMachineWriter{}); err != nil {
 		t.Fatalf("StartAgent: %v", err)
 	}
 	if !ran {
 		t.Error("entry action not called by StartAgent")
+	}
+}
+
+func TestNewAgent_TickDurationMs_Default(t *testing.T) {
+	def := &MachineDefinition{ID: "m", Initial: "a", States: map[string]*StateNode{}}
+	a := NewAgent(def, 1, "", 0)
+	if a.TickDurationMs != 50 {
+		t.Errorf("TickDurationMs = %d, want 50 (default)", a.TickDurationMs)
+	}
+}
+
+func TestNewAgent_TickDurationMs_Custom(t *testing.T) {
+	def := &MachineDefinition{ID: "m", Initial: "a", States: map[string]*StateNode{}}
+	a := NewAgent(def, 1, "", 100)
+	if a.TickDurationMs != 100 {
+		t.Errorf("TickDurationMs = %d, want 100", a.TickDurationMs)
 	}
 }

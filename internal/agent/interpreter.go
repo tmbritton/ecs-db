@@ -76,7 +76,7 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		}
 		actionsRun = append(actionsRun, ran...)
 		for duration := range state.After {
-			targetTick := tick + parseDurationTicks(duration, 50)
+			targetTick := tick + parseDurationTicks(duration, agent.TickDurationMs)
 			if err := mw.ScheduleAfterEvent(agent.EntityID, agent.Definition.ID, afterEventType(duration, state.ID), targetTick); err != nil {
 				return fmt.Errorf("SendEvent: schedule after for %q: %w", state.ID, err)
 			}
@@ -125,8 +125,8 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 			var candidates []Transition
 			if ts, ok := cur.On[event.Type]; ok {
 				candidates = ts
-			} else if ts, ok := cur.After[event.Type]; ok {
-				candidates = ts
+			} else {
+				candidates = afterCandidates(cur, event.Type)
 			}
 			found := false
 			for _, t := range candidates {

@@ -13,16 +13,22 @@ type Agent struct {
 	EntityID             int64
 	History              map[string][]*StateNode // history node ID → recorded atomic snapshot
 	ActivatedByComponent string                  // non-empty if activated via AttachComponent
+	TickDurationMs       int64
 }
 
 // NewAgent returns an Agent with no active configuration.
 // Call StartAgent once before delivering events via SendEvent.
-func NewAgent(def *MachineDefinition, entityID int64, activatedByComponent string) *Agent {
+// tickDurationMs sets the tick duration for after-event scheduling; if <= 0 it defaults to 50.
+func NewAgent(def *MachineDefinition, entityID int64, activatedByComponent string, tickDurationMs int64) *Agent {
+	if tickDurationMs <= 0 {
+		tickDurationMs = 50
+	}
 	return &Agent{
 		Definition:           def,
 		EntityID:             entityID,
 		History:              make(map[string][]*StateNode),
 		ActivatedByComponent: activatedByComponent,
+		TickDurationMs:       tickDurationMs,
 	}
 }
 
@@ -71,7 +77,7 @@ func StartAgent(agent *Agent, registry *Registry, tick int64, world WorldWriter,
 			return fmt.Errorf("StartAgent: entry actions for %q: %w", state.ID, err)
 		}
 		for duration := range state.After {
-			targetTick := tick + parseDurationTicks(duration, 50)
+			targetTick := tick + parseDurationTicks(duration, agent.TickDurationMs)
 			evType := afterEventType(duration, state.ID)
 			if err := mw.ScheduleAfterEvent(agent.EntityID, def.ID, evType, targetTick); err != nil {
 				return fmt.Errorf("StartAgent: scheduling after for %q: %w", state.ID, err)
