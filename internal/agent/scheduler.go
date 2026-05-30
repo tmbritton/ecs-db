@@ -51,7 +51,6 @@ func afterEventType(duration, stateID string) string {
 // afterCandidates returns the After transitions for cur whose computed event type
 // matches eventType. After keys are raw duration strings; the event type is
 // "xstate.after(<duration>).<state-id>", so we compute and compare.
-// Used by the interpreter in Task 3 (after-event routing fix).
 func afterCandidates(cur *StateNode, eventType string) []Transition {
 	for duration, ts := range cur.After {
 		if eventType == afterEventType(duration, cur.ID) {
