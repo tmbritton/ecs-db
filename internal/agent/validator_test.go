@@ -344,3 +344,35 @@ func TestValidateMachine_NestedStateErrors(t *testing.T) {
 		t.Errorf("Field = %q, want %q", errs[0].Field, "unknownAction")
 	}
 }
+
+func TestValidateMachine_AfterDuration_Valid(t *testing.T) {
+	s := testSchema()
+	r := NewRegistry()
+	for _, dur := range []string{"500", "500ms", "1s", "1.5s", "2m"} {
+		raw := `{"id":"m","initial":"idle","states":{"idle":{"after":{"` + dur + `":[{"target":"idle"}]}}}}`
+		def := mustParse(t, raw)
+		errs := ValidateMachine(def, r, s)
+		for _, e := range errs {
+			if e.Field == dur {
+				t.Errorf("duration %q rejected unexpectedly: %s", dur, e.Message)
+			}
+		}
+	}
+}
+
+func TestValidateMachine_AfterDuration_Invalid(t *testing.T) {
+	s := testSchema()
+	r := NewRegistry()
+	raw := `{"id":"m","initial":"idle","states":{"idle":{"after":{"bad":[{"target":"idle"}]}}}}`
+	def := mustParse(t, raw)
+	errs := ValidateMachine(def, r, s)
+	found := false
+	for _, e := range errs {
+		if e.Field == "bad" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected validation error for duration 'bad', got none")
+	}
+}

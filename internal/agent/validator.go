@@ -125,7 +125,13 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 			errs = append(errs, validateTransition(machineID, node.ID, t, registry, knownStates)...)
 		}
 	}
-	for _, transitions := range node.After {
+	for duration, transitions := range node.After {
+		if _, err := ParseDurationMs(duration); err != nil {
+			errs = append(errs, ValidationError{
+				MachineID: machineID, StateID: node.ID, Field: duration,
+				Message: fmt.Sprintf("after duration %q is invalid: %v", duration, err),
+			})
+		}
 		for _, t := range transitions {
 			errs = append(errs, validateTransition(machineID, node.ID, t, registry, knownStates)...)
 		}
