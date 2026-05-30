@@ -143,7 +143,7 @@ func selectEligibleTransitions(agent *Agent, event Event, registry *Registry, re
 					// This prevents sibling parallel-region atoms from firing the
 					// same transition a second time when cur is a parallel ancestor.
 					for _, otherAtom := range agent.Configuration {
-						if isDescendant(otherAtom, cur) {
+						if isDescendantOrSelf(otherAtom, cur) {
 							handled[otherAtom] = true
 						}
 					}
@@ -209,7 +209,7 @@ func isDescendantOrRoot(s, ancestor *StateNode) bool {
 	if ancestor == nil {
 		return true // nil = machine root; every node is a descendant
 	}
-	return isDescendant(s, ancestor)
+	return isDescendantOrSelf(s, ancestor)
 }
 
 // lcaNode returns the Lowest Common Ancestor of a and b.
@@ -251,7 +251,7 @@ func recordHistoryNodes(agent *Agent, exitSet []*StateNode) {
 						snapshot = append(snapshot, active)
 					}
 				} else {
-					if isDescendant(active, state) {
+					if isDescendantOrSelf(active, state) {
 						snapshot = append(snapshot, active)
 					}
 				}

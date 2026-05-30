@@ -142,8 +142,8 @@ func nodeDepth(n *StateNode) int {
 	return depth
 }
 
-// isDescendant reports whether s is equal to ancestor or a descendant of it.
-func isDescendant(s, ancestor *StateNode) bool {
+// isDescendantOrSelf reports whether s is equal to ancestor or a descendant of it.
+func isDescendantOrSelf(s, ancestor *StateNode) bool {
 	for cur := s; cur != nil; cur = cur.Parent {
 		if cur == ancestor {
 			return true
