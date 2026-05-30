@@ -133,7 +133,7 @@ Design spec: [`docs/superpowers/specs/2026-05-27-epic3-state-machine-design.md`]
   - Wrap one event delivery in one SQLite transaction — crash mid-event leaves DB consistent
   - Write `behavior_components` and `transitions` rows per event
 
-- [ ] **Delayed transitions (`after`)** — Behaviors need timers.
+- [x] **Delayed transitions (`after`)** — Behaviors need timers.
   - Schedule into `event_queue` with target tick; cancel on state exit
   - `after` durations converted to tick counts at load time
 

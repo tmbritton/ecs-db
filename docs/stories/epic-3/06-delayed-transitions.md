@@ -1,7 +1,7 @@
 # Story 6: Delayed Transitions (`after`)
 
 **Epic:** 3 — Agents (behavior-as-data) runtime  
-**Status:** 🔲 Not started  
+**Status:** ✅ Done  
 **Priority:** High — `after` is used in the wandering_goblin example and most real behaviors
 
 **Depends on:** Story 5 (interpreter entry/exit hooks)
@@ -16,17 +16,17 @@ The tick loop (Epic 5) drains `event_queue` rows where `target_tick ≤ current_
 
 ## Acceptance Criteria
 
-- [ ] `after` duration strings parsed and converted to integer tick counts at machine load time
+- [x] `after` duration strings parsed and converted to integer tick counts at machine load time
   - Millisecond integers: `"500"` → 500ms → `ceil(500 / tick_duration_ms)` ticks
   - Duration strings: `"500ms"`, `"1s"`, `"1.5s"`, `"2m"` all handled
   - Invalid duration string → validation error at load time (not runtime)
-- [ ] On entering a state with `after` transitions, one `event_queue` row is inserted per `after` entry: `entity_id`, `machine_id`, `event_type = "after:<state-id>:<duration>"`, `target_tick`
-- [ ] On exiting a state, all `event_queue` rows for that `(entity_id, machine_id, state-id)` are deleted
-- [ ] Scheduling and cancellation happen inside the same `*sql.Tx` as the microstep that caused the entry/exit
-- [ ] Tick duration (ms per tick) is configurable; defaults to 50ms (20Hz)
-- [ ] A state with multiple `after` entries schedules all of them; only the first to fire (lowest `target_tick`) will have an effect since entering a new state cancels the others
-- [ ] Tests: enter state with `after` → row appears in `event_queue`; exit state → row deleted; re-enter state → new row with updated `target_tick`
-- [ ] 100% test coverage on scheduling and cancellation logic
+- [x] On entering a state with `after` transitions, one `event_queue` row is inserted per `after` entry: `entity_id`, `machine_id`, `event_type = "after:<state-id>:<duration>"`, `target_tick`
+- [x] On exiting a state, all `event_queue` rows for that `(entity_id, machine_id, state-id)` are deleted
+- [x] Scheduling and cancellation happen inside the same `*sql.Tx` as the microstep that caused the entry/exit
+- [x] Tick duration (ms per tick) is configurable; defaults to 50ms (20Hz)
+- [x] A state with multiple `after` entries schedules all of them; only the first to fire (lowest `target_tick`) will have an effect since entering a new state cancels the others
+- [x] Tests: enter state with `after` → row appears in `event_queue`; exit state → row deleted; re-enter state → new row with updated `target_tick`
+- [x] 100% test coverage on scheduling and cancellation logic
 
 ## Notes
 

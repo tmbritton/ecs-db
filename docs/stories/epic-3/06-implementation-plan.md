@@ -1,6 +1,6 @@
 # Story 6: Delayed Transitions (`after`) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Wire `after`-transition scheduling/cancellation end-to-end: duration parsing in the agent package, corrected after-event routing in the interpreter, load-time duration validation, and a real SQL-backed `MachineWriter` in `internal/storage`.
 
@@ -45,7 +45,7 @@ Story 5 implemented the full SCXML microstep algorithm and called `mw.ScheduleAf
 - Create: `internal/agent/scheduler.go`
 - Create: `internal/agent/scheduler_test.go`
 
-- [ ] **Step 1: Write failing scheduler_test.go**
+- [x] **Step 1: Write failing scheduler_test.go**
 
 ```go
 package agent
@@ -147,7 +147,7 @@ func TestDurationToTicks_ZeroTickDuration(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to confirm compile failure**
+- [x] **Step 2: Run to confirm compile failure**
 
 ```
 go test ./internal/agent/... -run "TestParseDurationMs|TestDurationToTicks" -v 2>&1 | head -10
@@ -155,7 +155,7 @@ go test ./internal/agent/... -run "TestParseDurationMs|TestDurationToTicks" -v 2
 
 Expected: `undefined: ParseDurationMs`, `undefined: DurationToTicks`.
 
-- [ ] **Step 3: Create scheduler.go**
+- [x] **Step 3: Create scheduler.go**
 
 ```go
 package agent
@@ -218,7 +218,7 @@ func afterCandidates(cur *StateNode, eventType string) []Transition {
 
 Note: `afterEventType` and `parseDurationTicks` are moved here from `agent.go`; the old definitions in `agent.go` must be deleted in Task 2.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```
 go test ./internal/agent/... -run "TestParseDurationMs|TestDurationToTicks" -v
@@ -226,7 +226,7 @@ go test ./internal/agent/... -run "TestParseDurationMs|TestDurationToTicks" -v
 
 Expected: all pass.
 
-- [ ] **Step 5: Full regression check**
+- [x] **Step 5: Full regression check**
 
 ```
 go test ./...
@@ -234,7 +234,7 @@ go test ./...
 
 Expected: all pass (old `afterEventType` still in agent.go — no conflict yet since they're identical).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/agent/scheduler.go internal/agent/scheduler_test.go
@@ -249,7 +249,7 @@ git commit -m "feat(epic-3/story-6): add scheduler duration parsing"
 - Modify: `internal/agent/agent.go`
 - Modify: `internal/agent/agent_test.go`
 
-- [ ] **Step 1: Edit agent.go**
+- [x] **Step 1: Edit agent.go**
 
 **(a) Add `TickDurationMs` to `Agent` struct:**
 
@@ -295,7 +295,7 @@ for duration := range state.After {
 
 **(e) Remove `strings` and `strconv` imports** from `agent.go` — only `"fmt"` remains.
 
-- [ ] **Step 2: Update agent_test.go — fix NewAgent call sites**
+- [x] **Step 2: Update agent_test.go — fix NewAgent call sites**
 
 Every `NewAgent(def, id, comp)` gains a fourth argument `0`:
 
@@ -327,7 +327,7 @@ func TestNewAgent_TickDurationMs_Custom(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run agent tests**
+- [x] **Step 3: Run agent tests**
 
 ```
 go test ./internal/agent/... -run "TestNewAgent|TestStartAgent" -v
@@ -335,7 +335,7 @@ go test ./internal/agent/... -run "TestNewAgent|TestStartAgent" -v
 
 Expected: all pass.
 
-- [ ] **Step 4: Full regression check**
+- [x] **Step 4: Full regression check**
 
 ```
 go test ./...
@@ -343,7 +343,7 @@ go test ./...
 
 interpreter_test.go also calls `NewAgent` — those will fail here. That's expected; fix them in Task 3.
 
-- [ ] **Step 5: Commit (after Task 3 fixes interpreter_test.go)**
+- [x] **Step 5: Commit (after Task 3 fixes interpreter_test.go)**
 
 Hold this commit until Task 3 is complete so the repo compiles cleanly.
 
@@ -357,7 +357,7 @@ Hold this commit until Task 3 is complete so the repo compiles cleanly.
 
 **The bug:** `selectEligibleTransitions` checks `cur.After[event.Type]` where `After` keys are raw duration strings (`"500"`) but delivered event types are `"xstate.after(500).m.idle"`. The lookup always misses.
 
-- [ ] **Step 1: Fix selectEligibleTransitions in interpreter.go**
+- [x] **Step 1: Fix selectEligibleTransitions in interpreter.go**
 
 Find the candidates lookup block inside `selectEligibleTransitions`:
 
@@ -383,7 +383,7 @@ if ts, ok := cur.On[event.Type]; ok {
 
 (`afterCandidates` is defined in `scheduler.go`, same package.)
 
-- [ ] **Step 2: Update the parseDurationTicks call in SendEvent**
+- [x] **Step 2: Update the parseDurationTicks call in SendEvent**
 
 Find the after-scheduling loop inside `SendEvent`'s entry block:
 
@@ -399,7 +399,7 @@ for duration := range state.After {
     targetTick := tick + parseDurationTicks(duration, agent.TickDurationMs)
 ```
 
-- [ ] **Step 3: Update interpreter_test.go — fix NewAgent call sites**
+- [x] **Step 3: Update interpreter_test.go — fix NewAgent call sites**
 
 Every `NewAgent(def, id, comp)` call gains `0` as the fourth argument. These appear in:
 - The `startedAgent` helper: `a := NewAgent(def, entityID, "", 0)`
@@ -413,7 +413,7 @@ Every `NewAgent(def, id, comp)` call gains `0` as the fourth argument. These app
 - `TestSendEvent_FinalState_DetachesActivatingComponent`: `a := NewAgent(def, 1, "StatusBuff", 0)`
 - `TestSendEvent_FinalState_NoPrimaryDetach`: `a := NewAgent(def, 1, "", 0)`
 
-- [ ] **Step 4: Add after-event routing test to interpreter_test.go**
+- [x] **Step 4: Add after-event routing test to interpreter_test.go**
 
 ```go
 func TestSendEvent_AfterEventDelivery_Routed(t *testing.T) {
@@ -447,7 +447,7 @@ func TestSendEvent_AfterEventDelivery_Routed(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run all agent tests**
+- [x] **Step 5: Run all agent tests**
 
 ```
 go test ./internal/agent/... -v
@@ -455,7 +455,7 @@ go test ./internal/agent/... -v
 
 Expected: all pass including `TestSendEvent_AfterEventDelivery_Routed`.
 
-- [ ] **Step 6: Full regression check**
+- [x] **Step 6: Full regression check**
 
 ```
 go test ./...
@@ -463,7 +463,7 @@ go test ./...
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit Tasks 2 and 3 together**
+- [x] **Step 7: Commit Tasks 2 and 3 together**
 
 ```bash
 git add internal/agent/agent.go internal/agent/agent_test.go \
@@ -479,7 +479,7 @@ git commit -m "feat(epic-3/story-6): TickDurationMs config; fix after-event rout
 - Modify: `internal/agent/validator.go`
 - Modify: `internal/agent/validator_test.go`
 
-- [ ] **Step 1: Add after-duration validation to validateStateNode**
+- [x] **Step 1: Add after-duration validation to validateStateNode**
 
 In `validateStateNode`, find the existing `for _, transitions := range node.After` loop:
 
@@ -507,7 +507,7 @@ for duration, transitions := range node.After {
 }
 ```
 
-- [ ] **Step 2: Add tests to validator_test.go**
+- [x] **Step 2: Add tests to validator_test.go**
 
 Look at `validator_test.go` for the existing `testSchema()` and `mustParse()` helpers, then append:
 
@@ -545,7 +545,7 @@ func TestValidateMachine_AfterDuration_Invalid(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```
 go test ./internal/agent/... -run "TestValidateMachine" -v
@@ -553,7 +553,7 @@ go test ./internal/agent/... -run "TestValidateMachine" -v
 
 Expected: all pass.
 
-- [ ] **Step 4: Full regression check**
+- [x] **Step 4: Full regression check**
 
 ```
 go test ./...
@@ -561,7 +561,7 @@ go test ./...
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add internal/agent/validator.go internal/agent/validator_test.go
@@ -580,7 +580,7 @@ The `event_queue`, `behavior_components`, and `transitions` tables already exist
 
 **Cancellation LIKE pattern:** `xstate.after(%).<stateID>` — safe because the literal `).` anchors the boundary between duration and state ID. See the Context section for the proof that this pattern cannot spuriously match sibling states.
 
-- [ ] **Step 1: Write failing machine_writer_test.go**
+- [x] **Step 1: Write failing machine_writer_test.go**
 
 ```go
 package storage_test
@@ -890,7 +890,7 @@ func TestAfterEventFlow_EnterExitReenter(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to confirm compile failure**
+- [x] **Step 2: Run to confirm compile failure**
 
 ```
 go test ./internal/storage/... -run "TestSetMachineState|TestScheduleAfterEvent|TestCancelAfterEvents|TestAppendTransition|TestAfterEventFlow" -v 2>&1 | head -15
@@ -898,7 +898,7 @@ go test ./internal/storage/... -run "TestSetMachineState|TestScheduleAfterEvent|
 
 Expected: `undefined: storage.NewMachineWriter`.
 
-- [ ] **Step 3: Create machine_writer.go**
+- [x] **Step 3: Create machine_writer.go**
 
 ```go
 package storage
@@ -1017,7 +1017,7 @@ func escapeForLIKE(s string) string {
 var _ agent.MachineWriter = (*sqliteMachineWriter)(nil)
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```
 go test ./internal/storage/... -run "TestSetMachineState|TestScheduleAfterEvent|TestCancelAfterEvents|TestAppendTransition|TestAfterEventFlow" -v
@@ -1025,7 +1025,7 @@ go test ./internal/storage/... -run "TestSetMachineState|TestScheduleAfterEvent|
 
 Expected: all pass.
 
-- [ ] **Step 5: Full regression check and coverage**
+- [x] **Step 5: Full regression check and coverage**
 
 ```
 go test ./... && \
@@ -1037,7 +1037,7 @@ go tool cover -func=storage_cov.out | grep "machine_writer\.go"
 
 Expected: all pass; `machine_writer.go` ≥ 90%; `scheduler.go` ≥ 90%.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add internal/storage/machine_writer.go internal/storage/machine_writer_test.go
