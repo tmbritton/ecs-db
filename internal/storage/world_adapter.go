@@ -3,10 +3,20 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 )
+
+var safeIdentifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+
+func validateIdentifier(s, context string) error {
+	if !safeIdentifier.MatchString(s) {
+		return fmt.Errorf("%s: unsafe identifier %q", context, s)
+	}
+	return nil
+}
 
 // txWorldWriter implements agent.WorldWriter using a live *sql.Tx.
 // Table names are "comp_" + lowercase(compName); column names are lowercase(field).
@@ -23,11 +33,18 @@ func (w *txWorldWriter) SpawnEntity(entityType string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("SpawnEntity: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("SpawnEntity: LastInsertId: %w", err)
+	}
+	return id, nil
 }
 
 func (w *txWorldWriter) AttachComponent(entityID int64, compName string, values map[string]any) error {
 	table := "comp_" + strings.ToLower(compName)
+	if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "AttachComponent compName"); err != nil {
+		return err
+	}
 	cols := []string{"entity_id"}
 	args := []any{entityID}
 	for col, val := range values {
@@ -50,6 +67,9 @@ func (w *txWorldWriter) AttachComponent(entityID int64, compName string, values 
 
 func (w *txWorldWriter) DetachComponent(entityID int64, compName string) error {
 	table := "comp_" + strings.ToLower(compName)
+	if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "DetachComponent compName"); err != nil {
+		return err
+	}
 	_, err := w.tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE entity_id = ?", table), entityID)
 	if err != nil {
 		return fmt.Errorf("DetachComponent %q: %w", compName, err)
@@ -60,6 +80,12 @@ func (w *txWorldWriter) DetachComponent(entityID int64, compName string) error {
 func (w *txWorldWriter) SetComponentValue(entityID int64, compName, field string, value any) error {
 	table := "comp_" + strings.ToLower(compName)
 	col := strings.ToLower(field)
+	if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "SetComponentValue compName"); err != nil {
+		return err
+	}
+	if err := validateIdentifier(col, "SetComponentValue field"); err != nil {
+		return err
+	}
 	_, err := w.tx.Exec(
 		fmt.Sprintf("UPDATE %s SET %s = ? WHERE entity_id = ?", table, col),
 		value, entityID,
@@ -80,6 +106,12 @@ func NewTxWorldReader(tx *sql.Tx) agent.WorldReader { return &txWorldReader{tx: 
 func (r *txWorldReader) GetComponentValue(entityID int64, compName, field string) (any, error) {
 	table := "comp_" + strings.ToLower(compName)
 	col := strings.ToLower(field)
+	if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "GetComponentValue compName"); err != nil {
+		return nil, err
+	}
+	if err := validateIdentifier(col, "GetComponentValue field"); err != nil {
+		return nil, err
+	}
 	var val any
 	err := r.tx.QueryRow(
 		fmt.Sprintf("SELECT %s FROM %s WHERE entity_id = ?", col, table), entityID,
@@ -95,6 +127,9 @@ func (r *txWorldReader) GetComponentValue(entityID int64, compName, field string
 
 func (r *txWorldReader) HasComponent(entityID int64, compName string) (bool, error) {
 	table := "comp_" + strings.ToLower(compName)
+	if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "HasComponent compName"); err != nil {
+		return false, err
+	}
 	var n int
 	err := r.tx.QueryRow(
 		fmt.Sprintf("SELECT 1 FROM %s WHERE entity_id = ? LIMIT 1", table), entityID,
