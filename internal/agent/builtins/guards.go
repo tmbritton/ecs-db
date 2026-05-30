@@ -37,6 +37,10 @@ func (g *atTargetGuard) Evaluate(ctx agent.GuardContext) bool {
 		return false
 	}
 
+	if ok, _ := ctx.World.HasComponent(ctx.EntityID, "Position"); !ok {
+		return false
+	}
+
 	px, _ := ctx.World.GetComponentValue(ctx.EntityID, "Position", "x")
 	py, _ := ctx.World.GetComponentValue(ctx.EntityID, "Position", "y")
 	tx, _ := ctx.World.GetComponentValue(ctx.EntityID, txComp, "target_x")
@@ -55,6 +59,13 @@ func (g *inRangeGuard) Evaluate(ctx agent.GuardContext) bool {
 	maxDist := toFloat(ctx.Params["distance"])
 	targetID, ok := resolveTargetID(ctx.World, ctx.Params["target"])
 	if !ok {
+		return false
+	}
+
+	if ok, _ := ctx.World.HasComponent(ctx.EntityID, "Position"); !ok {
+		return false
+	}
+	if ok, _ := ctx.World.HasComponent(targetID, "Position"); !ok {
 		return false
 	}
 
