@@ -95,7 +95,11 @@ func SendEvent(agent *Agent, event Event, tick int64, registry *Registry, world 
 		}
 	}
 
-	agent.Configuration = atomicStates(entrySet)
+	// Only update Configuration for targeted transitions.
+	// Targetless transitions run actions without changing active states.
+	if len(entrySet) > 0 {
+		agent.Configuration = atomicStates(entrySet)
+	}
 
 	toStates := nodeIDs(agent.Configuration)
 	if err := mw.SetMachineState(agent.EntityID, agent.Definition.ID, toStates, tick); err != nil {

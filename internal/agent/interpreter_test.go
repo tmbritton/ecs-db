@@ -490,3 +490,42 @@ func TestSendEvent_AfterEventDelivery_Routed(t *testing.T) {
 		t.Error("after-transition action not reached — event routing is broken")
 	}
 }
+
+func TestSendEvent_TargetlessTransition_PreservesConfiguration(t *testing.T) {
+	// A targetless transition runs its actions but must NOT clear the Configuration.
+	// Regression: line 98 of interpreter.go set Configuration = nil for empty entrySet.
+	r := interpreterRegistry()
+	sideEffect := &callCountingAction{}
+	r.RegisterAction(ActionMeta{Name: "sideEffect"}, sideEffect)
+
+	def := mustParse(t, `{
+		"id":"m","initial":"active",
+		"states":{
+			"active":{
+				"on":{
+					"DO":[{"actions":["sideEffect"]}]
+				}
+			}
+		}
+	}`)
+	def.ContextManifest = map[string]string{}
+	a := NewAgent(def, 1, "", 0)
+	mw := &testMachineWriter{}
+	if err := StartAgent(a, r, 0, &captureWorldWriter{}, &testWorldReader{}, mw); err != nil {
+		t.Fatalf("StartAgent: %v", err)
+	}
+
+	if err := SendEvent(a, Event{Type: "DO"}, 1, r, &captureWorldWriter{}, &testWorldReader{}, mw); err != nil {
+		t.Fatalf("SendEvent: %v", err)
+	}
+
+	if sideEffect.count != 1 {
+		t.Errorf("sideEffect.count = %d, want 1", sideEffect.count)
+	}
+	if len(a.Configuration) != 1 {
+		t.Fatalf("Configuration len = %d, want 1 (targetless must not clear active states)", len(a.Configuration))
+	}
+	if a.Configuration[0].ID != "m.active" {
+		t.Errorf("Configuration[0].ID = %q, want m.active", a.Configuration[0].ID)
+	}
+}
