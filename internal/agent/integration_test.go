@@ -140,7 +140,7 @@ func startAgentTx(t *testing.T, db *sql.DB, a *agent.Agent, reg *agent.Registry)
 	}
 }
 
-func sendEvent(t *testing.T, db *sql.DB, a *agent.Agent, ev agent.Event, tick int64, reg *agent.Registry) { //nolint:unused
+func sendEvent(t *testing.T, db *sql.DB, a *agent.Agent, ev agent.Event, tick int64, reg *agent.Registry) {
 	t.Helper()
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -226,5 +226,147 @@ func TestWanderingGoblin_SetTimerOnEntry(t *testing.T) {
 	}
 	if patience != 40 {
 		t.Errorf("patience = %v, want 40 (set by setTimer on idle entry)", patience)
+	}
+}
+
+// ── Wandering goblin: event delivery ─────────────────────────────────────────
+
+func TestWanderingGoblin_TimerExpiredTransition(t *testing.T) {
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/wandering_goblin.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup health: %v", err)
+	}
+
+	a := agent.NewAgent(def, entityID, "", 50)
+	startAgentTx(t, db, a, reg)
+
+	// Zero patience so timerExpired guard returns true on next TICK.
+	if _, err := db.Exec("UPDATE comp_goblinstats SET patience=0 WHERE entity_id=?", entityID); err != nil {
+		t.Fatalf("zero patience: %v", err)
+	}
+
+	sendEvent(t, db, a, agent.Event{Type: "TICK"}, 1, reg)
+
+	states := currentStates(t, db, entityID, "wandering_goblin")
+	if len(states) == 0 || !strings.HasSuffix(states[0], ".wandering") {
+		t.Errorf("after TICK with patience=0: states=%v, want [...wandering]", states)
+	}
+}
+
+func TestWanderingGoblin_TargetlessMoveTowardTarget(t *testing.T) {
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/wandering_goblin.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup health: %v", err)
+	}
+
+	a := agent.NewAgent(def, entityID, "", 50)
+	startAgentTx(t, db, a, reg)
+
+	// Move to wandering via timer expiry.
+	if _, err := db.Exec("UPDATE comp_goblinstats SET patience=0 WHERE entity_id=?", entityID); err != nil {
+		t.Fatalf("zero patience: %v", err)
+	}
+	sendEvent(t, db, a, agent.Event{Type: "TICK"}, 1, reg)
+
+	// Set a far-away target so atTarget returns false → targetless TICK fires.
+	if _, err := db.Exec("UPDATE comp_goblinstats SET target_x=9999, target_y=9999 WHERE entity_id=?", entityID); err != nil {
+		t.Fatalf("set far target: %v", err)
+	}
+	sendEvent(t, db, a, agent.Event{Type: "TICK"}, 2, reg)
+
+	states := currentStates(t, db, entityID, "wandering_goblin")
+	if len(states) == 0 || !strings.HasSuffix(states[0], ".wandering") {
+		t.Errorf("after targetless TICK: states=%v, want [...wandering]", states)
+	}
+}
+
+func TestWanderingGoblin_PlayerNearbyTransition(t *testing.T) {
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/wandering_goblin.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup goblin position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup goblin health: %v", err)
+	}
+
+	// Create a Player so setPursueTarget (pursuing entry action) can resolve "$player".
+	playerID := insertEntity(t, db, "Player")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 50, 50)", playerID); err != nil {
+		t.Fatalf("setup player position: %v", err)
+	}
+
+	a := agent.NewAgent(def, entityID, "", 50)
+	startAgentTx(t, db, a, reg)
+
+	sendEvent(t, db, a, agent.Event{Type: "PLAYER_NEARBY"}, 1, reg)
+
+	states := currentStates(t, db, entityID, "wandering_goblin")
+	if len(states) == 0 || !strings.HasSuffix(states[0], ".pursuing") {
+		t.Errorf("after PLAYER_NEARBY: states=%v, want [...pursuing]", states)
+	}
+}
+
+func TestWanderingGoblin_TransitionRecordAppended(t *testing.T) {
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/wandering_goblin.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup goblin position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup goblin health: %v", err)
+	}
+
+	playerID := insertEntity(t, db, "Player")
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 50, 50)", playerID); err != nil {
+		t.Fatalf("setup player position: %v", err)
+	}
+
+	a := agent.NewAgent(def, entityID, "", 50)
+	startAgentTx(t, db, a, reg)
+
+	sendEvent(t, db, a, agent.Event{Type: "PLAYER_NEARBY"}, 1, reg)
+
+	// Query the transitions table — from_states and to_states are stored as JSON arrays.
+	var fromStates, toStates, event string
+	err := db.QueryRow(
+		"SELECT from_states, to_states, event FROM transitions WHERE entity_id=? AND machine_id=? ORDER BY id DESC LIMIT 1",
+		entityID, "wandering_goblin",
+	).Scan(&fromStates, &toStates, &event)
+	if err != nil {
+		t.Fatalf("query transitions: %v", err)
+	}
+	if !strings.Contains(fromStates, "idle") {
+		t.Errorf("from_states = %q, want to contain idle", fromStates)
+	}
+	if !strings.Contains(toStates, "pursuing") {
+		t.Errorf("to_states = %q, want to contain pursuing", toStates)
+	}
+	if event != "PLAYER_NEARBY" {
+		t.Errorf("event = %q, want PLAYER_NEARBY", event)
 	}
 }
