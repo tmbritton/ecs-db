@@ -177,7 +177,7 @@ func TestLoader_ReloadFile_Success(t *testing.T) {
 	if err := os.WriteFile(path, []byte(validMachineV2JSON), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := l.ReloadFile(path, "core"); err != nil {
+	if err := l.ReloadFile(path, "core", nil); err != nil {
 		t.Fatalf("ReloadFile: %v", err)
 	}
 	def, ok := l.Get("test_machine")
@@ -201,7 +201,7 @@ func TestLoader_ReloadFile_FailureRetainsPrevious(t *testing.T) {
 	if err := os.WriteFile(path, []byte(invalidMachineJSON), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if err := l.ReloadFile(path, "core"); err == nil {
+	if err := l.ReloadFile(path, "core", nil); err == nil {
 		t.Fatal("expected error from ReloadFile on invalid machine, got nil")
 	}
 
@@ -216,8 +216,61 @@ func TestLoader_ReloadFile_FailureRetainsPrevious(t *testing.T) {
 
 func TestLoader_ReloadFile_MissingFile(t *testing.T) {
 	l := NewLoader(testRegistry(), testSchema())
-	err := l.ReloadFile("/nonexistent/path/m.json", "core")
+	err := l.ReloadFile("/nonexistent/path/m.json", "core", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestLoader_ReloadFile_InvokesCallback(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "m.json", validMachineJSON)
+
+	l := NewLoader(testRegistry(), testSchema())
+	if _, err := l.LoadMachine(path); err != nil {
+		t.Fatalf("initial load: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(validMachineV2JSON), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var gotID string
+	var gotStates map[string]bool
+	cb := ReconcileFunc(func(machineID string, validStates map[string]bool) {
+		gotID = machineID
+		gotStates = validStates
+	})
+
+	if err := l.ReloadFile(path, "core", cb); err != nil {
+		t.Fatalf("ReloadFile: %v", err)
+	}
+	if gotID != "test_machine" {
+		t.Errorf("callback machineID = %q, want %q", gotID, "test_machine")
+	}
+	if !gotStates["a"] || !gotStates["b"] {
+		t.Errorf("callback validStates missing expected keys: %v", gotStates)
+	}
+}
+
+func TestLoader_ReloadFile_CallbackNotCalledOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "m.json", validMachineJSON)
+
+	l := NewLoader(testRegistry(), testSchema())
+	if _, err := l.LoadMachine(path); err != nil {
+		t.Fatalf("initial load: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(invalidMachineJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	called := false
+	cb := ReconcileFunc(func(machineID string, validStates map[string]bool) {
+		called = true
+	})
+
+	_ = l.ReloadFile(path, "core", cb)
+	if called {
+		t.Error("callback must not be invoked on reload failure")
 	}
 }

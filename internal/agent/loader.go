@@ -104,10 +104,16 @@ func (l *Loader) ScanDir(dir, modName string) (int, error) {
 	return count, nil
 }
 
+// ReconcileFunc is called after a successful hot-reload with the machine ID
+// and the full set of valid state identifiers in the new definition.
+// It is invoked synchronously before ReloadFile returns.
+type ReconcileFunc func(machineID string, validStates map[string]bool)
+
 // ReloadFile re-parses and re-validates the machine at path under modName.
 // On success the in-memory definition is atomically replaced and a log line is printed.
+// If fn is non-nil it is called with the new machine's ID and valid state set.
 // On failure the previous definition is retained and the error is returned.
-func (l *Loader) ReloadFile(path, modName string) error {
+func (l *Loader) ReloadFile(path, modName string, fn ReconcileFunc) error {
 	def, err := l.LoadMachine(path)
 	if err != nil {
 		fmt.Printf("[hot-reload] machine reload failed (%s): %v\n", path, err)
@@ -117,6 +123,9 @@ func (l *Loader) ReloadFile(path, modName string) error {
 	l.sources[def.ID] = modName + ":" + path
 	l.mu.Unlock()
 	fmt.Printf("[hot-reload] machine %q reloaded from %s\n", def.ID, path)
+	if fn != nil {
+		fn(def.ID, collectStateIDs(def.States))
+	}
 	return nil
 }
 

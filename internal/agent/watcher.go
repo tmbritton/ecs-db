@@ -20,11 +20,12 @@ type WatchedDir struct {
 // Watcher monitors behavior directories for *.json file changes and hot-reloads
 // machine definitions into a Loader via ReloadFile.
 type Watcher struct {
-	loader   *Loader
-	dirs     []WatchedDir
-	debounce time.Duration
-	mu       sync.Mutex
-	timers   map[string]*time.Timer // keyed by absolute file path
+	loader    *Loader
+	dirs      []WatchedDir
+	debounce  time.Duration
+	mu        sync.Mutex
+	timers    map[string]*time.Timer // keyed by absolute file path
+	reconcile ReconcileFunc          // optional; nil until wired in Epic 5
 }
 
 // NewWatcher creates a Watcher. debounce controls how long to wait after the
@@ -40,6 +41,12 @@ func NewWatcher(loader *Loader, dirs []WatchedDir, debounce time.Duration) *Watc
 		debounce: debounce,
 		timers:   make(map[string]*time.Timer),
 	}
+}
+
+// SetReconcileFunc sets the callback invoked after each successful reload.
+// Must be called before Start.
+func (w *Watcher) SetReconcileFunc(fn ReconcileFunc) {
+	w.reconcile = fn
 }
 
 // Start watches all configured directories until ctx is cancelled.
@@ -87,6 +94,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 // the same file cancels any pending timer and starts a fresh one.
 func (w *Watcher) scheduleReload(filePath string) {
 	modName := w.modNameForPath(filePath)
+	reconcile := w.reconcile
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if t, ok := w.timers[filePath]; ok {
@@ -96,7 +104,7 @@ func (w *Watcher) scheduleReload(filePath string) {
 		w.mu.Lock()
 		delete(w.timers, filePath)
 		w.mu.Unlock()
-		_ = w.loader.ReloadFile(filePath, modName)
+		_ = w.loader.ReloadFile(filePath, modName, reconcile)
 	})
 }
 
