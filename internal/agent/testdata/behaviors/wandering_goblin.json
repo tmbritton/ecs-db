@@ -1,0 +1,54 @@
+{
+  "id": "wandering_goblin",
+  "initial": "idle",
+  "context": {
+    "speed": 2.0,
+    "aggroRange": 80,
+    "patience": 0,
+    "target_x": 0,
+    "target_y": 0
+  },
+  "states": {
+    "idle": {
+      "entry": [{ "type": "setTimer", "params": { "key": "patience", "ticks": 40 } }],
+      "on": {
+        "TICK": [
+          {
+            "target": "wandering",
+            "cond": { "type": "timerExpired", "params": { "key": "patience" } }
+          }
+        ],
+        "PLAYER_NEARBY": "pursuing"
+      }
+    },
+    "wandering": {
+      "entry": [{ "type": "pickRandomTarget", "params": { "radius": 100 } }],
+      "on": {
+        "TICK": [
+          { "target": "idle", "cond": "atTarget" },
+          { "actions": [{ "type": "moveTowardTarget" }] }
+        ],
+        "PLAYER_NEARBY": "pursuing"
+      }
+    },
+    "pursuing": {
+      "entry": [{ "type": "setPursueTarget" }],
+      "on": {
+        "TICK": [
+          {
+            "target": "attacking",
+            "cond": { "type": "inRange", "params": { "distance": 16 } }
+          },
+          { "actions": [{ "type": "moveTowardTarget", "params": { "speed_mult": 1.5 } }] }
+        ],
+        "PLAYER_FAR": "idle"
+      }
+    },
+    "attacking": {
+      "entry": [
+        { "type": "dealDamage", "params": { "amount": 5, "target": "$player" } }
+      ],
+      "after": { "500": "pursuing" }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "burning",
+  "initial": "active",
+  "context": {
+    "duration": 0
+  },
+  "states": {
+    "active": {
+      "on": {
+        "EXTINGUISH": "extinguished"
+      }
+    },
+    "extinguished": {
+      "type": "final"
+    }
+  }
+}
