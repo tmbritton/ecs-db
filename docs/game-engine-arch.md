@@ -35,12 +35,18 @@ The database-as-contract discipline is maintained within the monolith by convent
                     │   HTTP + web UI     │
                     └─────────────────────┘
 
-┌─────────────────────────┐
-│  mods/                  │
-│   ├── schema.json       │ ──loads──► Interpreter
-│   └── behaviors/*.json  │
-│  hot-reloaded           │
-└─────────────────────────┘
+┌─────────────────────────────────┐
+│  game.toml                      │ ──configures──► Interpreter
+├─────────────────────────────────┤
+│  schema.json                    │ ──loads──► Interpreter
+├─────────────────────────────────┤
+│  Core mod (and optional mods):  │
+│   behaviors/*.json  ────────────│──loads──► Interpreter
+│   actions/*.lua     ────────────│──(future)
+│   guards/*.lua      ────────────│──(future)
+│   assets/           ────────────│──(future)
+│  hot-reloaded                   │
+└─────────────────────────────────┘
 ```
 
 ## The data model: ECS via schema.json
@@ -254,6 +260,41 @@ CREATE TABLE transitions (
 );
 ```
 
+## Configuration and the mod system
+
+The engine is configured by a TOML file, defaulting to `game.toml` in the working directory. An alternate path is passed with `-config ./path/to/config.toml`. If the file is absent the engine applies built-in defaults (`./ecs.db`, `./schema.json`, no mods) so it runs out-of-the-box without any config file present.
+
+```toml
+[database]
+path = "./ecs.db"
+
+[schema]
+path = "./schema.json"
+
+# Mods are loaded in array order. Later entries override earlier ones
+# when two mods declare a machine with the same ID (a warning is printed).
+[[mods]]
+name      = "core"
+behaviors = "./behaviors/"   # XState v4 JSON machine files
+actions   = "./actions/"     # Lua custom action scripts (future)
+guards    = "./guards/"      # Lua custom guard scripts (future)
+assets    = "./assets/"      # Sprites, sounds, etc. (future)
+```
+
+### Mod loading order and override semantics
+
+Mods are loaded in the order they appear in the `[[mods]]` array. Each mod's `behaviors/` directory is scanned for `*.json` files; every valid machine is registered by its `"id"` field. If a later mod declares a machine with the same ID as an earlier mod, the later definition replaces the earlier one and a warning is printed. This is intentional: mods can override core behavior by providing a machine with the same ID.
+
+A mod that fails to load (invalid JSON, unknown action/guard, undefined transition target) logs an error and is skipped; previously loaded machines remain active. The game does not crash on a bad mod file.
+
+### `actions` and `guards` directories (reserved)
+
+The `actions` and `guards` fields are present in the config schema now to establish the convention before the Lua integration epic arrives. They are parsed and stored but not yet acted on. When Lua support is added, the engine will scan each mod's `actions/` and `guards/` directories for `.lua` files and register them alongside the built-in Go implementations.
+
+### `assets` directory (reserved)
+
+Similarly `assets` is declared now for consistency. The renderer epic will use it to locate sprites, sounds, and other media per mod.
+
 ## Agents: behavior as data
 
 Game behavior is defined per-entity by JSON state machines, called **agents**. Agent definitions conform to the XState v4 spec (excluding `invoke`): states, transitions, conditions (`cond`), actions, context, entry/exit actions, delayed (`after`) transitions, hierarchical states, parallel states, final states, and history states.
@@ -370,12 +411,13 @@ The interpreter is the sole writer of world state and the only process that know
 
 On startup the interpreter:
 
-1. Loads `schema.json` and validates it. Rejects any component named "Behavior" (reserved).
-2. Opens or creates `world.sqlite`. Generates SQL DDL from the schema if creating; checks `schema_version` on open. Creates interpreter-managed tables (`behavior_components`, `transitions`, `event_queue`) with `CREATE TABLE IF NOT EXISTS`.
-3. Loads all `mods/behaviors/*.json` and validates them against registered actions, guards, and `schema.json` component fields. Reports errors loudly; skips invalid files.
-4. For each entity type that declares `"behavior"`, ensures active entities of that type have a corresponding `behavior_components` row.
-5. Starts the filesystem watcher for hot reload.
-6. Enters its tick loop.
+1. Reads `game.toml` (or falls back to built-in defaults if the file is absent).
+2. Loads `schema.json` (path from config) and validates it. Rejects any component named "Behavior" (reserved).
+3. Opens or creates the SQLite database (path from config). Generates SQL DDL from the schema if creating; checks `schema_version` on open. Creates interpreter-managed tables (`behavior_components`, `transitions`, `event_queue`) with `CREATE TABLE IF NOT EXISTS`.
+4. For each mod in config order, scans the mod's `behaviors/` directory and loads all `*.json` machine files, validating each against registered actions, guards, and `schema.json` component fields. Reports errors loudly; skips invalid files; logs a warning if a machine ID is overridden by a later mod.
+5. For each entity type that declares `"behavior"`, ensures active entities of that type have a corresponding `behavior_components` row.
+6. Starts the filesystem watcher for hot reload.
+7. Enters its tick loop.
 
 Its tick loop:
 
@@ -417,7 +459,7 @@ A "catch-up" policy handles the case where the renderer was paused (minimized wi
 
 ### Behavior library (in-process)
 
-A small component of the interpreter, not a separate process. Watches `mods/behaviors/` for file changes and maintains an in-memory map of machine IDs to parsed agent definitions. Validates references to actions and guards against the registries at load time.
+A small component of the interpreter, not a separate process. Watches each configured mod's `behaviors/` directory for file changes and maintains an in-memory map of machine IDs to parsed agent definitions. Validates references to actions and guards against the registries at load time.
 
 Behavior files with malformed JSON, references to unknown actions or guards, or transitions to undefined states log a warning and the file is skipped, leaving the previous version in memory. The game keeps running while a modder fixes their typo.
 

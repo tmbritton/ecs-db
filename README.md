@@ -63,12 +63,37 @@ See [`docs/plan.md`](docs/plan.md) for details and [`docs/game-engine-arch.md`](
 git clone https://github.com/tmbritton/ecs-db
 cd ecs-db
 
-# Build and run
+# Build and run (uses game.toml in the working directory)
 make build
 ./bin/ecs-db
+
+# Point at a different config file
+./bin/ecs-db -config ./my-game/game.toml
 ```
 
-This loads `schema.json`, creates (or opens) the SQLite database with generated tables, and exits. The CLI is still early — the full tick loop and Ebitengine renderer come in Epic 5.
+This reads `game.toml`, loads `schema.json`, creates (or opens) the SQLite database, and scans each mod's `behaviors/` directory for state machine files. The CLI is still early — the full tick loop and Ebitengine renderer come in Epic 5.
+
+## Configuration
+
+The engine is configured by `game.toml` (TOML format). If the file is absent, built-in defaults apply (`./ecs.db`, `./schema.json`, no mods).
+
+```toml
+[database]
+path = "./ecs.db"
+
+[schema]
+path = "./schema.json"
+
+# Mods are loaded in order; later entries override earlier ones on duplicate machine IDs.
+[[mods]]
+name      = "core"
+behaviors = "./behaviors/"   # XState v4 JSON state machines
+actions   = "./actions/"     # Lua custom actions (future)
+guards    = "./guards/"      # Lua custom guards (future)
+assets    = "./assets/"      # Sprites, sounds, etc. (future)
+```
+
+Multiple `[[mods]]` entries are supported. They are loaded in array order — a later mod can override a core machine by providing a `behaviors/*.json` file with the same `"id"`. A warning is printed when an override occurs.
 
 ## Why Go?
 
@@ -85,12 +110,18 @@ ecs-db/
 │   ├── game-engine-arch.md    # Full architecture document
 │   ├── plan.md                # Implementation roadmap
 │   └── stories/               # Refined story files per epic
-├── cmd/cli/main.go            # CLI entry point
+├── cmd/cli/main.go            # CLI entry point (-config flag, startup wiring)
 ├── internal/
 │   ├── agent/                 # State machine interpreter (parser, registry, SCXML engine)
+│   ├── config/                # TOML config loader (Config, ModConfig, Load, Defaults)
 │   ├── schema/                # Schema loading, validation, type definitions
 │   ├── storage/               # SQLite operations, DDL generation, MachineWriter
 │   └── world/                 # Domain interfaces (WorldWriter, WorldReader, Tx)
+├── behaviors/                 # Core game behavior machines (XState v4 JSON)
+├── actions/                   # Core Lua action scripts (future)
+├── guards/                    # Core Lua guard scripts (future)
+├── assets/                    # Core sprites, sounds, etc. (future)
+├── game.toml                  # Default configuration (database, schema, mod paths)
 ├── schema.json                # Declarative game data model (source of truth)
 ├── Makefile
 └── README.md
