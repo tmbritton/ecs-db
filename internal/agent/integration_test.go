@@ -437,3 +437,135 @@ func TestBurningLifecycle_FinalStateDetachesComponent(t *testing.T) {
 		t.Errorf("comp_burning rows = %d after final state, want 0 (detached)", count)
 	}
 }
+
+// ── Stately round-trip ────────────────────────────────────────────────────────
+
+func TestStatelyRoundTrip_ParseSucceeds(t *testing.T) {
+	data, err := os.ReadFile("testdata/stately-export.json")
+	if err != nil {
+		t.Fatalf("read stately-export.json: %v", err)
+	}
+	def, err := agent.ParseMachine(data)
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	if def.ID == "" {
+		t.Error("parsed machine has no ID")
+	}
+	if def.Initial == "" {
+		t.Error("parsed machine has no Initial state")
+	}
+}
+
+func TestStatelyRoundTrip_ValidateSupported(t *testing.T) {
+	// traffic_light has no context, actions, or guards — passes with empty schema+registry.
+	data, err := os.ReadFile("testdata/stately-export.json")
+	if err != nil {
+		t.Fatalf("read stately-export.json: %v", err)
+	}
+	def, err := agent.ParseMachine(data)
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    map[string]schema.Component{},
+		EntityTypes:   map[string]schema.EntityType{},
+	})
+	if len(errs) > 0 {
+		t.Errorf("ValidateMachine on supported machine: %v", errs)
+	}
+}
+
+// ── Validation rejection ──────────────────────────────────────────────────────
+
+func TestValidation_InvokeRejectedAtParse(t *testing.T) {
+	raw := `{"id":"m","initial":"s","states":{"s":{"invoke":{"src":"someService"}}}}`
+	_, err := agent.ParseMachine([]byte(raw))
+	if err == nil {
+		t.Fatal("expected error for invoke, got nil")
+	}
+	if !strings.Contains(err.Error(), "invoke") {
+		t.Errorf("error = %q, want message containing 'invoke'", err.Error())
+	}
+}
+
+func TestValidation_UnknownActionRejected(t *testing.T) {
+	raw := `{"id":"m","initial":"s","states":{"s":{"entry":["unknownFoo"]}}}`
+	def, _ := agent.ParseMachine([]byte(raw))
+	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    map[string]schema.Component{},
+		EntityTypes:   map[string]schema.EntityType{},
+	})
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "unknownFoo") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected validation error mentioning 'unknownFoo', got none")
+	}
+}
+
+func TestValidation_UnknownGuardRejected(t *testing.T) {
+	raw := `{"id":"m","initial":"s","states":{"s":{"on":{"E":[{"target":"s","cond":"noSuchGuard"}]}}}}`
+	def, _ := agent.ParseMachine([]byte(raw))
+	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    map[string]schema.Component{},
+		EntityTypes:   map[string]schema.EntityType{},
+	})
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "noSuchGuard") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected validation error mentioning 'noSuchGuard', got none")
+	}
+}
+
+func TestValidation_UndefinedTargetRejected(t *testing.T) {
+	raw := `{"id":"m","initial":"s","states":{"s":{"on":{"E":"doesNotExist"}}}}`
+	def, _ := agent.ParseMachine([]byte(raw))
+	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components:    map[string]schema.Component{},
+		EntityTypes:   map[string]schema.EntityType{},
+	})
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "doesNotExist") || strings.Contains(e.Message, "unknown target") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected validation error for undefined target, errs=%v", errs)
+	}
+}
+
+func TestValidation_AmbiguousContextKeyRejected(t *testing.T) {
+	// "speed" appears in GoblinStats and a second component → ambiguous.
+	raw := `{"id":"m","initial":"s","context":{"speed":1},"states":{"s":{}}}`
+	def, _ := agent.ParseMachine([]byte(raw))
+	ambig := goblinSchema()
+	ambig.Components["Movement"] = schema.Component{
+		Type: "object",
+		Properties: map[string]schema.Property{
+			"speed": {Type: "number"},
+		},
+	}
+	errs := agent.ValidateMachine(def, agent.NewRegistry(), ambig)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e.Message, "ambiguous") && strings.Contains(e.Field, "speed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected ambiguous-context error for 'speed', errs=%v", errs)
+	}
+}
