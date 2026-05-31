@@ -164,3 +164,60 @@ func TestLoader_Get_Miss(t *testing.T) {
 		t.Error("Get: expected ok=false for unknown machine ID")
 	}
 }
+
+func TestLoader_ReloadFile_Success(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "m.json", validMachineJSON) // initial: "a"
+
+	l := NewLoader(testRegistry(), testSchema())
+	if _, err := l.LoadMachine(path); err != nil {
+		t.Fatalf("initial LoadMachine: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(validMachineV2JSON), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := l.ReloadFile(path, "core"); err != nil {
+		t.Fatalf("ReloadFile: %v", err)
+	}
+	def, ok := l.Get("test_machine")
+	if !ok {
+		t.Fatal("Get returned false after ReloadFile")
+	}
+	if def.Initial != "b" {
+		t.Errorf("Initial = %q, want b", def.Initial)
+	}
+}
+
+func TestLoader_ReloadFile_FailureRetainsPrevious(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "m.json", validMachineJSON) // initial: "a"
+
+	l := NewLoader(testRegistry(), testSchema())
+	if _, err := l.LoadMachine(path); err != nil {
+		t.Fatalf("initial LoadMachine: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(invalidMachineJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := l.ReloadFile(path, "core"); err == nil {
+		t.Fatal("expected error from ReloadFile on invalid machine, got nil")
+	}
+
+	def, ok := l.Get("test_machine")
+	if !ok {
+		t.Fatal("Get returned false — previous definition not retained")
+	}
+	if def.Initial != "a" {
+		t.Errorf("Initial = %q, want a (original definition must be retained)", def.Initial)
+	}
+}
+
+func TestLoader_ReloadFile_MissingFile(t *testing.T) {
+	l := NewLoader(testRegistry(), testSchema())
+	err := l.ReloadFile("/nonexistent/path/m.json", "core")
+	if err == nil {
+		t.Fatal("expected error for missing file, got nil")
+	}
+}

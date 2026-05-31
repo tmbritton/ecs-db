@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
@@ -15,6 +16,7 @@ import (
 type Loader struct {
 	registry *Registry
 	schema   schema.DatabaseSchema
+	mu       sync.RWMutex
 	machines map[string]*MachineDefinition
 	sources  map[string]string // machineID → "modName:filepath"
 }
@@ -52,7 +54,9 @@ func (l *Loader) LoadMachine(path string) (*MachineDefinition, error) {
 		return nil, fmt.Errorf("validation failed for %q: %s", def.ID, strings.Join(msgs, "; "))
 	}
 
+	l.mu.Lock()
 	l.machines[def.ID] = def
+	l.mu.Unlock()
 	return def, nil
 }
 
@@ -79,10 +83,12 @@ func (l *Loader) ScanDir(dir, modName string) (int, error) {
 			continue
 		}
 		src := modName + ":" + path
+		l.mu.Lock()
 		if prev, ok := l.sources[def.ID]; ok {
 			fmt.Printf("[config] machine %q overridden: was %s, now %s\n", def.ID, prev, src)
 		}
 		l.sources[def.ID] = src
+		l.mu.Unlock()
 		count++
 	}
 
@@ -92,9 +98,27 @@ func (l *Loader) ScanDir(dir, modName string) (int, error) {
 	return count, nil
 }
 
+// ReloadFile re-parses and re-validates the machine at path under modName.
+// On success the in-memory definition is atomically replaced and a log line is printed.
+// On failure the previous definition is retained and the error is returned.
+func (l *Loader) ReloadFile(path, modName string) error {
+	def, err := l.LoadMachine(path)
+	if err != nil {
+		fmt.Printf("[hot-reload] machine reload failed (%s): %v\n", path, err)
+		return err
+	}
+	l.mu.Lock()
+	l.sources[def.ID] = modName + ":" + path
+	l.mu.Unlock()
+	fmt.Printf("[hot-reload] machine %q reloaded from %s\n", def.ID, path)
+	return nil
+}
+
 // Get returns the currently active definition for machineID, or (nil, false)
 // if the machine has never been successfully loaded.
 func (l *Loader) Get(machineID string) (*MachineDefinition, bool) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	def, ok := l.machines[machineID]
 	return def, ok
 }
