@@ -104,7 +104,11 @@ func (w *Watcher) scheduleReload(filePath string) {
 // or "unknown" if no configured directory is a prefix of filePath.
 func (w *Watcher) modNameForPath(filePath string) string {
 	for _, d := range w.dirs {
-		if strings.HasPrefix(filePath, d.Path) {
+		prefix := d.Path
+		if !strings.HasSuffix(prefix, string(filepath.Separator)) {
+			prefix += string(filepath.Separator)
+		}
+		if strings.HasPrefix(filePath, prefix) {
 			return d.ModName
 		}
 	}
