@@ -1,0 +1,26 @@
+# ECS Database — game configuration
+# See docs/ for the full mod loading guide.
+
+[database]
+path = "./ecs.db"
+
+[schema]
+path = "./schema.json"
+
+# Mods are loaded in order. Later entries override earlier ones when two mods
+# define a machine with the same ID (a warning is printed). The first entry is
+# conventionally the core game.
+[[mods]]
+name      = "core"
+behaviors = "./behaviors/"
+actions   = "./actions/"
+guards    = "./guards/"
+assets    = "./assets/"
+
+# To add a mod, uncomment and fill in:
+# [[mods]]
+# name      = "my-mod"
+# behaviors = "./mods/my-mod/behaviors/"
+# actions   = "./mods/my-mod/actions/"
+# guards    = "./mods/my-mod/guards/"
+# assets    = "./mods/my-mod/assets/"
