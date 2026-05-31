@@ -1,7 +1,7 @@
 # Story 3: Hot-Reload Entity Semantics
 
 **Epic:** 4 — Behavior hot reload  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** Medium — completes the hot-reload experience; entities must not get stranded
 
 **Depends on:** Story 2 (watcher fires after a machine definition is swapped)

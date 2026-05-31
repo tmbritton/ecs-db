@@ -160,12 +160,12 @@ Refined into stories: See [`docs/stories/epic-4/`](docs/stories/epic-4/).
   - `agent.Loader.ScanDir(dir, modName)` — scan a directory, load all `*.json`, last mod wins on duplicate ID
   - CLI `-config` flag defaulting to `./game.toml`; `game.toml` committed to repo
 
-- [ ] **Filesystem watcher on `mods/behaviors/`** — Watch, debounce, reload.
+- [x] **Filesystem watcher on `mods/behaviors/`** — Watch, debounce, reload.
   - Debounce rapid writes (editor save bursts)
   - Re-validate changed files against the registries before swapping in
   - Atomic swap of the in-memory machine definition
 
-- [ ] **Hot-reload entity semantics** — Don't strand entities in deleted states.
+- [x] **Hot-reload entity semantics** — Don't strand entities in deleted states.
   - Entities pick up the new definition on next state evaluation
   - If an entity's current state was removed in the reload, reset to the machine's `initial` state
   - Log every reload attempt and outcome (success, validation failure, retained previous version)
