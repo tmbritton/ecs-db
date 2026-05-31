@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,11 +64,16 @@ func TestLoad_MissingFileReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("errors.Is(err, fs.ErrNotExist) = false, want true; err = %v", err)
+	}
 }
 
 func TestLoad_InvalidTOMLReturnsError(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "bad.toml")
-	os.WriteFile(f, []byte("[[[[invalid"), 0o644)
+	if err := os.WriteFile(f, []byte("[[[[invalid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	_, err := config.Load(f)
 	if err == nil {
 		t.Fatal("expected error for invalid TOML, got nil")
