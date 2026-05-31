@@ -47,7 +47,10 @@ func insertEntity(t *testing.T, db *sql.DB, entityType string) int64 {
 	if err != nil {
 		t.Fatalf("insertEntity: %v", err)
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("insertEntity LastInsertId: %v", err)
+	}
 	return id
 }
 
@@ -182,8 +185,12 @@ func TestWanderingGoblin_StartCreatesRow(t *testing.T) {
 	validateMachine(t, def, reg)
 
 	entityID := insertEntity(t, db, "Goblin")
-	db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID)
-	db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID)
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup health: %v", err)
+	}
 
 	a := agent.NewAgent(def, entityID, "", 50)
 	startAgentTx(t, db, a, reg)
@@ -203,14 +210,20 @@ func TestWanderingGoblin_SetTimerOnEntry(t *testing.T) {
 	validateMachine(t, def, reg)
 
 	entityID := insertEntity(t, db, "Goblin")
-	db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID)
-	db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID)
+	if _, err := db.Exec("INSERT INTO comp_position (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup position: %v", err)
+	}
+	if _, err := db.Exec("INSERT INTO comp_health (entity_id) VALUES (?)", entityID); err != nil {
+		t.Fatalf("setup health: %v", err)
+	}
 
 	a := agent.NewAgent(def, entityID, "", 50)
 	startAgentTx(t, db, a, reg)
 
 	var patience float64
-	db.QueryRow("SELECT patience FROM comp_goblinstats WHERE entity_id=?", entityID).Scan(&patience)
+	if err := db.QueryRow("SELECT patience FROM comp_goblinstats WHERE entity_id=?", entityID).Scan(&patience); err != nil {
+		t.Fatalf("query patience: %v", err)
+	}
 	if patience != 40 {
 		t.Errorf("patience = %v, want 40 (set by setTimer on idle entry)", patience)
 	}
