@@ -137,11 +137,11 @@ Design spec: [`docs/superpowers/specs/2026-05-27-epic3-state-machine-design.md`]
   - Schedule into `event_queue` with target tick; cancel on state exit
   - `after` durations converted to tick counts at load time
 
-- [ ] **Built-in actions and guards** — Standard library via WorldWriter/WorldReader (never raw SQL).
+- [x] **Built-in actions and guards** — Standard library via WorldWriter/WorldReader (never raw SQL).
   - Actions: `moveTowardTarget`, `dealDamage`, `spawnEntity`, `attachComponent`, `detachComponent`, `setTimer`, `log`, `pickRandomTarget`, `setPursueTarget`
   - Guards: `timerExpired`, `atTarget`, `inRange`, `hasComponent`, `healthAbove`
 
-- [ ] **Integration tests and Stately round-trip** — Prove it works end-to-end.
+- [x] **Integration tests and Stately round-trip** — Prove it works end-to-end.
   - `wandering_goblin` fixture: load → deliver events → assert `behavior_components` and `transitions`
   - Component lifecycle: attach behavior-bearing component → machine activates; final state → detach
   - Real Stately v4 export in `testdata/`, parsed and validated in CI
@@ -151,6 +151,14 @@ Design spec: [`docs/superpowers/specs/2026-05-27-epic3-state-machine-design.md`]
 ## Epic 4: Behavior hot reload
 
 Filesystem watcher so editing `mods/behaviors/*.json` updates the running game with no restart. Small but materially changes the development experience.
+
+Refined into stories: See [`docs/stories/epic-4/`](docs/stories/epic-4/).
+
+- [ ] **Config file and mod directory structure** — TOML config replacing hardcoded paths; multi-mod support.
+  - `internal/config` package: `Config`, `DatabaseConfig`, `SchemaConfig`, `ModConfig` structs; `Load()` and `Defaults()`
+  - `ModConfig` fields: `name`, `behaviors`, `actions` (Lua, future), `guards` (Lua, future), `assets` (future)
+  - `agent.Loader.ScanDir(dir, modName)` — scan a directory, load all `*.json`, last mod wins on duplicate ID
+  - CLI `-config` flag defaulting to `./game.toml`; `game.toml` committed to repo
 
 - [ ] **Filesystem watcher on `mods/behaviors/`** — Watch, debounce, reload.
   - Debounce rapid writes (editor save bursts)
