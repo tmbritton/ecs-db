@@ -295,6 +295,26 @@ The `actions` and `guards` fields are present in the config schema now to establ
 
 Similarly `assets` is declared now for consistency. The renderer epic will use it to locate sprites, sounds, and other media per mod.
 
+### Why mods do not have their own `schema.json`
+
+`schema.json` is intentionally a single file, pointed to by the top-level `[schema]` section of `game.toml` and not per-mod. Mods add behaviors, actions, guards, and assets — they share the core game's data model.
+
+The reason is the asymmetry between behavior files and schema files:
+
+- A behavior machine maps to in-memory state. Merging two mods that declare the same machine ID is safe: the later definition replaces the earlier one and the old machine stops being served.
+- A schema component maps to a SQL table. If two mods declare a component with the same name but different fields, one of them requires a DDL migration. The current migration system (`internal/storage/`) diffs a single `DatabaseSchema` against the live database; making it work on a merged N-mod product requires rethinking the diff pipeline and defining a conflict policy.
+
+Entity type overrides are even thornier: if a mod changes the required components on an entity type that already has rows in the database, a migration is needed immediately.
+
+When first-class schema modding becomes a goal, the path forward is:
+
+1. Add a `schema` field to `ModConfig` in `internal/config/config.go`
+2. Load and merge each mod's schema in config order before passing it to `NewSQLiteStore`
+3. Define merge semantics (last-mod-wins? error on conflict? namespace components by mod name?)
+4. Update the migration diff to treat the merged product as the authoritative schema
+
+Until there is a concrete use case, this complexity has no payoff. The most common mod scenario — new AI behaviors for entities that use existing component shapes — is fully supported today.
+
 ## Agents: behavior as data
 
 Game behavior is defined per-entity by JSON state machines, called **agents**. Agent definitions conform to the XState v4 spec (excluding `invoke`): states, transitions, conditions (`cond`), actions, context, entry/exit actions, delayed (`after`) transitions, hierarchical states, parallel states, final states, and history states.
