@@ -13,6 +13,12 @@ import (
 // Loader reads, parses, and validates machine definition files. It retains
 // the last successfully validated definition for each machine ID so that a
 // failed hot-reload leaves the previous version in service.
+//
+// Concurrency: Get is safe to call concurrently with ReloadFile. ScanDir and
+// ReloadFile are not safe to call concurrently with each other for the same
+// machine ID — each updates machines and sources in two separate critical
+// sections. In practice ScanDir runs once at startup and ReloadFile is driven
+// by a single watcher goroutine, so no overlap occurs.
 type Loader struct {
 	registry *Registry
 	schema   schema.DatabaseSchema

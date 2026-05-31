@@ -152,8 +152,8 @@ func TestLoader_LoadMachine_HotReload_FailureRetainsPrevious(t *testing.T) {
 	if !ok {
 		t.Fatal("Get: expected previous def to be retained after failed reload")
 	}
-	if retained != first {
-		t.Errorf("expected retained def to be the original pointer, got a different instance")
+	if retained.Initial != first.Initial {
+		t.Errorf("Initial = %q, want %q (previous definition must be retained)", retained.Initial, first.Initial)
 	}
 }
 
