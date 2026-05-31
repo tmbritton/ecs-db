@@ -1,7 +1,7 @@
 # Story 8: Integration Tests and Stately Round-Trip
 
 **Epic:** 3 — Agents (behavior-as-data) runtime  
-**Status:** 🔲 Not started  
+**Status:** ✅ Done  
 **Priority:** High — proves the whole pipeline works end-to-end
 
 **Depends on:** Stories 1–7 (all of them)
@@ -18,33 +18,33 @@ A real Stately Studio v4 export is checked into `testdata/` and parsed in CI. Th
 
 **wandering_goblin integration test:**
 
-- [ ] `wandering_goblin.json` checked into `testdata/behaviors/` matching the example in `game-engine-arch.md`
-- [ ] Schema with `Position`, `Sprite`, `Health`, `GoblinBehavior` (with `speed`, `aggroRange`, `target_x`, `target_y` fields) and `Goblin` entity type
-- [ ] Test: create Goblin entity → machine activates → `behavior_components` row exists for `(goblin_id, "wandering_goblin")`
-- [ ] Test: deliver `TICK` event → machine starts in `idle` state → `setTimer` entry action runs → timer field updated in component
-- [ ] Test: deliver `TICK` events until `timerExpired` guard fires → machine transitions to `wandering` → `behavior_components.current_states` updated → row in `transitions`
-- [ ] Test: deliver `PLAYER_NEARBY` event → machine transitions to `pursuing` regardless of current state
-- [ ] Test: each transition appends a row to `transitions` with correct `from_states`, `to_states`, `event`, `cond_result`, `actions_run`
+- [x] `wandering_goblin.json` checked into `testdata/behaviors/` matching the example in `game-engine-arch.md`
+- [x] Schema with `Position`, `Sprite`, `Health`, `GoblinBehavior` (with `speed`, `aggroRange`, `target_x`, `target_y` fields) and `Goblin` entity type
+- [x] Test: create Goblin entity → machine activates → `behavior_components` row exists for `(goblin_id, "wandering_goblin")`
+- [x] Test: deliver `TICK` event → machine starts in `idle` state → `setTimer` entry action runs → timer field updated in component
+- [x] Test: deliver `TICK` events until `timerExpired` guard fires → machine transitions to `wandering` → `behavior_components.current_states` updated → row in `transitions`
+- [x] Test: deliver `PLAYER_NEARBY` event → machine transitions to `pursuing` regardless of current state
+- [x] Test: each transition appends a row to `transitions` with correct `from_states`, `to_states`, `event`, `cond_result`, `actions_run`
 
 **Component-machine lifecycle test:**
 
-- [ ] Schema includes a `Burning` component with `"behavior": "burning"` and a simple `burning.json` machine in `testdata/` with a final state
-- [ ] Test: attach `Burning` component to entity → `behavior_components` row created for `(entity_id, "burning")`
-- [ ] Test: deliver events until `burning` machine reaches its final state → `Burning` component detached → `behavior_components` row deleted
+- [x] Schema includes a `Burning` component with `"behavior": "burning"` and a simple `burning.json` machine in `testdata/` with a final state
+- [x] Test: attach `Burning` component to entity → `behavior_components` row created for `(entity_id, "burning")`
+- [x] Test: deliver events until `burning` machine reaches its final state → `Burning` component detached → `behavior_components` row deleted
 
 **Stately round-trip:**
 
-- [ ] A real Stately Studio v4 export (any machine, exported as JSON) checked into `testdata/stately-export.json`
-- [ ] CI test: `ParseMachine(stately-export.json)` succeeds without error
-- [ ] CI test: `ValidateMachine(...)` on a Stately export that uses only supported features passes
+- [x] A real Stately Studio v4 export (any machine, exported as JSON) checked into `testdata/stately-export.json`
+- [x] CI test: `ParseMachine(stately-export.json)` succeeds without error
+- [x] CI test: `ValidateMachine(...)` on a Stately export that uses only supported features passes
 
 **Validation rejection tests:**
 
-- [ ] Machine with `invoke` → clear error message, not panic
-- [ ] Machine with unknown action type → clear error message
-- [ ] Machine with unknown cond type → clear error message
-- [ ] Machine with transition to undefined state → clear error message
-- [ ] Machine with ambiguous context key → clear error message
+- [x] Machine with `invoke` → clear error message, not panic
+- [x] Machine with unknown action type → clear error message
+- [x] Machine with unknown cond type → clear error message
+- [x] Machine with transition to undefined state → clear error message
+- [x] Machine with ambiguous context key → clear error message
 
 ## Notes
 
