@@ -26,8 +26,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, db *sql.DB, machineID string
 	if err != nil {
 		return fmt.Errorf("reconcile %q: query: %w", machineID, err)
 	}
-	defer rows.Close()
-
 	type entry struct {
 		entityID int64
 		states   []string
@@ -38,10 +36,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, db *sql.DB, machineID string
 		var entityID int64
 		var raw string
 		if err := rows.Scan(&entityID, &raw); err != nil {
+			rows.Close()
 			return fmt.Errorf("reconcile %q: scan: %w", machineID, err)
 		}
 		var states []string
 		if err := json.Unmarshal([]byte(raw), &states); err != nil {
+			rows.Close()
 			return fmt.Errorf("reconcile %q: parse current_states for entity %d: %w", machineID, entityID, err)
 		}
 		if len(removedStates(states, validStates)) == 0 {
@@ -51,8 +51,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, db *sql.DB, machineID string
 		toReset = append(toReset, entry{entityID, states})
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return fmt.Errorf("reconcile %q: rows: %w", machineID, err)
 	}
+	rows.Close()
 
 	if len(toReset) == 0 {
 		return nil
