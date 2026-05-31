@@ -492,7 +492,10 @@ func TestValidation_InvokeRejectedAtParse(t *testing.T) {
 
 func TestValidation_UnknownActionRejected(t *testing.T) {
 	raw := `{"id":"m","initial":"s","states":{"s":{"entry":["unknownFoo"]}}}`
-	def, _ := agent.ParseMachine([]byte(raw))
+	def, err := agent.ParseMachine([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMachine unexpectedly failed: %v", err)
+	}
 	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
@@ -511,7 +514,10 @@ func TestValidation_UnknownActionRejected(t *testing.T) {
 
 func TestValidation_UnknownGuardRejected(t *testing.T) {
 	raw := `{"id":"m","initial":"s","states":{"s":{"on":{"E":[{"target":"s","cond":"noSuchGuard"}]}}}}`
-	def, _ := agent.ParseMachine([]byte(raw))
+	def, err := agent.ParseMachine([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMachine unexpectedly failed: %v", err)
+	}
 	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
@@ -530,7 +536,10 @@ func TestValidation_UnknownGuardRejected(t *testing.T) {
 
 func TestValidation_UndefinedTargetRejected(t *testing.T) {
 	raw := `{"id":"m","initial":"s","states":{"s":{"on":{"E":"doesNotExist"}}}}`
-	def, _ := agent.ParseMachine([]byte(raw))
+	def, err := agent.ParseMachine([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMachine unexpectedly failed: %v", err)
+	}
 	errs := agent.ValidateMachine(def, agent.NewRegistry(), schema.DatabaseSchema{
 		SchemaVersion: 1,
 		Components:    map[string]schema.Component{},
@@ -550,7 +559,10 @@ func TestValidation_UndefinedTargetRejected(t *testing.T) {
 func TestValidation_AmbiguousContextKeyRejected(t *testing.T) {
 	// "speed" appears in GoblinStats and a second component → ambiguous.
 	raw := `{"id":"m","initial":"s","context":{"speed":1},"states":{"s":{}}}`
-	def, _ := agent.ParseMachine([]byte(raw))
+	def, err := agent.ParseMachine([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseMachine unexpectedly failed: %v", err)
+	}
 	ambig := goblinSchema()
 	ambig.Components["Movement"] = schema.Component{
 		Type: "object",
