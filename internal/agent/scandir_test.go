@@ -88,8 +88,12 @@ func TestScanDir_DuplicateMachineIDLastModWins(t *testing.T) {
 	writeFile(t, dir2, "traffic_light.json", altTrafficLightJSON) // initial = "red"
 
 	loader := agent.NewLoader(builtins.NewRegistry(), emptySchema())
-	loader.ScanDir(dir1, "core")
-	loader.ScanDir(dir2, "override-mod")
+	if _, err := loader.ScanDir(dir1, "core"); err != nil {
+		t.Fatalf("first ScanDir: %v", err)
+	}
+	if _, err := loader.ScanDir(dir2, "override-mod"); err != nil {
+		t.Fatalf("second ScanDir: %v", err)
+	}
 
 	def, _ := loader.Get("traffic_light")
 	if def.Initial != "red" {
