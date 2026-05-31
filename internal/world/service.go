@@ -3,6 +3,7 @@ package world
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
@@ -13,6 +14,7 @@ import (
 type EntityService struct {
 	store    EntityStore
 	schema   *schema.DatabaseSchema
+	mu       sync.Mutex
 	warnings []string
 }
 
@@ -29,6 +31,8 @@ func (s *EntityService) SetSchema(ds schema.DatabaseSchema) {
 
 // Warnings returns warnings from the last CreateEntity call.
 func (s *EntityService) Warnings() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.warnings
 }
 
@@ -52,7 +56,9 @@ func (s *EntityService) CreateEntity(
 	// Validate against schema.
 	vr := ValidateEntityCreation(s.schema, entityTypeName, names)
 	if !vr.Valid() {
+		s.mu.Lock()
 		s.warnings = vr.Warnings
+		s.mu.Unlock()
 		return nil, &ValidationError{
 			Type:     entityTypeName,
 			Errors:   vr.Errors,
@@ -61,8 +67,10 @@ func (s *EntityService) CreateEntity(
 	}
 
 	// Collect warnings (may be non-empty in warning mode).
+	s.mu.Lock()
 	s.warnings = make([]string, len(vr.Warnings))
 	copy(s.warnings, vr.Warnings)
+	s.mu.Unlock()
 
 	// Begin transaction.
 	tx, err := s.store.BeginTx(ctx)
@@ -142,7 +150,9 @@ func (s *EntityService) AttachComponent(
 	// Validate the attach.
 	vr := ValidateAttachComponent(s.schema, entityTypeName, compName, alreadyAttached)
 	if !vr.Valid() {
+		s.mu.Lock()
 		s.warnings = vr.Warnings
+		s.mu.Unlock()
 		return &ComponentMutationError{
 			Action:   "attach",
 			EntityID: entityID,
@@ -152,8 +162,10 @@ func (s *EntityService) AttachComponent(
 		}
 	}
 
+	s.mu.Lock()
 	s.warnings = make([]string, len(vr.Warnings))
 	copy(s.warnings, vr.Warnings)
+	s.mu.Unlock()
 
 	// Begin transaction and attach.
 	tx, err := s.store.BeginTx(ctx)
@@ -189,7 +201,9 @@ func (s *EntityService) DetachComponent(
 	// Validate the detach.
 	vr := ValidateDetachComponent(s.schema, entityTypeName, compName)
 	if !vr.Valid() {
+		s.mu.Lock()
 		s.warnings = vr.Warnings
+		s.mu.Unlock()
 		return &ComponentMutationError{
 			Action:   "detach",
 			EntityID: entityID,
@@ -199,7 +213,9 @@ func (s *EntityService) DetachComponent(
 		}
 	}
 
+	s.mu.Lock()
 	s.warnings = vr.Warnings
+	s.mu.Unlock()
 
 	// Begin transaction and detach.
 	tx, err := s.store.BeginTx(ctx)

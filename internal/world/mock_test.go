@@ -57,6 +57,7 @@ type mockStore struct {
 	currentTick     int64
 	currentTickErr  error
 	tx              *mockTx
+	newTx           func() *mockTx // if set, BeginTx calls this instead of returning tx
 	entityType      string
 	entityTypeErr   error
 	hasComponent    bool
@@ -66,6 +67,9 @@ type mockStore struct {
 func (m *mockStore) BeginTx(ctx context.Context) (Tx, error) {
 	if m.beginTxErr != nil {
 		return nil, m.beginTxErr
+	}
+	if m.newTx != nil {
+		return m.newTx(), nil
 	}
 	return m.tx, nil
 }

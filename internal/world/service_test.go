@@ -290,8 +290,8 @@ func TestValidationError_Error_EmptyErrors(t *testing.T) {
 func TestEntityService_CreateEntity_WarningsConcurrency(t *testing.T) {
 	store := &mockStore{
 		currentTick: 1,
-		tx: &mockTx{
-			insertEntityResults: []insertEntityResult{{id: 1, err: nil}},
+		newTx: func() *mockTx {
+			return &mockTx{insertEntityResults: []insertEntityResult{{id: 1, err: nil}}}
 		},
 	}
 
