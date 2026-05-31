@@ -48,7 +48,11 @@ func (w *txWorldWriter) AttachComponent(entityID int64, compName string, values 
 	cols := []string{"entity_id"}
 	args := []any{entityID}
 	for col, val := range values {
-		cols = append(cols, strings.ToLower(col))
+		lcol := strings.ToLower(col)
+		if err := validateIdentifier(lcol, "AttachComponent field"); err != nil {
+			return err
+		}
+		cols = append(cols, lcol)
 		args = append(args, val)
 	}
 	ph := make([]string, len(cols))
