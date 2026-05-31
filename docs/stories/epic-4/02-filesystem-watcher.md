@@ -1,7 +1,7 @@
 # Story 2: Filesystem Watcher for Behavior Hot Reload
 
 **Epic:** 4 — Behavior hot reload  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** High — delivers the core developer experience of this epic
 
 **Depends on:** Story 1 (config file provides the list of `behaviors/` directories to watch)
@@ -14,17 +14,16 @@ This is implemented as a component of the interpreter (in-process), not a separa
 
 ## Acceptance Criteria
 
-- [ ] `internal/agent/watcher.go` — `Watcher` type that watches a list of directories for `*.json` changes
-- [ ] Uses `github.com/fsnotify/fsnotify` for cross-platform filesystem events
-- [ ] Debounces rapid writes: multiple events on the same file within a short window (e.g., 50 ms) coalesce into one reload
-- [ ] On change: re-parses the file with `ParseMachine`, then re-validates with `ValidateMachine` (registries + schema)
-- [ ] If parse/validation passes: atomically replaces the `MachineDefinition` in the `Loader`'s map; logs `[hot-reload] machine "<id>" reloaded from <path>`
-- [ ] If parse/validation fails: logs `[hot-reload] machine "<id>" reload failed: <error>` and retains the previous in-memory definition
-- [ ] `Watcher.Start(ctx context.Context) error` — starts watching; returns when ctx is cancelled
-- [ ] `Watcher.Stop()` — signals shutdown cleanly
-- [ ] Directories that do not exist at watch time are skipped with a logged warning (consistent with `ScanDir` behaviour)
-- [ ] `internal/agent/watcher_test.go` — tests using real temp directories and file writes; no mocks
-- [ ] All new code has tests; `go test ./...` passes
+- [x] `internal/agent/watcher.go` — `Watcher` type that watches a list of directories for `*.json` changes
+- [x] Uses `github.com/fsnotify/fsnotify` for cross-platform filesystem events
+- [x] Debounces rapid writes: multiple events on the same file within a short window (e.g., 50 ms) coalesce into one reload
+- [x] On change: re-parses the file with `ParseMachine`, then re-validates with `ValidateMachine` (registries + schema)
+- [x] If parse/validation passes: atomically replaces the `MachineDefinition` in the `Loader`'s map; logs `[hot-reload] machine "<id>" reloaded from <path>`
+- [x] If parse/validation fails: logs `[hot-reload] machine "<id>" reload failed: <error>` and retains the previous in-memory definition
+- [x] `Watcher.Start(ctx context.Context) error` — starts watching; returns when ctx is cancelled
+- [x] Directories that do not exist at watch time are skipped with a logged warning (consistent with `ScanDir` behaviour)
+- [x] `internal/agent/watcher_test.go` — tests using real temp directories and file writes; no mocks
+- [x] All new code has tests; `go test ./...` passes
 
 ## Notes
 
