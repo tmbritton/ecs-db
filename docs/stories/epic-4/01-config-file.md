@@ -1,7 +1,7 @@
 # Story 1: Config File and Mod Directory Structure
 
 **Epic:** 4 — Behavior hot reload  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** High — prerequisite for hot reload (Epic 4) and the game binary (Epic 5)
 
 **Depends on:** Epic 3 (agent Loader exists)

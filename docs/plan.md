@@ -154,7 +154,7 @@ Filesystem watcher so editing `mods/behaviors/*.json` updates the running game w
 
 Refined into stories: See [`docs/stories/epic-4/`](docs/stories/epic-4/).
 
-- [ ] **Config file and mod directory structure** — TOML config replacing hardcoded paths; multi-mod support.
+- [x] **Config file and mod directory structure** — TOML config replacing hardcoded paths; multi-mod support.
   - `internal/config` package: `Config`, `DatabaseConfig`, `SchemaConfig`, `ModConfig` structs; `Load()` and `Defaults()`
   - `ModConfig` fields: `name`, `behaviors`, `actions` (Lua, future), `guards` (Lua, future), `assets` (future)
   - `agent.Loader.ScanDir(dir, modName)` — scan a directory, load all `*.json`, last mod wins on duplicate ID
