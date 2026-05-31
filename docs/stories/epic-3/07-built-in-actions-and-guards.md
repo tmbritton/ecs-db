@@ -1,7 +1,7 @@
 # Story 7: Built-In Actions and Guards
 
 **Epic:** 3 — Agents (behavior-as-data) runtime  
-**Status:** 🔲 Not started  
+**Status:** ✅ Done  
 **Priority:** High — built-ins are what make the wandering_goblin example run
 
 **Depends on:** Story 3 (registry and context types), Story 5 (interpreter, for lifecycle integration)
@@ -18,29 +18,29 @@ Built-ins live in `internal/agent/builtins/` and are registered into a `*Registr
 
 **Actions** (each registered with metadata including description and param schemas):
 
-- [ ] `moveTowardTarget` — read `target_x`/`target_y` from entity's component, update `Position.x`/`Position.y` by one step toward target at `speed` (or `speed * speed_mult` if `speed_mult` param provided)
-- [ ] `dealDamage` — decrement `Health.hp` on the target entity by `amount`; target is `params.target` (entity ID or `"$player"` sentinel)
-- [ ] `spawnEntity` — create a new entity of type `params.entity_type` at optional position; return new entity ID (stored where? TBD in integration — for now, log it)
-- [ ] `attachComponent` — attach component `params.component` to the entity with `params.data` as initial field values; triggers behavior-machine lifecycle if component declares `"behavior"`
-- [ ] `detachComponent` — detach component `params.component` from the entity
-- [ ] `setTimer` — write `params.ticks` to a timer field identified by `params.key` on the entity (the component field must exist in the entity's context manifest)
-- [ ] `log` — write `params.message` to the interpreter logger; no-op for the database
-- [ ] `pickRandomTarget` — pick a random position within `params.radius` of the entity's current position; write to `target_x`/`target_y` component fields
-- [ ] `setPursueTarget` — write the player entity's current position to the entity's `target_x`/`target_y` component fields
+- [x] `moveTowardTarget` — read `target_x`/`target_y` from entity's component, update `Position.x`/`Position.y` by one step toward target at `speed` (or `speed * speed_mult` if `speed_mult` param provided)
+- [x] `dealDamage` — decrement `Health.hp` on the target entity by `amount`; target is `params.target` (entity ID or `"$player"` sentinel)
+- [x] `spawnEntity` — create a new entity of type `params.entity_type` at optional position; return new entity ID (stored where? TBD in integration — for now, log it)
+- [x] `attachComponent` — attach component `params.component` to the entity with `params.data` as initial field values; triggers behavior-machine lifecycle if component declares `"behavior"`
+- [x] `detachComponent` — detach component `params.component` from the entity
+- [x] `setTimer` — write `params.ticks` to a timer field identified by `params.key` on the entity (the component field must exist in the entity's context manifest)
+- [x] `log` — write `params.message` to the interpreter logger; no-op for the database
+- [x] `pickRandomTarget` — pick a random position within `params.radius` of the entity's current position; write to `target_x`/`target_y` component fields
+- [x] `setPursueTarget` — write the player entity's current position to the entity's `target_x`/`target_y` component fields
 
 **Guards** (each registered with metadata):
 
-- [ ] `timerExpired` — returns true if the timer field identified by `params.key` has reached zero or below
-- [ ] `atTarget` — returns true if the entity's `Position` is within 1 unit of `target_x`/`target_y`
-- [ ] `inRange` — returns true if the distance between this entity and `params.target` entity is ≤ `params.distance`
-- [ ] `hasComponent` — returns true if the entity has the component named `params.component`
-- [ ] `healthAbove` — returns true if `Health.hp > params.threshold`
+- [x] `timerExpired` — returns true if the timer field identified by `params.key` has reached zero or below
+- [x] `atTarget` — returns true if the entity's `Position` is within 1 unit of `target_x`/`target_y`
+- [x] `inRange` — returns true if the distance between this entity and `params.target` entity is ≤ `params.distance`
+- [x] `hasComponent` — returns true if the entity has the component named `params.component`
+- [x] `healthAbove` — returns true if `Health.hp > params.threshold`
 
 **Registration:**
 
-- [ ] `RegisterBuiltins(r *Registry)` registers all of the above
-- [ ] Each registration includes a description string and param schemas
-- [ ] Tests: each action/guard has at least one test exercising its core behavior against a real SQLite DB (integration-style)
+- [x] `RegisterBuiltins(r *Registry)` registers all of the above
+- [x] Each registration includes a description string and param schemas
+- [x] Tests: each action/guard has at least one test exercising its core behavior against a real SQLite DB (integration-style)
 
 ## Notes
 
