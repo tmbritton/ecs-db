@@ -387,3 +387,53 @@ func TestWanderingGoblin_TransitionRecordAppended(t *testing.T) {
 		t.Errorf("event = %q, want PLAYER_NEARBY", event)
 	}
 }
+
+// ── Burning component lifecycle ───────────────────────────────────────────────
+
+func TestBurningLifecycle_StartCreatesRow(t *testing.T) {
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/burning.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	// Simulate AttachComponent("Burning") having just occurred.
+	if _, err := db.Exec("INSERT INTO comp_burning (entity_id, duration) VALUES (?, 5)", entityID); err != nil {
+		t.Fatalf("setup burning: %v", err)
+	}
+
+	// ActivatedByComponent="Burning" so the machine knows to detach on final state.
+	a := agent.NewAgent(def, entityID, "Burning", 50)
+	startAgentTx(t, db, a, reg)
+
+	states := currentStates(t, db, entityID, "burning")
+	if len(states) == 0 || !strings.HasSuffix(states[0], ".active") {
+		t.Errorf("current_states = %v, want [...active]", states)
+	}
+}
+
+func TestBurningLifecycle_FinalStateDetachesComponent(t *testing.T) {
+	// EXTINGUISH → extinguished (final) → DetachComponent("Burning") → comp_burning row deleted.
+	db := setupIntegrationDB(t)
+	reg := builtins.NewRegistry()
+	def := loadMachine(t, "testdata/behaviors/burning.json")
+	validateMachine(t, def, reg)
+
+	entityID := insertEntity(t, db, "Goblin")
+	if _, err := db.Exec("INSERT INTO comp_burning (entity_id, duration) VALUES (?, 5)", entityID); err != nil {
+		t.Fatalf("setup burning: %v", err)
+	}
+
+	a := agent.NewAgent(def, entityID, "Burning", 50)
+	startAgentTx(t, db, a, reg)
+
+	sendEvent(t, db, a, agent.Event{Type: "EXTINGUISH"}, 1, reg)
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM comp_burning WHERE entity_id=?", entityID).Scan(&count); err != nil {
+		t.Fatalf("query comp_burning: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("comp_burning rows = %d after final state, want 0 (detached)", count)
+	}
+}
