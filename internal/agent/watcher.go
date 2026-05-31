@@ -46,7 +46,9 @@ func NewWatcher(loader *Loader, dirs []WatchedDir, debounce time.Duration) *Watc
 // SetReconcileFunc sets the callback invoked after each successful reload.
 // Must be called before Start.
 func (w *Watcher) SetReconcileFunc(fn ReconcileFunc) {
+	w.mu.Lock()
 	w.reconcile = fn
+	w.mu.Unlock()
 }
 
 // Start watches all configured directories until ctx is cancelled.
@@ -94,9 +96,9 @@ func (w *Watcher) Start(ctx context.Context) error {
 // the same file cancels any pending timer and starts a fresh one.
 func (w *Watcher) scheduleReload(filePath string) {
 	modName := w.modNameForPath(filePath)
-	reconcile := w.reconcile
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	reconcile := w.reconcile
 	if t, ok := w.timers[filePath]; ok {
 		t.Stop()
 	}

@@ -252,6 +252,28 @@ func TestLoader_ReloadFile_InvokesCallback(t *testing.T) {
 	}
 }
 
+func TestLoader_ReloadFile_FirstLoad_InvokesCallback(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempFile(t, dir, "m.json", validMachineJSON)
+
+	l := NewLoader(testRegistry(), testSchema())
+	// No prior LoadMachine — ReloadFile is the first load for this machine.
+	var gotID string
+	cb := ReconcileFunc(func(machineID string, validStates map[string]bool) {
+		gotID = machineID
+	})
+	if err := l.ReloadFile(path, "core", cb); err != nil {
+		t.Fatalf("ReloadFile on first load: %v", err)
+	}
+	if gotID != "test_machine" {
+		t.Errorf("callback machineID = %q, want %q", gotID, "test_machine")
+	}
+	def, ok := l.Get("test_machine")
+	if !ok || def == nil {
+		t.Fatal("Get returned false after ReloadFile first load")
+	}
+}
+
 func TestLoader_ReloadFile_CallbackNotCalledOnFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempFile(t, dir, "m.json", validMachineJSON)
