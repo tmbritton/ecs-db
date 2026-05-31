@@ -294,6 +294,15 @@ func TestWanderingGoblin_TargetlessMoveTowardTarget(t *testing.T) {
 	if len(states) == 0 || !strings.HasSuffix(states[0], ".wandering") {
 		t.Errorf("after targetless TICK: states=%v, want [...wandering]", states)
 	}
+
+	// Confirm moveTowardTarget actually ran — position must have moved toward (9999,9999).
+	var newX, newY float64
+	if err := db.QueryRow("SELECT x, y FROM comp_position WHERE entity_id=?", entityID).Scan(&newX, &newY); err != nil {
+		t.Fatalf("query position after targetless TICK: %v", err)
+	}
+	if newX == 0 && newY == 0 {
+		t.Errorf("position unchanged after targetless TICK: moveTowardTarget did not run")
+	}
 }
 
 func TestWanderingGoblin_PlayerNearbyTransition(t *testing.T) {
@@ -352,19 +361,27 @@ func TestWanderingGoblin_TransitionRecordAppended(t *testing.T) {
 	sendEvent(t, db, a, agent.Event{Type: "PLAYER_NEARBY"}, 1, reg)
 
 	// Query the transitions table — from_states and to_states are stored as JSON arrays.
-	var fromStates, toStates, event string
+	// Filter by event name so extra preceding transitions don't affect the assertion.
+	var fromRaw, toRaw, event string
 	err := db.QueryRow(
-		"SELECT from_states, to_states, event FROM transitions WHERE entity_id=? AND machine_id=? ORDER BY id DESC LIMIT 1",
-		entityID, "wandering_goblin",
-	).Scan(&fromStates, &toStates, &event)
+		"SELECT from_states, to_states, event FROM transitions WHERE entity_id=? AND machine_id=? AND event=? ORDER BY id DESC LIMIT 1",
+		entityID, "wandering_goblin", "PLAYER_NEARBY",
+	).Scan(&fromRaw, &toRaw, &event)
 	if err != nil {
 		t.Fatalf("query transitions: %v", err)
 	}
-	if !strings.Contains(fromStates, "idle") {
-		t.Errorf("from_states = %q, want to contain idle", fromStates)
+	var fromArr, toArr []string
+	if err := json.Unmarshal([]byte(fromRaw), &fromArr); err != nil {
+		t.Fatalf("unmarshal from_states: %v", err)
 	}
-	if !strings.Contains(toStates, "pursuing") {
-		t.Errorf("to_states = %q, want to contain pursuing", toStates)
+	if err := json.Unmarshal([]byte(toRaw), &toArr); err != nil {
+		t.Fatalf("unmarshal to_states: %v", err)
+	}
+	if len(fromArr) == 0 || !strings.HasSuffix(fromArr[0], ".idle") {
+		t.Errorf("from_states = %v, want [...idle]", fromArr)
+	}
+	if len(toArr) == 0 || !strings.HasSuffix(toArr[0], ".pursuing") {
+		t.Errorf("to_states = %v, want [...pursuing]", toArr)
 	}
 	if event != "PLAYER_NEARBY" {
 		t.Errorf("event = %q, want PLAYER_NEARBY", event)
