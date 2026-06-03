@@ -174,35 +174,27 @@ Refined into stories: See [`docs/stories/epic-4/`](docs/stories/epic-4/).
 
 ## Epic 5: Interpreter tick loop & Ebitengine monolith
 
-End-to-end working game in a single binary: interpreter and Ebitengine renderer together. Goal: one entity wandering on screen, editing its agent JSON visibly changes behavior.
+End-to-end working game in a single binary: interpreter and Ebitengine renderer together. Ebitengine runs at 60 TPS; the interpreter tick fires every 3rd `Update()` call (~20 Hz game logic, 60 Hz input sampling). Goal: a goblin wanders a tile-based map, a player walks around, editing the agent JSON visibly changes behavior with no restart.
 
-- [ ] **Tick loop skeleton** — The interpreter's heartbeat, driven by Ebitengine's `Update()`.
-  - Drain `input_events` written by the renderer in the same `Update()` call
-  - Dispatch raw input to a game-specific input-to-event mapper → write to `event_queue`
-  - Drain due `event_queue` rows (where `target_tick` ≤ `current_tick`)
-  - Deliver `TICK` to every entity with an active `behavior_components` row
-  - Advance `world.current_tick`, bump `world.world_version`
+Design spec: [`docs/superpowers/specs/2026-06-02-epic5-renderer-design.md`](superpowers/specs/2026-06-02-epic5-renderer-design.md)
 
-- [ ] **Input capture layer** — Renderer writes, interpreter drains, same tick.
-  - Ebitengine input callbacks write to `input_events` (kind, payload JSON, wall_ms) before interpreter tick runs
-  - Game-specific mapper translates raw input rows into game events; marks `consumed = 1`
-  - Table doubles as an append-only audit log useful for replay
+Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
-- [ ] **Transitions audit table writes** — Every successful transition recorded.
-  - `tick`, `wall_ms`, `entity_id`, `machine_id`, `from_states`, `to_states`, `event`, `cond_result`, `actions_run`
-  - `actions_run` is a JSON array of action names — feeds Epic 8 effects
+- [ ] **Schema updates** — Evolve `Sprite`; add `Tile`, `Path`, `Speed` components and `Tile` entity type. Auto-migration verifies the pipeline still works.
 
-- [ ] **Ebitengine renderer** — Draw entities from the database each frame.
-  - `Draw()` queries entities joined with drawable components after `Update()` completes
-  - Default: draw sprite at position for any entity with `Position` + `Sprite`
-  - No `world_version` polling — renderer reads directly from the shared SQLite connection after writes
-  - Placeholder visual for unrecognized entity types
+- [ ] **Ebitengine wiring + tick loop** — `cmd/game/main.go`; `Game` struct with `Update()`/`Draw()`; 60 TPS / 20 Hz split via `frameCount % (60/TicksPerSecond)`; interpreter tick (drain `input_events` → drain `event_queue` → deliver `TICK` → advance tick + `world_version`) inside `Update()`.
 
-- [ ] **Smoke test: wandering goblin** — The prototype passes when this works end-to-end.
-  - Schema: `Position`, `Sprite` declared; `Goblin` entity type with `behavior: wandering_goblin`
-  - One `Goblin` running the `wandering_goblin` agent from the architecture doc
-  - Visibly wanders, idles, repeats
-  - Edit the agent JSON, save, see behavior change without restart
+- [ ] **Tilemap + TileGrid** — TOML map file; bootstrap creates `Tile` entities at startup; `internal/tilemap.TileGrid` (`[][]bool`) built from tile entities; static render buffer drawn once to `*ebiten.Image`; invalidated when a tile changes.
+
+- [ ] **Input capture + player movement** — `ebiten.IsKeyPressed` sampled 60 Hz; rows appended to `input_events`; game-specific input handler drains rows each tick and moves the `Player` entity one tile per tick (checking `TileGrid` for passability), setting `comp_sprite.animation` and `flip_x`.
+
+- [ ] **Sprite renderer + animation system** — Updated `Sprite` component (`sheet`, `animation`, `flip_x`); animation definitions TOML in `mods/assets/` (hot-swappable via watcher); `AnimState` map in renderer (frame timer at 60 Hz); `setAnimation` built-in action; `Draw()` queries all entities with `Position` + `Sprite` and renders the current frame.
+
+- [ ] **Pathfinding** — `internal/tilemap.AStar`; built-in action `computePath` (reads `comp_position`, runs A*, writes `comp_path`); action `stepAlongPath` (advances `comp_position`, increments `current_index`); guard `pathComplete` (`current_index ≥ len(waypoints)`).
+
+- [ ] **Line-of-sight + tile mutation** — Built-in guard `inLineOfSight` (DDA ray walk on `TileGrid`); built-in action `setTilePassable` (writes `comp_tile.passable` + calls `grid.SetPassable`).
+
+- [ ] **Goblin smoke test** — `mods/behaviors/goblin.json` (idle → `computePath` → wandering via `stepAlongPath` / `pathComplete` → idle loop); `mods/assets/animations.toml`; `mods/map/level1.toml`; window shows map + player + autonomous goblin; hot reload changes goblin behavior without restart.
 
 ---
 
