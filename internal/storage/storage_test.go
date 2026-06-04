@@ -145,15 +145,15 @@ var fixedTableColumns = map[string][]string{
 	"meta":         {"key", "value"},
 	"world":        {"key", "value"},
 	"entities":     {"id", "entity_type", "created_tick"},
-	"event_queue":  {"id", "tick", "target_entity", "kind", "payload"},
+	"event_queue":  {"id", "entity_id", "machine_id", "event_type", "payload", "target_tick"},
 	"input_events": {"id", "received_at_ms", "kind", "payload", "consumed"},
-	"transitions":  {"id", "tick", "wall_ms", "entity_id", "machine_id", "from_state", "to_state", "event", "guard_result", "actions_run"},
+	"transitions":  {"id", "tick", "wall_ms", "entity_id", "machine_id", "from_states", "to_states", "event", "cond_result", "actions_run"},
 }
 
 // expectedIndexes lists indexes that createTables must create.
 var expectedIndexes = []string{
 	"idx_entity_type",
-	"idx_event_queue_tick",
+	"idx_event_queue_target_tick",
 	"idx_input_events_consumed",
 	"idx_transitions_entity_id",
 }

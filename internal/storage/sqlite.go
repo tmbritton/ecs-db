@@ -254,11 +254,12 @@ func bootstrapDatabase(db *sql.DB, s schema.DatabaseSchema, schemaHash string) e
 	CREATE INDEX idx_entity_type ON entities(entity_type);
 
 	CREATE TABLE event_queue (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		tick INTEGER NOT NULL,
-		target_entity INTEGER,
-		kind TEXT NOT NULL,
-		payload TEXT NOT NULL DEFAULT '{}'
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		entity_id   INTEGER NOT NULL,
+		machine_id  TEXT NOT NULL,
+		event_type  TEXT NOT NULL,
+		payload     TEXT,
+		target_tick INTEGER NOT NULL
 	);
 
 	CREATE TABLE input_events (
@@ -270,20 +271,20 @@ func bootstrapDatabase(db *sql.DB, s schema.DatabaseSchema, schemaHash string) e
 	);
 
 	CREATE TABLE transitions (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		tick INTEGER NOT NULL,
-		wall_ms INTEGER NOT NULL,
-		entity_id INTEGER NOT NULL,
-		machine_id TEXT NOT NULL,
-		from_state TEXT NOT NULL,
-		to_state TEXT NOT NULL,
-		event TEXT NOT NULL,
-		guard_result TEXT,
-		actions_run TEXT
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		tick        INTEGER NOT NULL,
+		wall_ms     INTEGER NOT NULL,
+		entity_id   INTEGER NOT NULL,
+		machine_id  TEXT NOT NULL,
+		from_states TEXT NOT NULL,
+		to_states   TEXT NOT NULL,
+		event       TEXT NOT NULL,
+		cond_result INTEGER,
+		actions_run TEXT NOT NULL
 	);
 
 	-- Indexes on query-hot columns
-	CREATE INDEX idx_event_queue_tick ON event_queue(tick);
+	CREATE INDEX idx_event_queue_target_tick ON event_queue(target_tick);
 	CREATE INDEX idx_input_events_consumed ON input_events(consumed);
 	CREATE INDEX idx_transitions_entity_id ON transitions(entity_id);
 	`
