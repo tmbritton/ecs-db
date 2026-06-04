@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "components": {
     "Position": {
       "type": "object",
@@ -11,27 +11,56 @@
     "Health": {
       "type": "object",
       "properties": {
-        "hp": { "type": "integer" },
+        "hp":    { "type": "integer" },
         "maxHp": { "type": "integer" }
       }
     },
     "Sprite": {
       "type": "object",
       "properties": {
-        "imageId": { "type": "string" },
-        "frame": { "type": "integer" }
+        "sheet":     { "type": "string" },
+        "animation": { "type": "string" },
+        "flip_x":    { "type": "boolean" }
+      }
+    },
+    "Tile": {
+      "type": "object",
+      "properties": {
+        "x":         { "type": "integer" },
+        "y":         { "type": "integer" },
+        "passable":  { "type": "boolean" },
+        "tile_type": { "type": "string" }
+      }
+    },
+    "Path": {
+      "type": "object",
+      "properties": {
+        "waypoints":     { "type": "string" },
+        "current_index": { "type": "integer" }
+      }
+    },
+    "Speed": {
+      "type": "object",
+      "properties": {
+        "value": { "type": "number" }
       }
     }
   },
   "entityTypes": {
     "Goblin": {
       "requiredComponents": ["Position", "Health", "Sprite"],
-      "optionalComponents": [],
+      "optionalComponents": ["Path", "Speed"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
     "Player": {
       "requiredComponents": ["Position", "Health", "Sprite"],
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    },
+    "Tile": {
+      "requiredComponents": ["Tile"],
       "optionalComponents": [],
       "allowExtraComponents": false,
       "validationLevel": "strict"

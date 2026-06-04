@@ -1,7 +1,7 @@
 # Story 1: Schema Updates
 
 **Epic:** 5 — Interpreter tick loop & Ebitengine monolith  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** High — prerequisite for every other Epic 5 story
 
 **Depends on:** Epic 2 (migration system), Epic 1 (schema loader)
@@ -16,17 +16,17 @@ The existing migration system (Epic 2) handles all of this automatically when `s
 
 ## Acceptance Criteria
 
-- [ ] `schema.json` `schemaVersion` bumped to `2`
-- [ ] `Sprite` component updated:
+- [x] `schema.json` `schemaVersion` bumped to `2`
+- [x] `Sprite` component updated:
   - Remove `imageId` (string), `frame` (integer)
   - Add `sheet` (string), `animation` (string), `flip_x` (boolean, default `false`)
-- [ ] `Tile` component added: `x` (integer), `y` (integer), `passable` (boolean), `tile_type` (string)
-- [ ] `Path` component added: `waypoints` (string — JSON array of `{x,y}` objects), `current_index` (integer, default `0`)
-- [ ] `Speed` component added: `value` (number — tiles per tick, e.g. `1.0`)
-- [ ] `Tile` entity type added: `requiredComponents: ["Tile"]`, `allowExtraComponents: false`, `validationLevel: "strict"`
-- [ ] `Goblin` entity type updated: `optionalComponents` includes `Path` and `Speed`
-- [ ] Running the CLI against an existing database automatically migrates to v2 (comp_sprite rebuilt, three new tables created)
-- [ ] `go test ./...` passes
+- [x] `Tile` component added: `x` (integer), `y` (integer), `passable` (boolean), `tile_type` (string)
+- [x] `Path` component added: `waypoints` (string — JSON array of `{x,y}` objects), `current_index` (integer, default `0`)
+- [x] `Speed` component added: `value` (number — tiles per tick, e.g. `1.0`)
+- [x] `Tile` entity type added: `requiredComponents: ["Tile"]`, `allowExtraComponents: false`, `validationLevel: "strict"`
+- [x] `Goblin` entity type updated: `optionalComponents` includes `Path` and `Speed`
+- [x] Running the CLI against an existing database automatically migrates to v2 (comp_sprite rebuilt, three new tables created)
+- [x] `go test ./...` passes
 
 ## Notes
 
