@@ -1,11 +1,40 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/BurntSushi/toml"
 )
+
+var instance *Config
+
+// Init loads config from path, falling back to Defaults() if the file is
+// absent. Returns an error only if the file exists but cannot be parsed.
+// Must be called once at application startup before any call to Get.
+func Init(path string) error {
+	cfg, err := Load(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "Config file %q not found, using defaults\n", path)
+		instance = Defaults()
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	instance = cfg
+	return nil
+}
+
+// Get returns the loaded configuration. Panics if Init has not been called.
+func Get() *Config {
+	if instance == nil {
+		panic("config: Get called before Init")
+	}
+	return instance
+}
 
 type Config struct {
 	Database DatabaseConfig `toml:"database"`

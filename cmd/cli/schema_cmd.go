@@ -1,9 +1,7 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 
 	"github.com/spf13/cobra"
 
@@ -27,15 +25,7 @@ func init() {
 }
 
 func runSchemaValidate(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			cfg = config.Defaults()
-		} else {
-			return fmt.Errorf("loading config: %w", err)
-		}
-	}
-	s, err := schema.InitSchema(cfg.Schema.Path)
+	s, err := schema.InitSchema(config.Get().Schema.Path)
 	if err != nil {
 		return fmt.Errorf("schema invalid: %w", err)
 	}

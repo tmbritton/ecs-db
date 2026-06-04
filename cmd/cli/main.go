@@ -3,9 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -22,7 +20,10 @@ var cfgPath string
 var rootCmd = &cobra.Command{
 	Use:   "ecs-db",
 	Short: "ECS-in-SQLite game engine",
-	RunE:  runGame,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return config.Init(cfgPath)
+	},
+	RunE: runGame,
 }
 
 func init() {
@@ -37,15 +38,7 @@ func main() {
 }
 
 func runGame(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "Config file %q not found, using defaults\n", cfgPath)
-			cfg = config.Defaults()
-		} else {
-			return fmt.Errorf("loading config: %w", err)
-		}
-	}
+	cfg := config.Get()
 
 	schemaBytes, err := os.ReadFile(cfg.Schema.Path)
 	if err != nil {
