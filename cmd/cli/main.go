@@ -4,10 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
 	"io/fs"
 	"os"
+
+	"github.com/spf13/cobra"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/agent/builtins"
@@ -16,50 +17,58 @@ import (
 	"github.com/tmbritton/ecs-db/internal/storage"
 )
 
-func main() {
-	configPath := flag.String("config", "./game.toml", "path to TOML config file")
-	flag.Parse()
+var cfgPath string
 
-	cfg, err := config.Load(*configPath)
+var rootCmd = &cobra.Command{
+	Use:   "ecs-db",
+	Short: "ECS-in-SQLite game engine",
+	RunE:  runGame,
+}
+
+func init() {
+	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "./game.toml", "path to TOML config file")
+	rootCmd.AddCommand(schemaCmd)
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runGame(cmd *cobra.Command, args []string) error {
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "Config file %q not found, using defaults\n", *configPath)
+			fmt.Fprintf(os.Stderr, "Config file %q not found, using defaults\n", cfgPath)
 			cfg = config.Defaults()
 		} else {
-			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("loading config: %w", err)
 		}
 	}
 
-	// Load schema
 	schemaBytes, err := os.ReadFile(cfg.Schema.Path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading schema from %q: %v\n", cfg.Schema.Path, err)
-		os.Exit(1)
+		return fmt.Errorf("loading schema from %q: %w", cfg.Schema.Path, err)
 	}
 	dbSchema, err := schema.LoadSchema(schemaBytes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing schema from %q: %v\n", cfg.Schema.Path, err)
-		os.Exit(1)
+		return fmt.Errorf("parsing schema from %q: %w", cfg.Schema.Path, err)
 	}
 	if err := schema.ValidateSchema(dbSchema); err != nil {
-		fmt.Fprintf(os.Stderr, "Error validating schema from %q: %v\n", cfg.Schema.Path, err)
-		os.Exit(1)
+		return fmt.Errorf("validating schema from %q: %w", cfg.Schema.Path, err)
 	}
 
 	hash := sha256.Sum256(schemaBytes)
 	schemaHash := hex.EncodeToString(hash[:])
 
-	// Initialize database
 	db, err := storage.NewSQLiteStore(cfg.Database.Path, dbSchema, schemaHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing database: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("initializing database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
 	fmt.Printf("Database initialized (schema version %d)\n", dbSchema.SchemaVersion)
 
-	// Load behavior machines from each mod's behaviors directory
 	loader := agent.NewLoader(builtins.NewRegistry(), dbSchema)
 	for _, mod := range cfg.Mods {
 		if mod.Behaviors == "" {
@@ -75,4 +84,5 @@ func main() {
 	}
 
 	fmt.Println("Ready for commands (not implemented yet)")
+	return nil
 }
