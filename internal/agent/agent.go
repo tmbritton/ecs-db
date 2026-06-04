@@ -90,6 +90,19 @@ func StartAgent(agent *Agent, registry *Registry, tick int64, world WorldWriter,
 	return mw.SetMachineState(agent.EntityID, def.ID, nodeIDs(agent.Configuration), tick)
 }
 
+// LoadAgent reconstructs an Agent from persisted state for use in the tick loop.
+// stateIDs are the currently active leaf state IDs stored in behavior_components.current_states.
+// History is initialized empty — the reconciler handles invalid states on hot-reload.
+func LoadAgent(def *MachineDefinition, entityID int64, stateIDs []string, tickDurationMs int64) *Agent {
+	a := NewAgent(def, entityID, "", tickDurationMs)
+	for _, id := range stateIDs {
+		if node := findState(def.States, id); node != nil {
+			a.Configuration = append(a.Configuration, node)
+		}
+	}
+	return a
+}
+
 // ── Helpers shared by agent.go and interpreter.go ────────────────────────────
 
 // expandEntry returns states to enter (root→leaf) when targeting node.

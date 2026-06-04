@@ -255,3 +255,36 @@ func TestNewAgent_TickDurationMs_Custom(t *testing.T) {
 		t.Errorf("TickDurationMs = %d, want 100", a.TickDurationMs)
 	}
 }
+
+func TestLoadAgent_RebuildsConfiguration(t *testing.T) {
+	def := &MachineDefinition{
+		ID:      "test",
+		Initial: "idle",
+		States: map[string]*StateNode{
+			"idle": {ID: "idle", Type: StateTypeAtomic},
+			"run":  {ID: "run", Type: StateTypeAtomic},
+		},
+	}
+	a := LoadAgent(def, 42, []string{"idle"}, 50)
+	if len(a.Configuration) != 1 {
+		t.Fatalf("want 1 state, got %d", len(a.Configuration))
+	}
+	if a.Configuration[0].ID != "idle" {
+		t.Errorf("want state id=idle, got %q", a.Configuration[0].ID)
+	}
+	if a.EntityID != 42 {
+		t.Errorf("want EntityID=42, got %d", a.EntityID)
+	}
+}
+
+func TestLoadAgent_UnknownStateIDsSkipped(t *testing.T) {
+	def := &MachineDefinition{
+		ID:      "test",
+		Initial: "idle",
+		States:  map[string]*StateNode{"idle": {ID: "idle", Type: StateTypeAtomic}},
+	}
+	a := LoadAgent(def, 1, []string{"idle", "nonexistent"}, 50)
+	if len(a.Configuration) != 1 {
+		t.Errorf("want 1 state, got %d", len(a.Configuration))
+	}
+}
