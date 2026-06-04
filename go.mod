@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/fsnotify/fsnotify v1.7.0
+	github.com/hajimehoshi/ebiten/v2 v2.9.9
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.50.1
 )
@@ -15,7 +16,6 @@ require (
 	github.com/ebitengine/hideconsole v1.0.0 // indirect
 	github.com/ebitengine/purego v0.9.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hajimehoshi/ebiten/v2 v2.9.9 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
