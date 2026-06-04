@@ -50,6 +50,7 @@ type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	Schema   SchemaConfig   `toml:"schema"`
 	Mods     []ModConfig    `toml:"mods"`
+	Window   WindowConfig   `toml:"window"`
 }
 
 type DatabaseConfig struct {
@@ -66,6 +67,13 @@ type ModConfig struct {
 	Actions   string `toml:"actions"`
 	Guards    string `toml:"guards"`
 	Assets    string `toml:"assets"`
+}
+
+type WindowConfig struct {
+	Title    string `toml:"title"`
+	Width    int    `toml:"width"`
+	Height   int    `toml:"height"`
+	TileSize int    `toml:"tileSize"`
 }
 
 // Load reads and parses a TOML config file at path.
@@ -87,5 +95,11 @@ func Defaults() *Config {
 	return &Config{
 		Database: DatabaseConfig{Path: "./ecs.db"},
 		Schema:   SchemaConfig{Path: "./schema.json"},
+		Window: WindowConfig{
+			Title:    "ECS Demo",
+			Width:    640,
+			Height:   480,
+			TileSize: 16,
+		},
 	}
 }

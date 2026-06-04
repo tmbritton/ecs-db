@@ -17,6 +17,12 @@ actions   = "./actions/"
 guards    = "./guards/"
 assets    = "./assets/"
 
+[window]
+title    = "ECS Demo"
+width    = 640
+height   = 480
+tileSize = 16
+
 # To add a mod, uncomment and fill in:
 # [[mods]]
 # name      = "my-mod"
