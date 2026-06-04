@@ -11,8 +11,14 @@ import (
 
 func resetInstance(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() { instance = nil })
+	t.Cleanup(func() {
+		mu.Lock()
+		instance = nil
+		mu.Unlock()
+	})
+	mu.Lock()
 	instance = nil
+	mu.Unlock()
 }
 
 func TestInit_LoadsValidFile(t *testing.T) {
