@@ -1,4 +1,8 @@
 bin/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 .claude/
+/game
+/cli
