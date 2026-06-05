@@ -1,3 +1,5 @@
+//go:build ebitengine
+
 package main
 
 import (

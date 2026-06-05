@@ -1,24 +1,20 @@
-.PHONY: build run clean
+.PHONY: build run clean test
 
-# Build the CLI application
+BREW_PREFIX := /home/linuxbrew/.linuxbrew
+XORGPROTO   := $(shell brew --prefix xorgproto 2>/dev/null || echo $(BREW_PREFIX)/Cellar/xorgproto/2025.1)
+
+CGO_CFLAGS  := -I$(BREW_PREFIX)/include -I$(XORGPROTO)/include
+CGO_LDFLAGS := -L$(BREW_PREFIX)/lib
+
 build:
-	go build -o bin/ecsdb ./cmd/cli
+	CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" \
+	go build -tags ebitengine -o bin/game ./cmd/game
 
-# Run the CLI application
 run: build
-	./bin/ecsdb
+	./bin/game
 
-# Run without rebuilding (useful when you rebuild manually)
-run-only:
-	./bin/ecsdb
-
-# Clean build artifacts
 clean:
 	rm -rf bin/
 
-# Build and run in one command
-dev: build run-only
-
-# Run tests
 test:
 	go test ./...

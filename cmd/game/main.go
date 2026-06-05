@@ -33,6 +33,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "./game.toml", "path to TOML config file")
+	rootCmd.AddCommand(schemaCmd)
 }
 
 func main() {
