@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"image/color"
+	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
@@ -33,7 +34,11 @@ func NewTilemapRenderer(db *sql.DB, w, h, tileSize int) (*TilemapRenderer, error
 func (r *TilemapRenderer) Image() *ebiten.Image { return r.img }
 
 // Invalidate rebuilds the static image. Called by the setTilePassable action.
-func (r *TilemapRenderer) Invalidate() { _ = r.rebuild() }
+func (r *TilemapRenderer) Invalidate() {
+	if err := r.rebuild(); err != nil {
+		log.Printf("TilemapRenderer.Invalidate: %v", err)
+	}
+}
 
 func (r *TilemapRenderer) rebuild() error {
 	img := ebiten.NewImage(r.w, r.h)

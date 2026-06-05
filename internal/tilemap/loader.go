@@ -19,7 +19,7 @@ type mapDef struct {
 // LoadMap bootstraps Tile entities from a TOML map file and returns a
 // populated TileGrid. Idempotent: skips entity creation if Tile entities
 // already exist in the DB.
-func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string, tileSize int) (*TileGrid, error) {
+func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string) (*TileGrid, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("LoadMap: reading %q: %w", path, err)

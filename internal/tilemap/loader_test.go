@@ -70,7 +70,7 @@ func TestLoadMap_CreatesEntities(t *testing.T) {
 	svc := world.NewEntityService(store)
 	svc.SetSchema(ds)
 
-	grid, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree), 32)
+	grid, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree))
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestLoadMap_Idempotent(t *testing.T) {
 
 	path := writeTempMap(t, threeByThree)
 	for range 2 {
-		if _, err := LoadMap(context.Background(), svc, store.DB(), path, 32); err != nil {
+		if _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
 			t.Fatalf("LoadMap: %v", err)
 		}
 	}

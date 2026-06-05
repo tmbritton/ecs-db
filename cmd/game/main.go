@@ -83,7 +83,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 		tr   *renderer.TilemapRenderer
 	)
 	if cfg.Map.Path != "" {
-		g, err := tilemap.LoadMap(ctx, svc, store.DB(), cfg.Map.Path, cfg.Window.TileSize)
+		g, err := tilemap.LoadMap(ctx, svc, store.DB(), cfg.Map.Path)
 		if err != nil {
 			return fmt.Errorf("loading map: %w", err)
 		}
