@@ -11,6 +11,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
 // Game implements ebiten.Game. It runs the interpreter at ~20 Hz by calling
@@ -20,13 +21,17 @@ type Game struct {
 	frameCount int
 	logicalW   int
 	logicalH   int
+	grid       *tilemap.TileGrid
+	tr         *TilemapRenderer
 }
 
-func NewGame(db *sql.DB, loader *agent.Loader, registry *agent.Registry, w, h int) *Game {
+func NewGame(db *sql.DB, loader *agent.Loader, registry *agent.Registry, w, h int, grid *tilemap.TileGrid, tr *TilemapRenderer) *Game {
 	return &Game{
 		ticker:   newTicker(db, loader, registry),
 		logicalW: w,
 		logicalH: h,
+		grid:     grid,
+		tr:       tr,
 	}
 }
 
@@ -45,6 +50,9 @@ func (g *Game) Update() error {
 
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.Black)
+	if g.tr != nil {
+		screen.DrawImage(g.tr.Image(), nil)
+	}
 }
 
 func (g *Game) Layout(outsideW, outsideH int) (int, int) {

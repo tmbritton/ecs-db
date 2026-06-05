@@ -1,7 +1,7 @@
 # Story 3: Tilemap + TileGrid
 
 **Epic:** 5 — Interpreter tick loop & Ebitengine monolith  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** High — tilemap is required by player movement (Story 4) and pathfinding (Story 6)
 
 **Depends on:** Story 2 (Ebitengine window + tick loop), Story 1 (Tile component in schema)

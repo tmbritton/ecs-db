@@ -46,11 +46,16 @@ func Get() *Config {
 	return instance
 }
 
+type MapConfig struct {
+	Path string `toml:"path"`
+}
+
 type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	Schema   SchemaConfig   `toml:"schema"`
 	Mods     []ModConfig    `toml:"mods"`
 	Window   WindowConfig   `toml:"window"`
+	Map      MapConfig      `toml:"map"`
 }
 
 type DatabaseConfig struct {
@@ -101,5 +106,6 @@ func Defaults() *Config {
 			Height:   480,
 			TileSize: 16,
 		},
+		Map: MapConfig{Path: "mods/map/level1.toml"},
 	}
 }

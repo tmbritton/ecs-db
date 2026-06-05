@@ -18,6 +18,8 @@ import (
 	"github.com/tmbritton/ecs-db/internal/renderer"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
+	"github.com/tmbritton/ecs-db/internal/world"
 )
 
 var cfgPath string
@@ -70,6 +72,29 @@ func runGame(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensuring interpreter tables: %w", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := world.NewEntityService(store)
+	svc.SetSchema(dbSchema)
+
+	var (
+		grid *tilemap.TileGrid
+		tr   *renderer.TilemapRenderer
+	)
+	if cfg.Map.Path != "" {
+		g, err := tilemap.LoadMap(ctx, svc, store.DB(), cfg.Map.Path, cfg.Window.TileSize)
+		if err != nil {
+			return fmt.Errorf("loading map: %w", err)
+		}
+		grid = g
+		t, err := renderer.NewTilemapRenderer(store.DB(), cfg.Window.Width, cfg.Window.Height, cfg.Window.TileSize)
+		if err != nil {
+			return fmt.Errorf("building tilemap renderer: %w", err)
+		}
+		tr = t
+	}
+
 	registry := builtins.NewRegistry()
 	loader := agent.NewLoader(registry, dbSchema)
 
@@ -88,9 +113,6 @@ func runGame(cmd *cobra.Command, args []string) error {
 		watchedDirs = append(watchedDirs, agent.WatchedDir{Path: mod.Behaviors, ModName: mod.Name})
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	watcher := agent.NewWatcher(loader, watchedDirs, 0)
 	go func() {
 		if err := watcher.Start(ctx); err != nil {
@@ -102,6 +124,6 @@ func runGame(cmd *cobra.Command, args []string) error {
 	ebiten.SetWindowSize(cfg.Window.Width, cfg.Window.Height)
 	ebiten.SetWindowTitle(cfg.Window.Title)
 
-	game := renderer.NewGame(store.DB(), loader, registry, cfg.Window.Width, cfg.Window.Height)
+	game := renderer.NewGame(store.DB(), loader, registry, cfg.Window.Width, cfg.Window.Height, grid, tr)
 	return ebiten.RunGame(game)
 }
