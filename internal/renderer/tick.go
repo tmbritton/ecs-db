@@ -18,13 +18,19 @@ const (
 // Ticker executes the interpreter tick sequence against the SQLite database.
 // It is separated from Game so it can be tested without an Ebitengine window.
 type Ticker struct {
-	db       *sql.DB
-	loader   *agent.Loader
-	registry *agent.Registry
+	db           *sql.DB
+	loader       *agent.Loader
+	registry     *agent.Registry
+	inputHandler agent.InputHandler
 }
 
 func newTicker(db *sql.DB, loader *agent.Loader, registry *agent.Registry) *Ticker {
 	return &Ticker{db: db, loader: loader, registry: registry}
+}
+
+// SetInputHandler registers a handler that is called each tick with drained input_events rows.
+func (t *Ticker) SetInputHandler(h agent.InputHandler) {
+	t.inputHandler = h
 }
 
 // RunTick executes one interpreter tick in a single SQLite transaction:
@@ -51,6 +57,35 @@ func (t *Ticker) RunTick() error {
 	world := storage.NewTxWorldWriter(tx)
 	reader := storage.NewTxWorldReader(tx)
 	mw := storage.NewMachineWriter(tx)
+
+	// 1.5. Drain and dispatch input_events.
+	{
+		iRows, err := tx.Query(`SELECT id, kind, payload FROM input_events WHERE consumed = 0 ORDER BY id ASC`)
+		if err != nil {
+			return fmt.Errorf("querying input_events: %w", err)
+		}
+		var inputEvents []agent.InputEvent
+		for iRows.Next() {
+			var e agent.InputEvent
+			if err := iRows.Scan(&e.ID, &e.Kind, &e.Payload); err != nil {
+				iRows.Close()
+				return fmt.Errorf("scanning input_events: %w", err)
+			}
+			inputEvents = append(inputEvents, e)
+		}
+		iRows.Close()
+		if err := iRows.Err(); err != nil {
+			return fmt.Errorf("iterating input_events: %w", err)
+		}
+		if t.inputHandler != nil && len(inputEvents) > 0 {
+			if err := t.inputHandler.Handle(inputEvents, world, reader); err != nil {
+				log.Printf("tick: input handler: %v", err)
+			}
+		}
+		if _, err := tx.Exec(`UPDATE input_events SET consumed = 1 WHERE consumed = 0`); err != nil {
+			return fmt.Errorf("marking input events consumed: %w", err)
+		}
+	}
 
 	// 2. Drain due event_queue rows.
 	type dueEvent struct {

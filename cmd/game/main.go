@@ -5,7 +5,9 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/agent/builtins"
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/game"
 	"github.com/tmbritton/ecs-db/internal/renderer"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
@@ -120,10 +123,52 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	playerID, err := ensurePlayerEntity(ctx, svc, store.DB())
+	if err != nil {
+		return fmt.Errorf("ensuring player entity: %w", err)
+	}
+
+	var inputHandler agent.InputHandler
+	if grid != nil {
+		inputHandler = game.NewPlayerInputHandler(playerID, grid)
+	}
+
 	ebiten.SetTPS(60)
 	ebiten.SetWindowSize(cfg.Window.Width, cfg.Window.Height)
 	ebiten.SetWindowTitle(cfg.Window.Title)
 
-	game := renderer.NewGame(store.DB(), loader, registry, cfg.Window.Width, cfg.Window.Height, grid, tr)
-	return ebiten.RunGame(game)
+	g := renderer.NewGame(renderer.NewGameParams{
+		DB:       store.DB(),
+		Loader:   loader,
+		Registry: registry,
+		Width:    cfg.Window.Width,
+		Height:   cfg.Window.Height,
+		TileSize: cfg.Window.TileSize,
+		Grid:     grid,
+		Tilemap:  tr,
+		PlayerID: playerID,
+		Handler:  inputHandler,
+	})
+	return ebiten.RunGame(g)
+}
+
+// ensurePlayerEntity returns the existing Player entity ID, or creates one at (2,2) if absent.
+func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
+	var id int64
+	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Player' LIMIT 1`).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("looking up player: %w", err)
+	}
+	e, err := svc.CreateEntity(ctx, "Player", []world.EntityComponent{
+		{Name: "Position", Values: map[string]interface{}{"x": 2, "y": 2}},
+		{Name: "Sprite", Values: map[string]interface{}{"sheet": "", "animation": "player_idle", "flip_x": false}},
+		{Name: "Health", Values: map[string]interface{}{"hp": 10, "maxHp": 10}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("creating player: %w", err)
+	}
+	return e.ID, nil
 }
