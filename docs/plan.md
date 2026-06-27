@@ -180,13 +180,13 @@ Design spec: [`docs/superpowers/specs/2026-06-02-epic5-renderer-design.md`](supe
 
 Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
-- [ ] **Schema updates** — Evolve `Sprite`; add `Tile`, `Path`, `Speed` components and `Tile` entity type. Auto-migration verifies the pipeline still works.
+- [x] **Schema updates** — Evolve `Sprite`; add `Tile`, `Path`, `Speed` components and `Tile` entity type. Auto-migration verifies the pipeline still works.
 
-- [ ] **Ebitengine wiring + tick loop** — `cmd/game/main.go`; `Game` struct with `Update()`/`Draw()`; 60 TPS / 20 Hz split via `frameCount % (60/TicksPerSecond)`; interpreter tick (drain `input_events` → drain `event_queue` → deliver `TICK` → advance tick + `world_version`) inside `Update()`.
+- [x] **Ebitengine wiring + tick loop** — `cmd/game/main.go`; `Game` struct with `Update()`/`Draw()`; 60 TPS / 20 Hz split via `frameCount % (60/TicksPerSecond)`; interpreter tick (drain `input_events` → drain `event_queue` → deliver `TICK` → advance tick + `world_version`) inside `Update()`.
 
-- [ ] **Tilemap + TileGrid** — TOML map file; bootstrap creates `Tile` entities at startup; `internal/tilemap.TileGrid` (`[][]bool`) built from tile entities; static render buffer drawn once to `*ebiten.Image`; invalidated when a tile changes.
+- [x] **Tilemap + TileGrid** — TOML map file; bootstrap creates `Tile` entities at startup; `internal/tilemap.TileGrid` (`[][]bool`) built from tile entities; static render buffer drawn once to `*ebiten.Image`; invalidated when a tile changes.
 
-- [ ] **Input capture + player movement** — `ebiten.IsKeyPressed` sampled 60 Hz; rows appended to `input_events`; game-specific input handler drains rows each tick and moves the `Player` entity one tile per tick (checking `TileGrid` for passability), setting `comp_sprite.animation` and `flip_x`.
+- [x] **Input capture + player movement** — `ebiten.IsKeyPressed` sampled 60 Hz; rows appended to `input_events`; game-specific input handler drains rows each tick and moves the `Player` entity one tile per tick (checking `TileGrid` for passability), setting `comp_sprite.animation` and `flip_x`.
 
 - [ ] **Sprite renderer + animation system** — Updated `Sprite` component (`sheet`, `animation`, `flip_x`); animation definitions TOML in `mods/assets/` (hot-swappable via watcher); `AnimState` map in renderer (frame timer at 60 Hz); `setAnimation` built-in action; `Draw()` queries all entities with `Position` + `Sprite` and renders the current frame.
 
