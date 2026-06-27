@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/spf13/cobra"
@@ -133,21 +134,40 @@ func runGame(cmd *cobra.Command, args []string) error {
 		inputHandler = game.NewPlayerInputHandler(playerID, grid)
 	}
 
+	var animPath string
+	for _, mod := range cfg.Mods {
+		if mod.Assets != "" {
+			animPath = filepath.Join(mod.Assets, "animations.toml")
+			break
+		}
+	}
+	animLoader := renderer.NewAnimLoader()
+	if animPath != "" {
+		if err := animLoader.Load(animPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: loading animations: %v\n", err)
+		}
+		go func() {
+			if err := animLoader.Watch(ctx, animPath); err != nil {
+				fmt.Fprintf(os.Stderr, "anim watcher: %v\n", err)
+			}
+		}()
+	}
+
 	ebiten.SetTPS(60)
 	ebiten.SetWindowSize(cfg.Window.Width, cfg.Window.Height)
 	ebiten.SetWindowTitle(cfg.Window.Title)
 
 	g := renderer.NewGame(renderer.NewGameParams{
-		DB:       store.DB(),
-		Loader:   loader,
-		Registry: registry,
-		Width:    cfg.Window.Width,
-		Height:   cfg.Window.Height,
-		TileSize: cfg.Window.TileSize,
-		Grid:     grid,
-		Tilemap:  tr,
-		PlayerID: playerID,
-		Handler:  inputHandler,
+		DB:         store.DB(),
+		Loader:     loader,
+		Registry:   registry,
+		Width:      cfg.Window.Width,
+		Height:     cfg.Window.Height,
+		TileSize:   cfg.Window.TileSize,
+		Grid:       grid,
+		Tilemap:    tr,
+		Handler:    inputHandler,
+		AnimLoader: animLoader,
 	})
 	return ebiten.RunGame(g)
 }

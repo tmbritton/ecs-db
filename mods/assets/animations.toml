@@ -1,0 +1,27 @@
+[[animation]]
+name   = "player_idle"
+sheet  = "mods/assets/sprites/player.png"
+frames = [0]
+fps    = 1
+loop   = true
+
+[[animation]]
+name   = "player_walk"
+sheet  = "mods/assets/sprites/player.png"
+frames = [1, 2, 3, 4]
+fps    = 8
+loop   = true
+
+[[animation]]
+name   = "goblin_idle"
+sheet  = "mods/assets/sprites/goblin.png"
+frames = [0]
+fps    = 1
+loop   = true
+
+[[animation]]
+name   = "goblin_walk"
+sheet  = "mods/assets/sprites/goblin.png"
+frames = [1, 2, 3, 4]
+fps    = 8
+loop   = true

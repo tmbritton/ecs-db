@@ -247,3 +247,12 @@ func (a *logAction) Run(ctx agent.ActionContext) error {
 	fmt.Printf("[agent log] %s\n", msg)
 	return nil
 }
+
+// ── setAnimation ──────────────────────────────────────────────────────────────
+
+type setAnimationAction struct{}
+
+func (a *setAnimationAction) Run(ctx agent.ActionContext) error {
+	anim, _ := ctx.Params["animation"].(string)
+	return ctx.World.SetComponentValue(ctx.EntityID, "Sprite", "animation", anim)
+}

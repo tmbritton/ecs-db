@@ -87,6 +87,14 @@ func registerActions(r *agent.Registry) {
 			{Name: "message", Type: "string", Required: true},
 		},
 	}, &logAction{})
+
+	r.RegisterAction(agent.ActionMeta{
+		Name:        "setAnimation",
+		Description: "Set comp_sprite.animation on the entity.",
+		Params: []agent.ParamSchema{
+			{Name: "animation", Type: "string", Required: true},
+		},
+	}, &setAnimationAction{})
 }
 
 func registerGuards(r *agent.Registry) {

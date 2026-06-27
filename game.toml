@@ -15,7 +15,7 @@ name      = "core"
 behaviors = "./behaviors/"
 actions   = "./actions/"
 guards    = "./guards/"
-assets    = "./assets/"
+assets    = "./mods/assets/"
 
 [window]
 title    = "ECS Demo"
