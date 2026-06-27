@@ -77,9 +77,9 @@ func (t *Ticker) RunTick() error {
 		if err := iRows.Err(); err != nil {
 			return fmt.Errorf("iterating input_events: %w", err)
 		}
-		if t.inputHandler != nil && len(inputEvents) > 0 {
+		if t.inputHandler != nil {
 			if err := t.inputHandler.Handle(inputEvents, world, reader); err != nil {
-				log.Printf("tick: input handler: %v", err)
+				return fmt.Errorf("tick: input handler: %w", err)
 			}
 		}
 		if _, err := tx.Exec(`UPDATE input_events SET consumed = 1 WHERE consumed = 0`); err != nil {

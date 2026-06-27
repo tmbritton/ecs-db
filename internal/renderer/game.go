@@ -13,6 +13,7 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/game"
 	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
@@ -72,14 +73,14 @@ var dirKeys = []struct {
 	key  ebiten.Key
 	name string
 }{
-	{ebiten.KeyArrowUp, "ArrowUp"},
-	{ebiten.KeyArrowDown, "ArrowDown"},
-	{ebiten.KeyArrowLeft, "ArrowLeft"},
-	{ebiten.KeyArrowRight, "ArrowRight"},
-	{ebiten.KeyW, "W"},
-	{ebiten.KeyA, "A"},
-	{ebiten.KeyS, "S"},
-	{ebiten.KeyD, "D"},
+	{ebiten.KeyArrowUp, game.KeyArrowUp},
+	{ebiten.KeyArrowDown, game.KeyArrowDown},
+	{ebiten.KeyArrowLeft, game.KeyArrowLeft},
+	{ebiten.KeyArrowRight, game.KeyArrowRight},
+	{ebiten.KeyW, game.KeyW},
+	{ebiten.KeyA, game.KeyA},
+	{ebiten.KeyS, game.KeyS},
+	{ebiten.KeyD, game.KeyD},
 }
 
 func (g *Game) Update() error {
@@ -87,16 +88,19 @@ func (g *Game) Update() error {
 		return ebiten.Termination
 	}
 
-	// Sample held directional keys and write to input_events every frame.
+	// Sample held directional keys and write to input_events in a single transaction per frame.
 	now := time.Now().UnixMilli()
-	for _, k := range dirKeys {
-		if ebiten.IsKeyPressed(k.key) {
-			payload, _ := json.Marshal(map[string]string{"key": k.name})
-			_, _ = g.db.Exec(
-				`INSERT INTO input_events (received_at_ms, kind, payload) VALUES (?, 'key_held', ?)`,
-				now, string(payload),
-			)
+	if inputTx, err := g.db.Begin(); err == nil {
+		for _, k := range dirKeys {
+			if ebiten.IsKeyPressed(k.key) {
+				payload, _ := json.Marshal(map[string]string{"key": k.name})
+				_, _ = inputTx.Exec(
+					`INSERT INTO input_events (received_at_ms, kind, payload) VALUES (?, 'key_held', ?)`,
+					now, string(payload),
+				)
+			}
 		}
+		_ = inputTx.Commit()
 	}
 
 	g.frameCount++
@@ -118,9 +122,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if err := g.db.QueryRow(
 			"SELECT x, y FROM comp_position WHERE entity_id = ?", g.playerID,
 		).Scan(&px, &py); err == nil {
-			op := &ebiten.DrawImageOptions{}
+			var op ebiten.DrawImageOptions
 			op.GeoM.Translate(px*float64(g.tileSize), py*float64(g.tileSize))
-			screen.DrawImage(g.playerImg, op)
+			screen.DrawImage(g.playerImg, &op)
 		}
 	}
 }

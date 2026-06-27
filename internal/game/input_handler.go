@@ -43,16 +43,18 @@ func (h *PlayerInputHandler) Handle(events []agent.InputEvent, world agent.World
 			continue
 		}
 		switch payload.Key {
-		case "ArrowRight", "D":
+		case KeyArrowRight, KeyD:
 			dir = &direction{1, 0}
 			flipLeft = false
-		case "ArrowLeft", "A":
+		case KeyArrowLeft, KeyA:
 			dir = &direction{-1, 0}
 			flipLeft = true
-		case "ArrowDown", "S":
+		case KeyArrowDown, KeyS:
 			dir = &direction{0, 1}
-		case "ArrowUp", "W":
+			flipLeft = false
+		case KeyArrowUp, KeyW:
 			dir = &direction{0, -1}
+			flipLeft = false
 		}
 	}
 
@@ -90,7 +92,7 @@ func (h *PlayerInputHandler) Handle(events []agent.InputEvent, world agent.World
 	if err := world.SetComponentValue(h.playerID, "Sprite", "animation", anim); err != nil {
 		return fmt.Errorf("player input: set animation: %w", err)
 	}
-	flip := btoi(moved && flipLeft)
+	flip := btoi(flipLeft)
 	if err := world.SetComponentValue(h.playerID, "Sprite", "flip_x", flip); err != nil {
 		return fmt.Errorf("player input: set flip_x: %w", err)
 	}
