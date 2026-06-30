@@ -1,6 +1,9 @@
 package builtins
 
-import "github.com/tmbritton/ecs-db/internal/agent"
+import (
+	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
+)
 
 // NewRegistry returns a registry pre-populated with all built-in actions and guards.
 func NewRegistry() *agent.Registry {
@@ -95,6 +98,25 @@ func registerActions(r *agent.Registry) {
 			{Name: "animation", Type: "string", Required: true},
 		},
 	}, &setAnimationAction{})
+}
+
+// RegisterPathfinding registers computePath, stepAlongPath, and pathComplete into r.
+// Call after NewRegistry, before behaviors are loaded. grid must not be nil.
+func RegisterPathfinding(r *agent.Registry, grid *tilemap.TileGrid) {
+	r.RegisterAction(agent.ActionMeta{
+		Name:        "computePath",
+		Description: "Compute A* path from entity Position to target_x/target_y and write to Path component.",
+	}, &computePathAction{grid: grid})
+
+	r.RegisterAction(agent.ActionMeta{
+		Name:        "stepAlongPath",
+		Description: "Move entity Position to next Path waypoint and increment current_index.",
+	}, &stepAlongPathAction{})
+
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "pathComplete",
+		Description: "True when Path.current_index >= len(Path.waypoints), or when Path is not attached.",
+	}, &pathCompleteGuard{})
 }
 
 func registerGuards(r *agent.Registry) {

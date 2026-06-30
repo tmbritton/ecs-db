@@ -1,6 +1,7 @@
 package builtins
 
 import (
+	"encoding/json"
 	"math"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
@@ -100,4 +101,27 @@ func (g *healthAboveGuard) Evaluate(ctx agent.GuardContext) bool {
 	threshold := toFloat(ctx.Params["threshold"])
 	hp, _ := ctx.World.GetComponentValue(ctx.EntityID, "Health", "hp")
 	return toFloat(hp) > threshold
+}
+
+// ── pathComplete ──────────────────────────────────────────────────────────────
+
+type pathCompleteGuard struct{}
+
+func (g *pathCompleteGuard) Evaluate(ctx agent.GuardContext) bool {
+	has, _ := ctx.World.HasComponent(ctx.EntityID, "Path")
+	if !has {
+		return true
+	}
+	waypointsVal, _ := ctx.World.GetComponentValue(ctx.EntityID, "Path", "waypoints")
+	indexVal, _ := ctx.World.GetComponentValue(ctx.EntityID, "Path", "current_index")
+
+	waypointsStr, _ := waypointsVal.(string)
+	if waypointsStr == "" {
+		return true
+	}
+	var waypoints []json.RawMessage
+	if err := json.Unmarshal([]byte(waypointsStr), &waypoints); err != nil {
+		return true
+	}
+	return int(toFloat(indexVal)) >= len(waypoints)
 }

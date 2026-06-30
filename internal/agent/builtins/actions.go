@@ -1,11 +1,13 @@
 package builtins
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
 // toFloat coerces any SQLite-returned or JSON-decoded numeric value to float64.
@@ -255,4 +257,88 @@ type setAnimationAction struct{}
 func (a *setAnimationAction) Run(ctx agent.ActionContext) error {
 	anim, _ := ctx.Params["animation"].(string)
 	return ctx.World.SetComponentValue(ctx.EntityID, "Sprite", "animation", anim)
+}
+
+// ── computePath ───────────────────────────────────────────────────────────────
+
+type computePathAction struct{ grid *tilemap.TileGrid }
+
+func (a *computePathAction) Run(ctx agent.ActionContext) error {
+	if ctx.Reader == nil {
+		return nil
+	}
+
+	px, _ := ctx.Reader.GetComponentValue(ctx.EntityID, "Position", "x")
+	py, _ := ctx.Reader.GetComponentValue(ctx.EntityID, "Position", "y")
+
+	txComp := manifestComp(ctx, "target_x")
+	tyComp := manifestComp(ctx, "target_y")
+	if txComp == "" || tyComp == "" {
+		return nil
+	}
+	tx, _ := ctx.Reader.GetComponentValue(ctx.EntityID, txComp, "target_x")
+	ty, _ := ctx.Reader.GetComponentValue(ctx.EntityID, tyComp, "target_y")
+
+	start := tilemap.Point{X: int(toFloat(px)), Y: int(toFloat(py))}
+	goal := tilemap.Point{X: int(toFloat(tx)), Y: int(toFloat(ty))}
+
+	path := tilemap.AStar(a.grid, start, goal)
+	if path == nil {
+		return nil
+	}
+
+	jsonBytes, err := json.Marshal(path)
+	if err != nil {
+		return nil
+	}
+	jsonStr := string(jsonBytes)
+
+	has, _ := ctx.Reader.HasComponent(ctx.EntityID, "Path")
+	if !has {
+		return ctx.World.AttachComponent(ctx.EntityID, "Path", map[string]any{
+			"waypoints":     jsonStr,
+			"current_index": int64(0),
+		})
+	}
+	if err := ctx.World.SetComponentValue(ctx.EntityID, "Path", "waypoints", jsonStr); err != nil {
+		return err
+	}
+	return ctx.World.SetComponentValue(ctx.EntityID, "Path", "current_index", int64(0))
+}
+
+// ── stepAlongPath ─────────────────────────────────────────────────────────────
+
+type stepAlongPathAction struct{}
+
+func (a *stepAlongPathAction) Run(ctx agent.ActionContext) error {
+	if ctx.Reader == nil {
+		return nil
+	}
+
+	waypointsVal, _ := ctx.Reader.GetComponentValue(ctx.EntityID, "Path", "waypoints")
+	indexVal, _ := ctx.Reader.GetComponentValue(ctx.EntityID, "Path", "current_index")
+
+	waypointsStr, _ := waypointsVal.(string)
+	if waypointsStr == "" {
+		return nil
+	}
+
+	var waypoints []tilemap.Point
+	if err := json.Unmarshal([]byte(waypointsStr), &waypoints); err != nil {
+		return nil
+	}
+
+	idx := int(toFloat(indexVal))
+	if idx >= len(waypoints) {
+		return nil
+	}
+
+	next := waypoints[idx]
+	if err := ctx.World.SetComponentValue(ctx.EntityID, "Position", "x", float64(next.X)); err != nil {
+		return err
+	}
+	if err := ctx.World.SetComponentValue(ctx.EntityID, "Position", "y", float64(next.Y)); err != nil {
+		return err
+	}
+	return ctx.World.SetComponentValue(ctx.EntityID, "Path", "current_index", int64(idx+1))
 }

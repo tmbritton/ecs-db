@@ -192,7 +192,7 @@ Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
 - [x] **Asset loader + hot-reload sprite sheets** — `[[entity_asset]]` sections in `animations.toml` map entity types to sprite sheets; `AnimLoader.SyncToDatabase` stamps `comp_sprite.sheet` for all entities on every startup; `ImageCache` (ebitengine-tagged) caches `*ebiten.Image` per path and evicts on fsnotify PNG change events, forcing reload on next Draw.
 
-- [ ] **Pathfinding** — `internal/tilemap.AStar`; built-in action `computePath` (reads `comp_position`, runs A*, writes `comp_path`); action `stepAlongPath` (advances `comp_position`, increments `current_index`); guard `pathComplete` (`current_index ≥ len(waypoints)`).
+- [x] **Pathfinding** — `internal/tilemap.AStar`; built-in action `computePath` (reads `comp_position`, runs A*, writes `comp_path`); action `stepAlongPath` (advances `comp_position`, increments `current_index`); guard `pathComplete` (`current_index ≥ len(waypoints)`).
 
 - [ ] **Line-of-sight + tile mutation** — Built-in guard `inLineOfSight` (DDA ray walk on `TileGrid`); built-in action `setTilePassable` (writes `comp_tile.passable` + calls `grid.SetPassable`).
 

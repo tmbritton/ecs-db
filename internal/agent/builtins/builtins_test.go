@@ -9,6 +9,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/agent/builtins"
 	"github.com/tmbritton/ecs-db/internal/storage"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 	_ "modernc.org/sqlite"
 )
 
@@ -26,6 +27,7 @@ func setupBuiltinsDB(t *testing.T) *sql.DB {
 		`CREATE TABLE comp_position    (entity_id INTEGER PRIMARY KEY, x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE comp_health      (entity_id INTEGER PRIMARY KEY, hp REAL NOT NULL DEFAULT 100, maxhp REAL NOT NULL DEFAULT 100)`,
 		`CREATE TABLE comp_goblinstats (entity_id INTEGER PRIMARY KEY, speed REAL NOT NULL DEFAULT 2, aggrorange REAL NOT NULL DEFAULT 80, target_x REAL NOT NULL DEFAULT 0, target_y REAL NOT NULL DEFAULT 0, patience REAL NOT NULL DEFAULT 0)`,
+		`CREATE TABLE comp_path        (entity_id INTEGER PRIMARY KEY, waypoints TEXT NOT NULL DEFAULT '[]', current_index INTEGER NOT NULL DEFAULT 0)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("setup: %v", err)
@@ -527,6 +529,150 @@ func TestGuard_healthAbove_False(t *testing.T) {
 	})
 	if got {
 		t.Error("healthAbove(hp=30, threshold=50) = true, want false")
+	}
+}
+
+// ── Pathfinding actions and guard ─────────────────────────────────────────────
+
+func openGrid(w, h int) *tilemap.TileGrid {
+	g := tilemap.NewTileGrid(w, h)
+	for y := range h {
+		for x := range w {
+			g.SetPassable(x, y, true)
+		}
+	}
+	return g
+}
+
+func TestAction_computePath_WritesWaypoints(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_position    (entity_id, x, y)               VALUES (?, 0, 0)", entityID)
+	db.Exec("INSERT INTO comp_goblinstats (entity_id, target_x, target_y) VALUES (?, 2, 0)", entityID)
+
+	grid := openGrid(5, 5)
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, grid)
+
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		ctx := actx(entityID, w, rd, nil)
+		handler, _ := r.GetAction("computePath")
+		if err := handler.Run(ctx); err != nil {
+			t.Fatalf("computePath: %v", err)
+		}
+	})
+
+	var waypoints string
+	var idx int
+	db.QueryRow("SELECT waypoints, current_index FROM comp_path WHERE entity_id = ?", entityID).Scan(&waypoints, &idx)
+	if waypoints == "" || waypoints == "[]" {
+		t.Errorf("waypoints = %q, want non-empty path", waypoints)
+	}
+	if idx != 0 {
+		t.Errorf("current_index = %d, want 0", idx)
+	}
+}
+
+func TestAction_stepAlongPath_AdvancesPosition(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", entityID)
+	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0},{"X":2,"Y":0}]', 0)`, entityID)
+
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(5, 5))
+
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		ctx := actx(entityID, w, rd, nil)
+		handler, _ := r.GetAction("stepAlongPath")
+		if err := handler.Run(ctx); err != nil {
+			t.Fatalf("stepAlongPath: %v", err)
+		}
+	})
+
+	var x, y float64
+	var idx int
+	db.QueryRow("SELECT x, y FROM comp_position WHERE entity_id = ?", entityID).Scan(&x, &y)
+	db.QueryRow("SELECT current_index FROM comp_path WHERE entity_id = ?", entityID).Scan(&idx)
+
+	if x != 1 || y != 0 {
+		t.Errorf("position = (%v,%v), want (1,0)", x, y)
+	}
+	if idx != 1 {
+		t.Errorf("current_index = %d, want 1", idx)
+	}
+}
+
+func TestAction_stepAlongPath_NoOpAtEnd(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 3, 0)", entityID)
+	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0}]', 1)`, entityID)
+
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(5, 5))
+
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		ctx := actx(entityID, w, rd, nil)
+		handler, _ := r.GetAction("stepAlongPath")
+		_ = handler.Run(ctx)
+	})
+
+	var x float64
+	db.QueryRow("SELECT x FROM comp_position WHERE entity_id = ?", entityID).Scan(&x)
+	if x != 3 {
+		t.Errorf("position changed at end of path: x = %v, want 3", x)
+	}
+}
+
+func TestGuard_pathComplete_TrueWhenIndexAtEnd(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0}]', 1)`, entityID)
+
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(5, 5))
+
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("pathComplete")
+		return handler.Evaluate(gctx(entityID, rd, nil))
+	})
+	if !got {
+		t.Error("pathComplete with index == len = false, want true")
+	}
+}
+
+func TestGuard_pathComplete_FalseWhenMidPath(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0},{"X":2,"Y":0}]', 0)`, entityID)
+
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(5, 5))
+
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("pathComplete")
+		return handler.Evaluate(gctx(entityID, rd, nil))
+	})
+	if got {
+		t.Error("pathComplete with index 0 of 2 = true, want false")
+	}
+}
+
+func TestGuard_pathComplete_TrueWhenNoPath(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	entityID := insertEntity(t, db, "Goblin")
+	// No comp_path row inserted.
+
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(5, 5))
+
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("pathComplete")
+		return handler.Evaluate(gctx(entityID, rd, nil))
+	})
+	if !got {
+		t.Error("pathComplete with no Path component = false, want true")
 	}
 }
 
