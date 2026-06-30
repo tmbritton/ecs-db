@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
 // ── timerExpired ──────────────────────────────────────────────────────────────
@@ -101,6 +102,31 @@ func (g *healthAboveGuard) Evaluate(ctx agent.GuardContext) bool {
 	threshold := toFloat(ctx.Params["threshold"])
 	hp, _ := ctx.World.GetComponentValue(ctx.EntityID, "Health", "hp")
 	return toFloat(hp) > threshold
+}
+
+// ── inLineOfSight ─────────────────────────────────────────────────────────────
+
+type inLineOfSightGuard struct{ grid *tilemap.TileGrid }
+
+func (g *inLineOfSightGuard) Evaluate(ctx agent.GuardContext) bool {
+	targetParam := ctx.Params["target"]
+	if targetParam == nil {
+		targetParam = "$player"
+	}
+	targetID, ok := resolveTargetID(ctx.World, targetParam)
+	if !ok {
+		return false
+	}
+
+	px, _ := ctx.World.GetComponentValue(ctx.EntityID, "Position", "x")
+	py, _ := ctx.World.GetComponentValue(ctx.EntityID, "Position", "y")
+	tx, _ := ctx.World.GetComponentValue(targetID, "Position", "x")
+	ty, _ := ctx.World.GetComponentValue(targetID, "Position", "y")
+
+	start := tilemap.Point{X: int(toFloat(px)), Y: int(toFloat(py))}
+	end := tilemap.Point{X: int(toFloat(tx)), Y: int(toFloat(ty))}
+
+	return tilemap.LineOfSight(g.grid, start, end)
 }
 
 // ── pathComplete ──────────────────────────────────────────────────────────────

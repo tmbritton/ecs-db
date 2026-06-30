@@ -306,6 +306,23 @@ func (a *computePathAction) Run(ctx agent.ActionContext) error {
 	return ctx.World.SetComponentValue(ctx.EntityID, "Path", "current_index", int64(0))
 }
 
+// ── setTilePassable ───────────────────────────────────────────────────────────
+
+type setTilePassableAction struct{ grid *tilemap.TileGrid }
+
+func (a *setTilePassableAction) Run(ctx agent.ActionContext) error {
+	x := int(toFloat(ctx.Params["x"]))
+	y := int(toFloat(ctx.Params["y"]))
+	passable, _ := ctx.Params["passable"].(bool)
+
+	id, ok := a.grid.EntityAt(x, y)
+	if !ok {
+		return nil
+	}
+	a.grid.SetPassable(x, y, passable)
+	return ctx.World.SetComponentValue(id, "Tile", "passable", passable)
+}
+
 // ── stepAlongPath ─────────────────────────────────────────────────────────────
 
 type stepAlongPathAction struct{}

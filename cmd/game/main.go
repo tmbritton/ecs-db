@@ -102,6 +102,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 	registry := builtins.NewRegistry()
 	if grid != nil {
 		builtins.RegisterPathfinding(registry, grid)
+		builtins.RegisterLineOfSight(registry, grid)
 	}
 	loader := agent.NewLoader(registry, dbSchema)
 

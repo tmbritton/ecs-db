@@ -28,6 +28,7 @@ func setupBuiltinsDB(t *testing.T) *sql.DB {
 		`CREATE TABLE comp_health      (entity_id INTEGER PRIMARY KEY, hp REAL NOT NULL DEFAULT 100, maxhp REAL NOT NULL DEFAULT 100)`,
 		`CREATE TABLE comp_goblinstats (entity_id INTEGER PRIMARY KEY, speed REAL NOT NULL DEFAULT 2, aggrorange REAL NOT NULL DEFAULT 80, target_x REAL NOT NULL DEFAULT 0, target_y REAL NOT NULL DEFAULT 0, patience REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE comp_path        (entity_id INTEGER PRIMARY KEY, waypoints TEXT NOT NULL DEFAULT '[]', current_index INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE comp_tile        (entity_id INTEGER PRIMARY KEY, x INTEGER NOT NULL DEFAULT 0, y INTEGER NOT NULL DEFAULT 0, passable INTEGER NOT NULL DEFAULT 1, tile_type TEXT NOT NULL DEFAULT 'floor')`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("setup: %v", err)
@@ -673,6 +674,79 @@ func TestGuard_pathComplete_TrueWhenNoPath(t *testing.T) {
 	})
 	if !got {
 		t.Error("pathComplete with no Path component = false, want true")
+	}
+}
+
+// ── Line-of-sight guard and setTilePassable action ────────────────────────────
+
+func TestGuard_inLineOfSight_ClearPath(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	goblinID := insertEntity(t, db, "Goblin")
+	playerID := insertEntity(t, db, "Player")
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 4, 0)", playerID)
+
+	grid := openGrid(5, 1)
+	r := builtins.NewRegistry()
+	builtins.RegisterLineOfSight(r, grid)
+
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("inLineOfSight")
+		return handler.Evaluate(gctx(goblinID, rd, nil))
+	})
+	if !got {
+		t.Error("inLineOfSight on clear path = false, want true")
+	}
+}
+
+func TestGuard_inLineOfSight_Blocked(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	goblinID := insertEntity(t, db, "Goblin")
+	playerID := insertEntity(t, db, "Player")
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
+	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 4, 0)", playerID)
+
+	grid := openGrid(5, 1)
+	grid.SetPassable(2, 0, false)
+	r := builtins.NewRegistry()
+	builtins.RegisterLineOfSight(r, grid)
+
+	got := readGuard(t, db, func(rd agent.WorldReader) bool {
+		handler, _ := r.GetGuard("inLineOfSight")
+		return handler.Evaluate(gctx(goblinID, rd, nil))
+	})
+	if got {
+		t.Error("inLineOfSight with wall at (2,0) = true, want false")
+	}
+}
+
+func TestAction_setTilePassable_UpdatesGridAndDB(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	tileID := insertEntity(t, db, "Tile")
+	db.Exec("INSERT INTO comp_tile (entity_id, x, y, passable) VALUES (?, 2, 0, 1)", tileID)
+
+	grid := openGrid(5, 1)
+	grid.SetEntityID(2, 0, tileID)
+
+	r := builtins.NewRegistry()
+	builtins.RegisterLineOfSight(r, grid)
+
+	goblinID := insertEntity(t, db, "Goblin")
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		ctx := actx(goblinID, w, rd, map[string]any{"x": float64(2), "y": float64(0), "passable": false})
+		handler, _ := r.GetAction("setTilePassable")
+		if err := handler.Run(ctx); err != nil {
+			t.Fatalf("setTilePassable: %v", err)
+		}
+	})
+
+	if grid.IsPassable(2, 0) {
+		t.Error("grid.IsPassable(2,0) = true after setTilePassable(false), want false")
+	}
+	var passable int
+	db.QueryRow("SELECT passable FROM comp_tile WHERE entity_id = ?", tileID).Scan(&passable)
+	if passable != 0 {
+		t.Errorf("comp_tile.passable = %d after setTilePassable(false), want 0", passable)
 	}
 }
 

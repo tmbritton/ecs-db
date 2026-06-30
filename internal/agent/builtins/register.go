@@ -119,6 +119,28 @@ func RegisterPathfinding(r *agent.Registry, grid *tilemap.TileGrid) {
 	}, &pathCompleteGuard{})
 }
 
+// RegisterLineOfSight registers inLineOfSight and setTilePassable into r.
+// Call after NewRegistry, before behaviors are loaded. grid must not be nil.
+func RegisterLineOfSight(r *agent.Registry, grid *tilemap.TileGrid) {
+	r.RegisterGuard(agent.GuardMeta{
+		Name:        "inLineOfSight",
+		Description: "True when the DDA ray from entity Position to target Position is unobstructed.",
+		Params: []agent.ParamSchema{
+			{Name: "target", Type: "string", Required: false, Default: "$player"},
+		},
+	}, &inLineOfSightGuard{grid: grid})
+
+	r.RegisterAction(agent.ActionMeta{
+		Name:        "setTilePassable",
+		Description: "Set comp_tile.passable at (x,y) and update TileGrid.",
+		Params: []agent.ParamSchema{
+			{Name: "x", Type: "number", Required: true},
+			{Name: "y", Type: "number", Required: true},
+			{Name: "passable", Type: "boolean", Required: true},
+		},
+	}, &setTilePassableAction{grid: grid})
+}
+
 func registerGuards(r *agent.Registry) {
 	r.RegisterGuard(agent.GuardMeta{
 		Name:        "timerExpired",
