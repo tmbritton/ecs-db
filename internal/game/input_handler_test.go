@@ -109,12 +109,9 @@ func TestPlayerInputHandler_MoveRight_Passable(t *testing.T) {
 	if x != 3 || y != 2 {
 		t.Errorf("position = (%.0f,%.0f), want (3,2)", x, y)
 	}
-	anim, flip := readSprite(t, db, playerID)
-	if anim != "player_walk" {
-		t.Errorf("animation = %q, want player_walk", anim)
-	}
-	if flip != 0 {
-		t.Errorf("flip_x = %d, want 0 (moving right)", flip)
+	anim, _ := readSprite(t, db, playerID)
+	if anim != "player_walk_right" {
+		t.Errorf("animation = %q, want player_walk_right", anim)
 	}
 }
 
@@ -135,7 +132,7 @@ func TestPlayerInputHandler_MoveRight_Wall(t *testing.T) {
 		t.Errorf("position = (%.0f,%.0f), want (2,2) — wall should block", x, y)
 	}
 	anim, _ := readSprite(t, db, playerID)
-	if anim != "player_idle" {
-		t.Errorf("animation = %q, want player_idle (blocked by wall)", anim)
+	if anim != "player_walk_right" {
+		t.Errorf("animation = %q, want player_walk_right (key held, movement blocked)", anim)
 	}
 }

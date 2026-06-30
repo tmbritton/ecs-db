@@ -6,9 +6,30 @@ fps    = 1
 loop   = true
 
 [[animation]]
-name   = "player_walk"
+name   = "player_walk_right"
 sheet  = "mods/assets/sprites/player.png"
-frames = [1, 2, 3, 4]
+frames = [0]
+fps    = 8
+loop   = true
+
+[[animation]]
+name   = "player_walk_down"
+sheet  = "mods/assets/sprites/player.png"
+frames = [1]
+fps    = 8
+loop   = true
+
+[[animation]]
+name   = "player_walk_left"
+sheet  = "mods/assets/sprites/player.png"
+frames = [2]
+fps    = 8
+loop   = true
+
+[[animation]]
+name   = "player_walk_up"
+sheet  = "mods/assets/sprites/player.png"
+frames = [3]
 fps    = 8
 loop   = true
 
