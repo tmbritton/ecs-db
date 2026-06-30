@@ -172,11 +172,17 @@ func runGame(cmd *cobra.Command, args []string) error {
 	return ebiten.RunGame(g)
 }
 
+const playerSheet = "mods/assets/sprites/player.png"
+
 // ensurePlayerEntity returns the existing Player entity ID, or creates one at (2,2) if absent.
+// It also backfills the sheet path on existing rows that still have sheet = ”.
 func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
 	var id int64
 	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Player' LIMIT 1`).Scan(&id)
 	if err == nil {
+		_, _ = db.ExecContext(ctx,
+			`UPDATE comp_sprite SET sheet = ? WHERE entity_id = ? AND sheet = ''`,
+			playerSheet, id)
 		return id, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -184,7 +190,7 @@ func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.D
 	}
 	e, err := svc.CreateEntity(ctx, "Player", []world.EntityComponent{
 		{Name: "Position", Values: map[string]interface{}{"x": 2, "y": 2}},
-		{Name: "Sprite", Values: map[string]interface{}{"sheet": "", "animation": "player_idle", "flip_x": false}},
+		{Name: "Sprite", Values: map[string]interface{}{"sheet": playerSheet, "animation": "player_idle", "flip_x": false}},
 		{Name: "Health", Values: map[string]interface{}{"hp": 10, "maxHp": 10}},
 	})
 	if err != nil {
