@@ -1,3 +1,11 @@
+[[entity_asset]]
+entity_type = "Player"
+sheet       = "mods/assets/sprites/player.png"
+
+[[entity_asset]]
+entity_type = "Goblin"
+sheet       = "mods/assets/sprites/goblin.png"
+
 [[animation]]
 name   = "player_idle"
 sheet  = "mods/assets/sprites/player.png"

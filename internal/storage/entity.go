@@ -31,11 +31,11 @@ func (t *sqliteTx) InsertEntity(ctx context.Context, entityType string, createdT
 	return res.LastInsertId()
 }
 
-func (t *sqliteTx) InsertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+func (t *sqliteTx) InsertComponent(ctx context.Context, entityID int64, compName string, values world.ComponentValues) error {
 	return t.insertComponent(ctx, entityID, compName, values)
 }
 
-func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName string, values world.ComponentValues) error {
 	err := t.insertComponent(ctx, entityID, compName, values)
 	// On UNIQUE constraint violation, return the domain sentinel.
 	if err != nil {
@@ -49,7 +49,7 @@ func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName
 
 // insertComponent is the shared implementation for both InsertComponent
 // and AttachComponent — they do the same SQL operation.
-func (t *sqliteTx) insertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+func (t *sqliteTx) insertComponent(ctx context.Context, entityID int64, compName string, values world.ComponentValues) error {
 	comp, ok := t.schema.Components[compName]
 	if !ok {
 		return fmt.Errorf("component %q not declared in schema", compName)
@@ -77,11 +77,11 @@ func (t *sqliteTx) insertObjectComponent(
 	tableName string,
 	entityID int64,
 	comp schema.Component,
-	values map[string]interface{},
+	values world.ComponentValues,
 ) error {
 	// Build column list in sorted order for deterministic SQL.
 	cols := make([]string, 0, len(comp.Properties)+1)
-	args := make([]interface{}, 0, len(comp.Properties)+1)
+	args := make([]any, 0, len(comp.Properties)+1)
 	cols = append(cols, "entity_id")
 	args = append(args, entityID)
 
@@ -122,7 +122,7 @@ func (t *sqliteTx) insertEntityRefComponent(
 	ctx context.Context,
 	tableName string,
 	entityID int64,
-	values map[string]interface{},
+	values world.ComponentValues,
 ) error {
 	targetID, ok := values["target_entity_id"]
 	if !ok {
@@ -146,22 +146,22 @@ func (t *sqliteTx) insertArrayComponent(
 	ctx context.Context,
 	tableName string,
 	entityID int64,
-	values map[string]interface{},
+	values world.ComponentValues,
 ) error {
 	// Arrays are stored as JSON in a single "value" column.
-	var raw interface{}
+	var raw any
 	if v, ok := values["value"]; ok {
 		raw = v
 	} else if len(values) > 0 {
 		// Caller passed raw array items as the map.
 		// Convert to a slice.
-		items := make([]interface{}, 0, len(values))
+		items := make([]any, 0, len(values))
 		for _, v := range values {
 			items = append(items, v)
 		}
 		raw = items
 	} else {
-		raw = []interface{}{}
+		raw = []any{}
 	}
 
 	jsonBytes, err := json.Marshal(raw)
@@ -184,9 +184,9 @@ func (t *sqliteTx) insertScalarComponent(
 	tableName string,
 	entityID int64,
 	compType string,
-	values map[string]interface{},
+	values world.ComponentValues,
 ) error {
-	var val interface{}
+	var val any
 	if v, ok := values["value"]; ok {
 		val = v
 	} else if len(values) == 1 {

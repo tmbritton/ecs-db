@@ -188,7 +188,9 @@ Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
 - [x] **Input capture + player movement** — `ebiten.IsKeyPressed` sampled 60 Hz; rows appended to `input_events`; game-specific input handler drains rows each tick and moves the `Player` entity one tile per tick (checking `TileGrid` for passability), setting `comp_sprite.animation` and `flip_x`.
 
-- [ ] **Sprite renderer + animation system** — Updated `Sprite` component (`sheet`, `animation`, `flip_x`); animation definitions TOML in `mods/assets/` (hot-swappable via watcher); `AnimState` map in renderer (frame timer at 60 Hz); `setAnimation` built-in action; `Draw()` queries all entities with `Position` + `Sprite` and renders the current frame.
+- [x] **Sprite renderer + animation system** — Updated `Sprite` component (`sheet`, `animation`, `flip_x`); animation definitions TOML in `mods/assets/` (hot-swappable via watcher); `AnimState` map in renderer (frame timer at 60 Hz); `setAnimation` built-in action; `Draw()` queries all entities with `Position` + `Sprite` and renders the current frame.
+
+- [x] **Asset loader + hot-reload sprite sheets** — `[[entity_asset]]` sections in `animations.toml` map entity types to sprite sheets; `AnimLoader.SyncToDatabase` stamps `comp_sprite.sheet` for all entities on every startup; `ImageCache` (ebitengine-tagged) caches `*ebiten.Image` per path and evicts on fsnotify PNG change events, forcing reload on next Draw.
 
 - [ ] **Pathfinding** — `internal/tilemap.AStar`; built-in action `computePath` (reads `comp_position`, runs A*, writes `comp_path`); action `stepAlongPath` (advances `comp_position`, increments `current_index`); guard `pathComplete` (`current_index ≥ len(waypoints)`).
 

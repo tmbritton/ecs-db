@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/png"
-	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -33,7 +31,7 @@ type Game struct {
 	tr          *TilemapRenderer
 	animLoader  *AnimLoader
 	animStates  map[int64]*AnimState
-	imgCache    map[string]*ebiten.Image
+	imageCache  *ImageCache
 	fallbackImg *ebiten.Image
 }
 
@@ -49,6 +47,7 @@ type NewGameParams struct {
 	Tilemap    *TilemapRenderer
 	Handler    agent.InputHandler
 	AnimLoader *AnimLoader
+	ImageCache *ImageCache
 }
 
 func NewGame(p NewGameParams) *Game {
@@ -58,6 +57,10 @@ func NewGame(p NewGameParams) *Game {
 	al := p.AnimLoader
 	if al == nil {
 		al = NewAnimLoader()
+	}
+	ic := p.ImageCache
+	if ic == nil {
+		ic = NewImageCache()
 	}
 
 	var fallback *ebiten.Image
@@ -76,7 +79,7 @@ func NewGame(p NewGameParams) *Game {
 		tr:          p.Tilemap,
 		animLoader:  al,
 		animStates:  make(map[int64]*AnimState),
-		imgCache:    make(map[string]*ebiten.Image),
+		imageCache:  ic,
 		fallbackImg: fallback,
 	}
 }
@@ -179,7 +182,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		worldY := py * ts
 
 		def, hasDef := g.animLoader.Get(animation)
-		sheetImg, hasImg := g.loadImage(sheet)
+		sheetImg, hasImg := g.imageCache.Get(sheet)
 
 		if !hasDef || !hasImg {
 			// Fallback: solid colour rectangle.
@@ -218,27 +221,4 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 func (g *Game) Layout(outsideW, outsideH int) (int, int) {
 	return g.logicalW, g.logicalH
-}
-
-// loadImage returns a cached *ebiten.Image for path, loading and caching on first use.
-// Returns nil, false if sheet is empty or the file cannot be loaded.
-func (g *Game) loadImage(path string) (*ebiten.Image, bool) {
-	if path == "" {
-		return nil, false
-	}
-	if img, ok := g.imgCache[path]; ok {
-		return img, true
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, false
-	}
-	defer f.Close()
-	src, _, err := image.Decode(f)
-	if err != nil {
-		return nil, false
-	}
-	img := ebiten.NewImageFromImage(src)
-	g.imgCache[path] = img
-	return img, true
 }

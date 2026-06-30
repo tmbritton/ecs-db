@@ -48,7 +48,7 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 					continue
 				}
 				if _, err := svc.CreateEntity(ctx, "Tile", []world.EntityComponent{
-					{Name: "Tile", Values: map[string]interface{}{
+					{Name: "Tile", Values: world.ComponentValues{
 						"x": x, "y": y, "passable": passable, "tile_type": tileType,
 					}},
 				}); err != nil {

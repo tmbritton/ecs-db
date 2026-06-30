@@ -14,10 +14,10 @@ type Tx interface {
 	InsertEntity(ctx context.Context, entityType string, createdTick int64) (int64, error)
 	// InsertComponent inserts a row into the correct comp_* table for the
 	// named component with the given values and entity_id.
-	InsertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error
+	InsertComponent(ctx context.Context, entityID int64, compName string, values ComponentValues) error
 	// AttachComponent inserts a component row for the given entity.
 	// Returns errors.Is(err, ErrAlreadyAttached) if the component is already present.
-	AttachComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error
+	AttachComponent(ctx context.Context, entityID int64, compName string, values ComponentValues) error
 	// DetachComponent deletes the component row for the given entity.
 	DetachComponent(ctx context.Context, entityID int64, compName string) error
 	// Commit commits the transaction.

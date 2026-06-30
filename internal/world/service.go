@@ -133,7 +133,7 @@ func (s *EntityService) AttachComponent(
 	ctx context.Context,
 	entityID int64,
 	compName string,
-	values map[string]interface{},
+	values ComponentValues,
 ) error {
 	// Look up the entity type.
 	entityTypeName, err := s.store.GetEntityType(ctx, entityID)

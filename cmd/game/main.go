@@ -134,10 +134,11 @@ func runGame(cmd *cobra.Command, args []string) error {
 		inputHandler = game.NewPlayerInputHandler(playerID, grid)
 	}
 
-	var animPath string
+	var animPath, spritesDir string
 	for _, mod := range cfg.Mods {
 		if mod.Assets != "" {
 			animPath = filepath.Join(mod.Assets, "animations.toml")
+			spritesDir = filepath.Join(mod.Assets, "sprites")
 			break
 		}
 	}
@@ -145,10 +146,21 @@ func runGame(cmd *cobra.Command, args []string) error {
 	if animPath != "" {
 		if err := animLoader.Load(animPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: loading animations: %v\n", err)
+		} else if err := animLoader.SyncToDatabase(ctx, store.DB()); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: syncing asset sheets: %v\n", err)
 		}
 		go func() {
 			if err := animLoader.Watch(ctx, animPath); err != nil {
 				fmt.Fprintf(os.Stderr, "anim watcher: %v\n", err)
+			}
+		}()
+	}
+
+	imageCache := renderer.NewImageCache()
+	if spritesDir != "" {
+		go func() {
+			if err := imageCache.WatchDir(ctx, spritesDir); err != nil {
+				fmt.Fprintf(os.Stderr, "image cache watcher: %v\n", err)
 			}
 		}()
 	}
@@ -168,30 +180,26 @@ func runGame(cmd *cobra.Command, args []string) error {
 		Tilemap:    tr,
 		Handler:    inputHandler,
 		AnimLoader: animLoader,
+		ImageCache: imageCache,
 	})
 	return ebiten.RunGame(g)
 }
 
-const playerSheet = "mods/assets/sprites/player.png"
-
 // ensurePlayerEntity returns the existing Player entity ID, or creates one at (2,2) if absent.
-// It also backfills the sheet path on existing rows that still have sheet = ”.
+// The sheet field is intentionally empty — SyncToDatabase stamps the correct path on every startup.
 func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
 	var id int64
 	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Player' LIMIT 1`).Scan(&id)
 	if err == nil {
-		_, _ = db.ExecContext(ctx,
-			`UPDATE comp_sprite SET sheet = ? WHERE entity_id = ? AND sheet = ''`,
-			playerSheet, id)
 		return id, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("looking up player: %w", err)
 	}
 	e, err := svc.CreateEntity(ctx, "Player", []world.EntityComponent{
-		{Name: "Position", Values: map[string]interface{}{"x": 2, "y": 2}},
-		{Name: "Sprite", Values: map[string]interface{}{"sheet": playerSheet, "animation": "player_idle", "flip_x": false}},
-		{Name: "Health", Values: map[string]interface{}{"hp": 10, "maxHp": 10}},
+		{Name: "Position", Values: world.ComponentValues{"x": 2, "y": 2}},
+		{Name: "Sprite", Values: world.ComponentValues{"sheet": "", "animation": "player_idle", "flip_x": false}},
+		{Name: "Health", Values: world.ComponentValues{"hp": 10, "maxHp": 10}},
 	})
 	if err != nil {
 		return 0, fmt.Errorf("creating player: %w", err)

@@ -29,11 +29,11 @@ func (m *mockTx) InsertEntity(ctx context.Context, entityType string, createdTic
 	return r.id, r.err
 }
 
-func (m *mockTx) InsertComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+func (m *mockTx) InsertComponent(ctx context.Context, entityID int64, compName string, values ComponentValues) error {
 	return m.insertCompErr
 }
 
-func (m *mockTx) AttachComponent(ctx context.Context, entityID int64, compName string, values map[string]interface{}) error {
+func (m *mockTx) AttachComponent(ctx context.Context, entityID int64, compName string, values ComponentValues) error {
 	return m.attachCompErr
 }
 

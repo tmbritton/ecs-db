@@ -10,10 +10,13 @@ type Entity struct {
 	CreatedTick int64
 }
 
+// ComponentValues maps component property names to their initial values.
+type ComponentValues map[string]any
+
 // EntityComponent carries the component data to persist when creating an
 // entity. Name matches a top-level key in schema.json's "components" map,
 // and Values maps property names to their initial values.
 type EntityComponent struct {
 	Name   string
-	Values map[string]interface{}
+	Values ComponentValues
 }
