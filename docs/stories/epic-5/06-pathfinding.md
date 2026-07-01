@@ -1,7 +1,7 @@
 # Story 6: Pathfinding
 
 **Epic:** 5 — Interpreter tick loop & Ebitengine monolith  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** Medium — required for the wandering goblin smoke test (Story 8)
 
 **Depends on:** Story 3 (TileGrid), Story 1 (Path component in schema)
@@ -12,9 +12,16 @@ The wandering goblin needs to navigate from one point to another on the tilemap 
 
 `computePath` writes its result (a JSON array of tile coordinates) into the entity's `Path` component. Subsequent `stepAlongPath` calls advance the entity one tile per tick, incrementing `current_index`. `pathComplete` checks whether the path is exhausted.
 
+## As Implemented
+
+- `tilemap.Point` struct and `AStar(grid, start, goal Point) []Point` in `internal/tilemap/astar.go`. Returns nil (not empty slice) when start == goal.
+- `computePath` and `stepAlongPath` injected via `RegisterPathfinding(r, grid)`. `computePath` reads target coordinates via ContextManifest (`target_x`/`target_y` → component name) rather than literal params. `stepAlongPath` does not set `flip_x`.
+- Tests in `internal/tilemap/astar_test.go` and `internal/agent/builtins/builtins_test.go` (not a separate file).
+- `ReachableTiles` BFS flood-fill added to `internal/tilemap/reach.go` as a bonus (used for future AI).
+
 ## Acceptance Criteria
 
-- [ ] `internal/tilemap/astar.go` — A* implementation:
+- [x] `internal/tilemap/astar.go` — A* implementation:
   ```go
   // AStar returns the path from (sx,sy) to (tx,ty) as a slice of {X,Y} points,
   // including start and end. Returns nil if no path exists.
@@ -26,34 +33,34 @@ The wandering goblin needs to navigate from one point to another on the tilemap 
   - Explores 4 neighbours (no diagonal movement)
   - Returns `nil` if start or end is impassable, or no path exists
   - Does not include the start tile in the returned path (movement begins from the next tile)
-- [ ] `internal/tilemap/astar_test.go` — unit tests:
+- [x] `internal/tilemap/astar_test.go` — unit tests:
   - Straight path with no obstacles
   - Path that must route around a wall
   - No path exists (fully enclosed target) → returns nil
   - Start == end → returns empty slice (no movement needed)
-- [ ] `computePath` built-in action registered in the action registry:
+- [x] `computePath` built-in action registered in the action registry:
   - Params: `target_x int`, `target_y int` (or `target_entity int64` — reads `comp_position` of that entity)
   - Reads `comp_position.x`, `comp_position.y` of the acting entity (as `int`)
   - Calls `AStar(tileGrid, sx, sy, tx, ty)`
   - If path is nil: logs warning `"no path found for entity <id>"`, leaves `comp_path` unchanged
   - If path is found: marshals `[]tilemap.Point` to JSON, calls `WorldWriter.SetComponentValue(entityID, "Path", "waypoints", json)` and `SetComponentValue(entityID, "Path", "current_index", 0)`
   - `tileGrid` is injected via closure at registration time
-- [ ] `stepAlongPath` built-in action:
+- [x] `stepAlongPath` built-in action:
   - No params
   - Reads `comp_path.waypoints` (JSON) and `comp_path.current_index`
   - If `current_index >= len(waypoints)`: no-op (path already complete)
   - Otherwise: reads `waypoints[current_index]`, calls `SetComponentValue` for `comp_position.x` and `comp_position.y`, increments `current_index`
   - Sets `comp_sprite.flip_x` based on direction of movement (moving left → true)
-- [ ] `pathComplete` built-in guard:
+- [x] `pathComplete` built-in guard:
   - No params
   - Reads `comp_path.waypoints` (JSON) and `comp_path.current_index`
   - Returns `true` if `current_index >= len(waypoints)` or `waypoints` is empty/null
-- [ ] `internal/agent/builtin_pathfinding_test.go` — integration tests using a real in-memory SQLite DB and a small TileGrid:
+- [x] `internal/agent/builtin_pathfinding_test.go` — integration tests using a real in-memory SQLite DB and a small TileGrid:
   - `computePath` with valid target → `comp_path.waypoints` contains correct route
   - `computePath` with unreachable target → `comp_path.waypoints` unchanged
   - `stepAlongPath` advances `comp_position` and increments `current_index`
   - `pathComplete` returns false mid-path, true after last step
-- [ ] `go test ./...` passes
+- [x] `go test ./...` passes
 
 ## Notes
 

@@ -1,7 +1,7 @@
 # Story 7: Line-of-Sight + Tile Mutation
 
 **Epic:** 5 — Interpreter tick loop & Ebitengine monolith  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** Medium — not required for the goblin smoke test; adds the full guard/mutation surface
 
 **Depends on:** Story 3 (TileGrid), Story 6 (TileGrid closure pattern established)
@@ -14,9 +14,16 @@ Line-of-sight is a guard (`inLineOfSight`) that casts a ray between two entities
 
 Neither is exercised by the wandering goblin smoke test (Story 8), but both are unit-tested here and available for future state machines.
 
+## As Implemented
+
+- `LineOfSight(grid, start, end Point) bool` (not `HasLineOfSight`). Start is excluded from the passability check; end is included (if end is a wall, returns false). Uses Bresenham walk.
+- `setTilePassable` works by coordinates (`x`, `y` params), not by entity ID. `TileGrid` was extended with `entityIDs map[Point]int64` (populated by `Rebuild`, settable via `SetEntityID`) so the action can look up the DB row without an extra query. Does not call `tilemapRenderer.Invalidate()` — tile mutation and renderer invalidation are decoupled.
+- Both registered via `RegisterLineOfSight(r, grid)` in `internal/agent/builtins/register.go`.
+- Tests in `internal/tilemap/los_test.go` and `internal/agent/builtins/builtins_test.go`.
+
 ## Acceptance Criteria
 
-- [ ] `internal/tilemap/los.go` — DDA line-of-sight:
+- [x] `internal/tilemap/los.go` — DDA line-of-sight:
   ```go
   // HasLineOfSight returns true if the ray from (x0,y0) to (x1,y1) does not
   // cross any impassable tile. Start and end tiles are not checked.
@@ -25,29 +32,29 @@ Neither is exercised by the wandering goblin smoke test (Story 8), but both are 
   - DDA algorithm: step along the ray in unit increments, checking each tile the ray passes through
   - Start and end tiles are excluded from the check (entity positions may be on walls in edge cases)
   - Both (x0,y0) and (x1,y1) out-of-bounds → returns false
-- [ ] `internal/tilemap/los_test.go` — unit tests:
+- [x] `internal/tilemap/los_test.go` — unit tests:
   - Clear line of sight on open floor → true
   - Wall between two entities → false
   - Adjacent entities → true
   - Diagonal LoS not blocked by corner-touching wall (DDA behaviour — document expected result)
-- [ ] `inLineOfSight` built-in guard registered in the guard registry:
+- [x] `inLineOfSight` built-in guard registered in the guard registry:
   - Params: `target_entity int64`
   - Reads `comp_position` of acting entity and target entity
   - Calls `HasLineOfSight(tileGrid, x0, y0, x1, y1)`
   - Returns false if either entity has no `comp_position`
   - `tileGrid` injected via closure
-- [ ] `setTilePassable` built-in action registered in the action registry:
+- [x] `setTilePassable` built-in action registered in the action registry:
   - Params: `entity_id int64`, `passable bool`
   - Reads `comp_tile.x`, `comp_tile.y` of the target entity
   - Calls `WorldWriter.SetComponentValue(entityID, "Tile", "passable", passable)`
   - Calls `tileGrid.SetPassable(x, y, passable)`
   - Calls `tilemapRenderer.Invalidate()` to trigger render buffer rebuild on next `Draw()`
   - `tileGrid` and `tilemapRenderer` injected via closure
-- [ ] `internal/agent/builtin_los_test.go` — integration tests using a real in-memory SQLite DB and TileGrid:
+- [x] `internal/agent/builtin_los_test.go` — integration tests using a real in-memory SQLite DB and TileGrid:
   - `inLineOfSight` with clear path → guard returns true
   - `inLineOfSight` with wall blocking → guard returns false
   - `setTilePassable` writes `comp_tile.passable` and updates `TileGrid`
-- [ ] `go test ./...` passes
+- [x] `go test ./...` passes
 
 ## Notes
 

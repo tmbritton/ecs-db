@@ -194,9 +194,9 @@ Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
 - [x] **Pathfinding** — `internal/tilemap.AStar`; built-in action `computePath` (reads `comp_position`, runs A*, writes `comp_path`); action `stepAlongPath` (advances `comp_position`, increments `current_index`); guard `pathComplete` (`current_index ≥ len(waypoints)`).
 
-- [ ] **Line-of-sight + tile mutation** — Built-in guard `inLineOfSight` (DDA ray walk on `TileGrid`); built-in action `setTilePassable` (writes `comp_tile.passable` + calls `grid.SetPassable`).
+- [x] **Line-of-sight + tile mutation** — Built-in guard `inLineOfSight` (DDA ray walk on `TileGrid`); built-in action `setTilePassable` (writes `comp_tile.passable` + calls `grid.SetPassable`). `TileGrid` stores entity ID per cell (populated by `Rebuild`) so `setTilePassable` can write through to the DB without a separate query. Both registered via `RegisterLineOfSight(r, grid)`.
 
-- [ ] **Goblin smoke test** — `mods/behaviors/goblin.json` (idle → `computePath` → wandering via `stepAlongPath` / `pathComplete` → idle loop); `mods/assets/animations.toml`; `mods/map/level1.toml`; window shows map + player + autonomous goblin; hot reload changes goblin behavior without restart.
+- [x] **Goblin smoke test** — `behaviors/goblin.json` (idle → pick random target + `computePath` → wandering via `stepAlongPath` / `pathComplete` → idle loop); `GoblinStats` component added to schema (v3) for `target_x`/`target_y` storage; goblin bootstrapped at (15,12) via `ensureGoblinEntity`; behavior started via `ensureGoblinBehavior` which calls `agent.StartAgent`; window shows map + player + autonomous wandering goblin.
 
 ---
 
