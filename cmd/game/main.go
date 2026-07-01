@@ -26,6 +26,8 @@ import (
 	"github.com/tmbritton/ecs-db/internal/world"
 )
 
+const tickDurationMs = int64(1000 / renderer.TicksPerSecond)
+
 var cfgPath string
 
 var rootCmd = &cobra.Command{
@@ -133,6 +135,14 @@ func runGame(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ensuring player entity: %w", err)
 	}
 
+	goblinID, err := ensureGoblinEntity(ctx, svc, store.DB())
+	if err != nil {
+		return fmt.Errorf("ensuring goblin entity: %w", err)
+	}
+	if err := ensureGoblinBehavior(ctx, goblinID, loader, registry, store.DB()); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: goblin behavior: %v\n", err)
+	}
+
 	var inputHandler agent.InputHandler
 	if grid != nil {
 		inputHandler = game.NewPlayerInputHandler(playerID, grid)
@@ -189,6 +199,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 	return ebiten.RunGame(g)
 }
 
+// TODO: prototype bootstrap — replace with a proper scene/level loader before shipping a real game.
 // ensurePlayerEntity returns the existing Player entity ID, or creates one at (2,2) if absent.
 // The sheet field is intentionally empty — SyncToDatabase stamps the correct path on every startup.
 func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
@@ -209,4 +220,55 @@ func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.D
 		return 0, fmt.Errorf("creating player: %w", err)
 	}
 	return e.ID, nil
+}
+
+// TODO: prototype bootstrap — replace with a proper scene/level loader before shipping a real game.
+// ensureGoblinEntity returns the existing Goblin entity ID, or creates one at (15,12) if absent.
+// The sheet field is intentionally empty — SyncToDatabase stamps the correct path on every startup.
+func ensureGoblinEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
+	var id int64
+	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Goblin' LIMIT 1`).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("looking up goblin: %w", err)
+	}
+	e, err := svc.CreateEntity(ctx, "Goblin", []world.EntityComponent{
+		{Name: "Position", Values: world.ComponentValues{"x": 15, "y": 12}},
+		{Name: "Sprite", Values: world.ComponentValues{"sheet": "", "animation": "goblin_idle", "flip_x": false}},
+		{Name: "Health", Values: world.ComponentValues{"hp": 5, "maxHp": 5}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("creating goblin: %w", err)
+	}
+	return e.ID, nil
+}
+
+// ensureGoblinBehavior starts the "goblin" machine for goblinID if it is not already running.
+// Must be called after loader.ScanDir so loader.Get("goblin") resolves.
+func ensureGoblinBehavior(ctx context.Context, goblinID int64, loader *agent.Loader, registry *agent.Registry, db *sql.DB) error {
+	var count int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM behavior_components WHERE entity_id = ? AND machine_id = 'goblin'`,
+		goblinID).Scan(&count); err != nil || count > 0 {
+		return err
+	}
+	def, ok := loader.Get("goblin")
+	if !ok {
+		return fmt.Errorf("goblin machine not loaded")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	a := agent.NewAgent(def, goblinID, "", tickDurationMs)
+	if err := agent.StartAgent(a, registry, 0,
+		storage.NewTxWorldWriter(tx),
+		storage.NewTxWorldReader(tx),
+		storage.NewMachineWriter(tx)); err != nil {
+		return fmt.Errorf("starting goblin agent: %w", err)
+	}
+	return tx.Commit()
 }

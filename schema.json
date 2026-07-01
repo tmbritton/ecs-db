@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "components": {
     "Position": {
       "type": "object",
@@ -44,12 +44,19 @@
       "properties": {
         "value": { "type": "number" }
       }
+    },
+    "GoblinStats": {
+      "type": "object",
+      "properties": {
+        "target_x": { "type": "number" },
+        "target_y": { "type": "number" }
+      }
     }
   },
   "entityTypes": {
     "Goblin": {
       "requiredComponents": ["Position", "Health", "Sprite"],
-      "optionalComponents": ["Path", "Speed"],
+      "optionalComponents": ["Path", "Speed", "GoblinStats"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
