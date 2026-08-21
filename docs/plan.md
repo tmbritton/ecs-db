@@ -333,9 +333,9 @@ This epic is the floor everything else stands on: a `forge` subcommand that buil
   - Tag-free root; `run` behind `//go:build ebitengine` with a `!ebitengine` stub that errors clearly
   - `make build-headless` proves `CGO_ENABLED=0 go build ./cmd/ecs-db` works with no tags
 
-- [ ] **Web toolchain** — templ + Datastar + embedded assets, no frontend build step.
+- [x] **Web toolchain** — templ + Datastar + embedded assets, no frontend build step.
   - `github.com/a-h/templ` as a go.mod `tool` dependency; `templ generate` wired into `make generate`
-  - Datastar Go SDK `github.com/starfederation/datastar-go`; client JS vendored under `static/js/vendor/`
+  - Datastar client JS vendored under `static/js/vendor/`; the Go SDK arrives with the first SSE endpoint in Story 5
   - `internal/forge/web/static/` served from `go:embed`; self-hosted fonts, no CDN
   - `internal/forge/server` — `net/http`, `[forge]` config section, graceful shutdown
 

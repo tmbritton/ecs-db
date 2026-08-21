@@ -50,12 +50,22 @@ type MapConfig struct {
 	Path string `toml:"path"`
 }
 
+// DefaultForgeAddr binds the Forge editor to loopback. Forge reads and writes
+// project files; it is a local authoring tool, not a service to expose.
+const DefaultForgeAddr = "127.0.0.1:7777"
+
+// ForgeConfig configures the Forge content editor served by `ecs-db forge`.
+type ForgeConfig struct {
+	Addr string `toml:"addr"`
+}
+
 type Config struct {
 	Database DatabaseConfig `toml:"database"`
 	Schema   SchemaConfig   `toml:"schema"`
 	Mods     []ModConfig    `toml:"mods"`
 	Window   WindowConfig   `toml:"window"`
 	Map      MapConfig      `toml:"map"`
+	Forge    ForgeConfig    `toml:"forge"`
 }
 
 type DatabaseConfig struct {
@@ -91,12 +101,27 @@ func Load(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
 	}
+	applyDefaults(&cfg)
 	return &cfg, nil
+}
+
+// applyDefaults fills in values whose zero value would be actively wrong, for
+// config files that omit the section entirely.
+func applyDefaults(cfg *Config) {
+	if cfg.Forge.Addr == "" {
+		cfg.Forge.Addr = DefaultForgeAddr
+	}
 }
 
 // Defaults returns a Config with built-in defaults, used when no config file
 // is present.
 func Defaults() *Config {
+	cfg := defaults()
+	applyDefaults(cfg)
+	return cfg
+}
+
+func defaults() *Config {
 	return &Config{
 		Database: DatabaseConfig{Path: "./ecs.db"},
 		Schema:   SchemaConfig{Path: "./schema.json"},

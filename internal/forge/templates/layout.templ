@@ -1,0 +1,21 @@
+package templates
+
+// Layout is the base document every Forge page is served inside. Datastar is
+// loaded as a module and self-initialises; there is no bootstrap call and no
+// frontend build step.
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<link rel="stylesheet" href="/static/css/fonts.css"/>
+			<link rel="stylesheet" href="/static/css/forge.css"/>
+			<script type="module" src="/static/js/vendor/datastar.js"></script>
+		</head>
+		<body>
+			{ children... }
+		</body>
+	</html>
+}
