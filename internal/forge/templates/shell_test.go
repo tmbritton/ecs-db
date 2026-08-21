@@ -11,16 +11,23 @@ import (
 	"github.com/a-h/templ"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/status"
 )
 
 func renderShell(t *testing.T, active mode.Mode) string {
+	t.Helper()
+	return renderShellWith(t, active, status.Status{})
+}
+
+// renderShellWith lets a test choose the engine status the menu bar renders.
+func renderShellWith(t *testing.T, active mode.Mode, engine status.Status) string {
 	t.Helper()
 	var buf bytes.Buffer
 	body := templ.ComponentFunc(func(_ context.Context, w io.Writer) error {
 		_, err := io.WriteString(w, "<p>STUB-CONTENT</p>")
 		return err
 	})
-	if err := Shell(active, body).Render(context.Background(), &buf); err != nil {
+	if err := Shell(active, engine, body).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
 	}
 	return buf.String()

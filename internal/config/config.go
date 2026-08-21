@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -54,9 +55,24 @@ type MapConfig struct {
 // project files; it is a local authoring tool, not a service to expose.
 const DefaultForgeAddr = "127.0.0.1:7777"
 
+// DefaultForgePollSeconds is how often Forge re-checks the game database for
+// the engine-status readout. Taken from config rather than hard-coded so Epic
+// 17's Preferences dialog has something to bind to.
+const DefaultForgePollSeconds = 2
+
 // ForgeConfig configures the Forge content editor served by `ecs-db forge`.
 type ForgeConfig struct {
-	Addr string `toml:"addr"`
+	Addr        string `toml:"addr"`
+	PollSeconds int    `toml:"pollSeconds"`
+}
+
+// PollInterval is the status poll period. A zero or negative configured value
+// would panic time.NewTicker, so it falls back rather than trusting the file.
+func (f ForgeConfig) PollInterval() time.Duration {
+	if f.PollSeconds <= 0 {
+		return DefaultForgePollSeconds * time.Second
+	}
+	return time.Duration(f.PollSeconds) * time.Second
 }
 
 type Config struct {
@@ -110,6 +126,9 @@ func Load(path string) (*Config, error) {
 func applyDefaults(cfg *Config) {
 	if cfg.Forge.Addr == "" {
 		cfg.Forge.Addr = DefaultForgeAddr
+	}
+	if cfg.Forge.PollSeconds <= 0 {
+		cfg.Forge.PollSeconds = DefaultForgePollSeconds
 	}
 }
 

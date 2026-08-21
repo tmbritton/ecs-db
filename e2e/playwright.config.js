@@ -18,6 +18,10 @@ const { defineConfig, devices } = require("@playwright/test");
 const PORT = 7788;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 
+// Forge is a fixed-viewport desktop tool, not a responsive site. The viewport
+// comes after the device spread, or the preset's 1280x720 wins.
+const chrome = { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } };
+
 module.exports = defineConfig({
   testDir: "./specs",
   // Forge is a local, single-user authoring tool. There is no flaky network to
@@ -35,13 +39,21 @@ module.exports = defineConfig({
 
   projects: [
     {
-      name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-        // After the device spread, not before: Forge is a fixed-viewport
-        // desktop tool, and the device preset's 1280x720 would otherwise win.
-        viewport: { width: 1440, height: 900 },
-      },
+      name: "app",
+      // Everything that only reads. Runs fully parallel.
+      testIgnore: /06-engine-status/,
+      use: { ...chrome },
+    },
+    {
+      // The engine-status specs rename the fixture database away and rewrite
+      // its schema_version to provoke the offline and mismatch states. There
+      // is one server and one database, so they cannot share it with specs
+      // reading through the same process — `dependencies` makes them run only
+      // after everything else has finished, rather than racing it.
+      name: "engine-status",
+      testMatch: /06-engine-status/,
+      dependencies: ["app"],
+      use: { ...chrome },
     },
   ],
 

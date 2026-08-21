@@ -1,0 +1,18 @@
+package components
+
+// EngineStatus is the readout in the top-right of the menu bar. It is the one
+// place Forge says whether a save will actually reach anything.
+//
+// The id lives on the component rather than on a wrapper in the shell:
+// Datastar's default patch mode is `outer` and matches on the element's own id,
+// so a patch arriving for an id that is not here would have nothing to morph
+// and the readout would silently stop updating.
+templ EngineStatus(props EngineStatusProps) {
+	<div id="engine-status" class="engine-status mono" role="status" data-testid="engine-status">
+		<span
+			class={ "engine-status__dot", dotClass(props.Status.State) }
+			aria-hidden="true"
+		>■</span>
+		<span data-testid="engine-status-text">{ engineStatusText(props.Status) }</span>
+	</div>
+}

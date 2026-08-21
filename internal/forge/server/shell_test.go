@@ -238,6 +238,12 @@ func TestShutdown_DoesNotWaitForOpenEventStreams(t *testing.T) {
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve() }()
 
+	// The connection has to be held open deliberately, not incidentally. An
+	// earlier version read one byte and returned, which closed the body — that
+	// only looked like "holding a stream" while the stream had nothing to say.
+	// The moment Story 6 gave it a payload, the read returned at once and the
+	// stream was gone before the assertion ran.
+	release := make(chan struct{})
 	streamOpen := make(chan struct{})
 	go func() {
 		defer close(streamOpen)
@@ -246,9 +252,11 @@ func TestShutdown_DoesNotWaitForOpenEventStreams(t *testing.T) {
 			return
 		}
 		defer resp.Body.Close()
-		// Read one byte so the handler is provably running before shutdown.
+		// Read one byte so the handler is provably running before shutdown,
+		// then keep the body open until the test is finished with it.
 		buf := make([]byte, 1)
 		_, _ = resp.Body.Read(buf)
+		<-release
 	}()
 
 	// Give the stream a moment to be accepted and reach the handler.
@@ -274,5 +282,10 @@ func TestShutdown_DoesNotWaitForOpenEventStreams(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("Serve did not return after Shutdown")
 	}
+	// Released here rather than by defer: the wait below cannot complete until
+	// the reader goroutine returns, and the goroutine cannot return until this
+	// is closed. A defer runs only after the test function returns, so it would
+	// deadlock against the wait.
+	close(release)
 	<-streamOpen
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/server"
+	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/web"
 )
 
@@ -31,7 +32,23 @@ func init() { rootCmd.AddCommand(forgeCmd) }
 
 func runForge(cmd *cobra.Command, _ []string) error {
 	cfg := config.Get()
-	srv := server.New(server.Config{Addr: cfg.Forge.Addr}, web.Static)
+
+	// The readout compares the database's recorded schema_version against the
+	// schema.json this project declares. Both are paths rather than values:
+	// Forge exists to edit that file, so a version read once here would go
+	// stale the first time someone bumps it, and a schema that fails to load is
+	// reported as such rather than stopping the editor — fixing it is exactly
+	// what Forge is for.
+	engine := status.Config{DBPath: cfg.Database.Path, SchemaPath: cfg.Schema.Path}
+	if len(cfg.Mods) > 0 {
+		engine.ModName = cfg.Mods[0].Name
+	}
+
+	srv := server.New(server.Config{
+		Addr:         cfg.Forge.Addr,
+		Engine:       engine,
+		PollInterval: cfg.Forge.PollInterval(),
+	}, web.Static)
 
 	// Bind before announcing anything: otherwise a bind failure prints
 	// "listening on ..." and only then returns the error.

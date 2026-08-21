@@ -351,7 +351,14 @@ This epic is the floor everything else stands on: a `forge` subcommand that buil
   - `/forge/{mode}` is a full page load; rail buttons are anchors, so history and deep links work unaided
   - One SSE subscription per page (`data-init="@get('/forge/{mode}/events')"`), stubbed for Story 6
 
-- [ ] **Engine-status readout** — Connected vs watcher-offline, pushed over SSE.
+- [x] **Engine-status readout** — Connected vs watcher-offline, pushed over SSE.
+  - `internal/forge/status` — read-only `mode=ro` check, never through `NewSQLiteStore`
+  - Three states: connected, version mismatch, offline — a stale database is not an absent one
+  - Rendered server-side on load, then patched down the page-level stream; identical patches suppressed
+
+**Epic 10 is complete.** `ecs-db forge` builds without CGO or X11, serves all six modes, and reports
+the engine connection live. The token and primitive layer, the app shell, and a Playwright e2e suite
+(`make e2e`) are in place for Epics 11-20 to build on.
 
 ---
 

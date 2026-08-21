@@ -751,11 +751,37 @@ button.list-row:not(.list-row--active):hover {
 
 .menubar__status {
   margin-left: auto;
+}
+
+/* The one place Forge says whether a save will reach anything. Mono, because
+   every value in it comes from the engine rather than the user. */
+.engine-status {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+.engine-status__dot {
+  width: 8px;
+  height: 8px;
+  line-height: 0;
+  overflow: hidden;
+  display: inline-block;
+  /* The glyph paints the square; hiding the text keeps the box exact. */
+  text-indent: -20px;
+}
+
+.engine-status__dot--ok {
+  background: var(--green);
+}
+
+/* Both failure states share red: the sentence beside the dot carries the
+   difference between "no database" and "a stale one", and a third hue would
+   claim a distinction the palette does not make. */
+.engine-status__dot--bad {
+  background: var(--red);
 }
 
 /* --- mode rail --- */

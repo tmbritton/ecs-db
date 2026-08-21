@@ -5,6 +5,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io/fs"
@@ -19,13 +20,21 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 )
 
 // Config is the subset of application config the HTTP layer needs.
 type Config struct {
 	Addr string
+	// Engine describes the game database to report on. Zero-valued in tests
+	// that do not care, which reports offline — the honest default.
+	Engine status.Config
+	// PollInterval is how often the engine status is re-checked. Zero falls
+	// back rather than panicking time.NewTicker.
+	PollInterval time.Duration
 }
 
 type Server struct {
@@ -58,6 +67,12 @@ func New(cfg Config, static fs.FS) *Server {
 	// that actually binds cannot be wrong, whatever constructed the Config.
 	if cfg.Addr == "" {
 		cfg.Addr = config.DefaultForgeAddr
+	}
+	// A zero interval panics time.NewTicker. config defaults it already;
+	// guarding here too means the boundary that actually ticks cannot be wrong,
+	// whatever constructed the Config.
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = config.DefaultForgePollSeconds * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{cfg: cfg, static: static, streamsCtx: ctx, cancelStreams: cancel}
@@ -104,7 +119,9 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mode not available", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, templates.Shell(m, content()))
+	// Rendered server-side on load so the menu bar is never blank before the
+	// first patch arrives; the stream takes over from there.
+	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), content()))
 }
 
 // handleModeEvents is the single SSE subscription a mode page opens.
@@ -136,7 +153,45 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 
-	<-sse.Context().Done()
+	ticker := time.NewTicker(s.cfg.PollInterval)
+	defer ticker.Stop()
+
+	var last string
+	for {
+		// Engine status shows on every mode, so it is pushed whatever m is.
+		// Epic 12's DDL preview and Epic 18's world_version traffic join it
+		// here, on this same connection.
+		switch cur, err := s.renderEngineStatus(); {
+		case err != nil:
+			slog.ErrorContext(ctx, "rendering engine status", "err", err)
+		case cur != last:
+			// Suppressing identical patches is not just economy: a stream that
+			// emits every tick forever makes the browser's EventStream log
+			// useless for debugging the busier traffic that lands on it later.
+			if err := sse.PatchElements(cur); err != nil {
+				return // client gone
+			}
+			last = cur
+		}
+
+		select {
+		case <-sse.Context().Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// renderEngineStatus checks the database and renders the readout to a string.
+// The first iteration of the stream loop runs before any tick, so a client that
+// reconnects sees current state immediately rather than after a poll interval.
+func (s *Server) renderEngineStatus() (string, error) {
+	var buf bytes.Buffer
+	c := components.EngineStatus(components.EngineStatusProps{Status: status.Check(s.cfg.Engine)})
+	if err := c.Render(context.Background(), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // openStreams reports how many SSE connections are currently held open. It
