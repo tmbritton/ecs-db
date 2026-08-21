@@ -846,6 +846,14 @@ button.list-row:not(.list-row--active):hover {
   color: var(--text-faint);
 }
 
+/* The save footer sits below the mode content, spanning the rail's right edge
+   to the window. It is part of the shell rather than of any mode, because the
+   file it saves belongs to the project rather than to whichever mode is open. */
+
+.shell__footer:empty {
+  display: none;
+}
+
 /* --- save reports -----------------------------------------------------------
    What became of the last save of each file. Fixed to the bottom-right rather
    than in the flow: it appears in response to an action, and must not shift the
@@ -893,6 +901,19 @@ button.list-row:not(.list-row--active):hover {
 
 .save-report__summary {
   color: var(--text-dim);
+}
+
+.save-report__resolutions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.save-report__resolution {
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .save-report__problems {

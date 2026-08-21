@@ -13,6 +13,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/server"
+	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/web"
 )
@@ -46,29 +47,39 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	// bad machine file is exactly what Forge is for, and refusing to start
 	// would leave no way to do it. Epic 12 renders this; for now it is logged.
 	//
-	// The status readout is configured from the resolved project rather than
-	// from the raw config, because paths in game.toml are relative to that file
-	// and Forge can be started from any directory. Taking them verbatim here
-	// while the project model resolved them properly meant the two halves of
-	// one process looked for the same schema.json in different places.
+	// config.Load resolves every path against the config file that declared
+	// them, so these are already absolute and mean the same thing the engine
+	// and the project model mean. That was not always true: the engine read
+	// them verbatim while internal/forge/project resolved them, and the two
+	// halves of one process looked for the same schema.json in different
+	// places. Taking them from cfg is now correct even when the project fails
+	// to open — which is exactly the case Forge exists to fix.
 	engine := status.Config{DBPath: cfg.Database.Path, SchemaPath: cfg.Schema.Path}
 	if len(cfg.Mods) > 0 {
 		engine.ModName = cfg.Mods[0].Name
 	}
+	var editing *session.Session
 	if proj, err := project.Open(cfgPath); err != nil {
 		slog.Warn("opening project", "config", cfgPath, "err", err)
 	} else {
-		engine.DBPath = proj.DBPath
-		engine.SchemaPath = proj.SchemaPath
 		slog.Info("project opened",
 			"schema", proj.SchemaPath, "mods", len(proj.Mods), "machines", len(proj.Machines))
 		for _, p := range proj.Problems {
 			slog.Warn("project problem", "path", p.Path, "err", p.Err)
 		}
+
+		// The one editable schema.json both modes work on. A failure here is
+		// logged rather than fatal, for the same reason opening the project is:
+		// the modes stay readable and the reason stays visible, and fixing a
+		// broken schema is exactly what Forge is for.
+		if editing, err = session.Open(proj.SchemaPath); err != nil {
+			slog.Warn("starting an editing session", "schema", proj.SchemaPath, "err", err)
+		}
 	}
 
 	srv := server.New(server.Config{
 		Addr:         cfg.Forge.Addr,
+		Session:      editing,
 		Engine:       engine,
 		PollInterval: cfg.Forge.PollInterval(),
 	}, web.Static)

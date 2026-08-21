@@ -5,7 +5,8 @@
 // exactly like a status that has not changed. So these tests move the world —
 // delete the database, put it back — and assert the readout follows.
 //
-// The fixture database is at tmp/e2e/e2e.db with schema_version 7. These tests
+// The fixture database sits inside the fixture project with schema_version 7,
+// so the project is self-contained. These tests
 // manipulate that file, which is why the suite seeds its own rather than
 // pointing at the developer's project.
 
@@ -13,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 const { test, expect, byTestId, expectSettled, watchEventStreams } = require("../fixtures");
 
-const DB = path.resolve(__dirname, "../../tmp/e2e/e2e.db");
+const DB = path.resolve(__dirname, "../fixtures/project/e2e.db");
 const SIDECARS = [DB, `${DB}-wal`, `${DB}-shm`];
 const STASH = `${DB}.stash`;
 
@@ -151,13 +152,17 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
     return {
       status: (text.match(/ id="engine-status"/g) || []).length,
       saves: (text.match(/ id="save-reports"/g) || []).length,
+      footer: (text.match(/ id="save-footer"/g) || []).length,
       total: (text.match(/event: datastar-patch-elements/g) || []).length,
     };
   });
 
   expect(frames.status, `engine status sent ${frames.status} times in ~6s`).toBe(1);
   expect(frames.saves, `save reports sent ${frames.saves} times in ~6s`).toBe(1);
-  expect(frames.total, `${frames.total} patches in total`).toBe(2);
+  expect(frames.footer, `save footer sent ${frames.footer} times in ~6s`).toBe(1);
+  // Three live regions, each sent once. The total is checked as well so a
+  // region added later without a counter here fails loudly.
+  expect(frames.total, `${frames.total} patches in total`).toBe(3);
 });
 
 test("the readout is announced to assistive tech when it changes", async ({ page }) => {

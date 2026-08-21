@@ -38,7 +38,7 @@ import (
 
 func main() {
 	schemaPath := flag.String("schema", "e2e/fixtures/project/schema.json", "schema to bootstrap from")
-	out := flag.String("out", "tmp/e2e/e2e.db", "database to write")
+	out := flag.String("out", "e2e/fixtures/project/e2e.db", "database to write")
 	flag.Parse()
 
 	if err := run(*schemaPath, *out); err != nil {

@@ -1,6 +1,11 @@
 package schema
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+
+	"github.com/tmbritton/ecs-db/internal/jsonorder"
+)
 
 // Supported property type values.
 const (
@@ -33,6 +38,41 @@ type Property struct {
 	Type       string              `json:"type"`
 	Properties map[string]Property `json:"properties,omitempty"`
 	Items      *Property           `json:"items,omitempty"`
+
+	// PropertyOrder records the authored order of Properties, on the same
+	// terms as Component.PropertyOrder — see DatabaseSchema.ComponentOrder for
+	// why order is kept at all. Recorded by UnmarshalJSON below, which is what
+	// makes it work at any nesting depth.
+	PropertyOrder []string `json:"-"`
+}
+
+// UnmarshalJSON decodes a property and records the order its own nested
+// properties appeared in.
+//
+// It lives here rather than in LoadSchema's walk so that it recurses for free:
+// a property nested inside an array's items inside another object records its
+// order the same way the top level does. Without it, nested properties were
+// alphabetised on save — a whole-block diff in a file nobody reordered, which
+// is exactly what the order tracking exists to prevent, one level down.
+func (p *Property) UnmarshalJSON(data []byte) error {
+	type propertyAlias Property // avoids recursing into this method
+	alias := (*propertyAlias)(p)
+	if err := json.Unmarshal(data, alias); err != nil {
+		return err
+	}
+
+	var section struct {
+		Properties json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(data, &section); err != nil {
+		return err
+	}
+	order, err := jsonorder.Keys(section.Properties)
+	if err != nil {
+		return fmt.Errorf("reading property order: %w", err)
+	}
+	p.PropertyOrder = order
+	return nil
 }
 
 // Validate returns a descriptive error if the property definition is

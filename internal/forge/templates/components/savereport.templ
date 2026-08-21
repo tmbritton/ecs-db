@@ -1,5 +1,7 @@
 package components
 
+import "github.com/tmbritton/ecs-db/internal/forge/savereport"
+
 // SaveReports renders the outcome of the most recent save of each file.
 //
 // The id is on the container so Datastar's default `outer` patch mode can morph
@@ -18,6 +20,22 @@ templ SaveReports(props SaveReportsProps) {
 				>
 					<span class="save-report__file mono">{ baseName(r.Path) }</span>
 					<span class="save-report__summary mono" data-testid="save-report-summary">{ r.Summary() }</span>
+					if r.Outcome == savereport.OutcomeConflict {
+						<div class="save-report__resolutions">
+							<button
+								type="button"
+								class="btn--outline save-report__resolution"
+								data-testid="conflict-reload"
+								data-on:click="@post('/forge/schema/reload')"
+							>Use theirs</button>
+							<button
+								type="button"
+								class="btn--danger save-report__resolution"
+								data-testid="conflict-overwrite"
+								data-on:click="@post('/forge/schema/overwrite')"
+							>Keep mine</button>
+						</div>
+					}
 					if len(r.Problems) > 0 {
 						<ul class="save-report__problems" data-testid="save-report-problems">
 							for _, p := range r.Problems {

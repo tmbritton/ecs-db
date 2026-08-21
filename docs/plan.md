@@ -411,7 +411,10 @@ This is the first epic where Forge changes anything — everything before it rea
 
 Two places the design outruns the engine, both carried forward from the original plan and both now assigned to the story that hits them: `array‹entity-ref›` junction tables do not exist (arrays are one JSON `TEXT` column), and spawn counts need Epic 14's object layers.
 
-- [ ] **Editing session** — One `editable.File[schema.DatabaseSchema]` per project, shared by both modes, saved through Epic 11's machinery.
+- [x] **Editing session** — One `editable.File[schema.DatabaseSchema]` per project, shared by both modes, saved through Epic 11's machinery.
+  - `Edit` takes a callback so no caller can hold a stale pointer or forget the lock
+  - Actions answer 204; the footer, the save report and the engine status all arrive on the one page stream
+  - Config paths now resolve against the config file, once, in `config.Load` — the engine and Forge had disagreed about which file a `game.toml` meant
 
 - [ ] **SCHEMA mode** — Component list, `v<N>` schemaVersion badge, shape cycling, fields table, behavior binding, reserved-`Behavior`-name enforcement.
 

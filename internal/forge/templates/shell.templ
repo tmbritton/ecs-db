@@ -13,7 +13,7 @@ import (
 // top, mode rail down the left, and the active mode's content filling the
 // rest. It knows nothing about what any mode contains — it renders the
 // component it is handed.
-templ Shell(active mode.Mode, engine status.Status, saves []savereport.Report, content Component) {
+templ Shell(active mode.Mode, engine status.Status, saves []savereport.Report, footer Component, content Component) {
 	@Layout("Forge — " + active.Title) {
 		<div class="shell" data-testid="shell" data-init={ eventStream(active) }>
 			@menuBar(engine)
@@ -22,6 +22,7 @@ templ Shell(active mode.Mode, engine status.Status, saves []savereport.Report, c
 				<main id="mode-content" class="shell__content" data-testid="mode-content">
 					@content
 				</main>
+				@SaveFooterRegion(footer)
 				@components.SaveReports(components.SaveReportsProps{Reports: saves})
 			</div>
 		</div>
@@ -70,4 +71,13 @@ templ modeRail(active mode.Mode) {
 			<span class="rail__glyph" aria-hidden="true">⚙</span>
 		</button>
 	</nav>
+}
+
+// SaveFooterRegion wraps the footer in the element the SSE stream patches, so
+// the region can be re-rendered on its own without touching the rest of the
+// shell.
+templ SaveFooterRegion(footer Component) {
+	<div id="save-footer" class="shell__footer" data-testid="save-footer-slot">
+		@footer
+	</div>
 }

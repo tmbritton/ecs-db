@@ -54,7 +54,7 @@ func TestShell_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 
 	want := []string{
 		"shell", "menubar", "wordmark", "engine-status",
-		"mode-rail", "rail-cog", "mode-content",
+		"mode-rail", "rail-cog", "mode-content", "save-footer-slot",
 		"menu-item-file", "menu-item-edit", "menu-item-view",
 		"menu-item-map", "menu-item-engine", "menu-item-help",
 	}

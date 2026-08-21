@@ -45,11 +45,13 @@ behaviors = "./behaviors/"
 	}
 
 	cfg := Get()
-	if cfg.Database.Path != "./myworld.db" {
-		t.Errorf("Database.Path = %q, want ./myworld.db", cfg.Database.Path)
+	// Resolved against the config file, not left as written — see
+	// config.resolvePaths for why every consumer needs them to mean one thing.
+	if want := filepath.Join(filepath.Dir(f), "myworld.db"); cfg.Database.Path != want {
+		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, want)
 	}
-	if cfg.Schema.Path != "./myschema.json" {
-		t.Errorf("Schema.Path = %q, want ./myschema.json", cfg.Schema.Path)
+	if want := filepath.Join(filepath.Dir(f), "myschema.json"); cfg.Schema.Path != want {
+		t.Errorf("Schema.Path = %q, want %q", cfg.Schema.Path, want)
 	}
 	if len(cfg.Mods) != 1 || cfg.Mods[0].Name != "core" {
 		t.Errorf("Mods = %v, want [{Name:core}]", cfg.Mods)
@@ -144,7 +146,7 @@ path = "./schema.json"
 		t.Fatalf("second Init: %v", err)
 	}
 
-	if Get().Database.Path != "./second.db" {
-		t.Errorf("Database.Path = %q, want ./second.db", Get().Database.Path)
+	if want := filepath.Join(filepath.Dir(f2), "second.db"); Get().Database.Path != want {
+		t.Errorf("Database.Path = %q, want %q", Get().Database.Path, want)
 	}
 }

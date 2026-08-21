@@ -7,20 +7,25 @@
 # it fall back to the repo's real schema.json, the assertions fail loudly
 # instead of passing against the wrong data.
 #
-# Paths are relative to the repo root, which is where the suite runs Forge.
+# Every path is relative to THIS FILE, which is how internal/forge/project
+# resolves them, and the fixture is self-contained so the two cannot drift.
+# Note that the engine reads the same fields relative to the working directory
+# instead — see docs/stories/epic-12/01-editing-session.md. The repo's own
+# game.toml sits at the repo root, where both readings coincide, which is why
+# the disagreement stayed hidden until a config lived somewhere else.
 
 [database]
-path = "./tmp/e2e/e2e.db"
+path = "./e2e.db"
 
 [schema]
-path = "./e2e/fixtures/project/schema.json"
+path = "./schema.json"
 
 [[mods]]
 name      = "e2e-core"
-behaviors = "./e2e/fixtures/project/behaviors/"
-actions   = "./e2e/fixtures/project/actions/"
-guards    = "./e2e/fixtures/project/guards/"
-assets    = "./e2e/fixtures/project/assets/"
+behaviors = "./behaviors/"
+actions   = "./actions/"
+guards    = "./guards/"
+assets    = "./assets/"
 
 [window]
 title    = "ECS e2e"

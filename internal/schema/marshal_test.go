@@ -641,3 +641,69 @@ func TestMarshal_ComponentWithBothPropertiesAndItems(t *testing.T) {
 		})
 	}
 }
+
+// Nested properties keep their authored order too.
+//
+// Epic 11 Story 2 recorded order for components and their top-level properties
+// but not for nested ones, and documented the asymmetry as acceptable "unless
+// Epic 12 lets someone reorder nested fields". It did not need to wait for
+// that: a nested block was alphabetised on *any* save, so opening a file with
+// non-alphabetical nested properties and saving it rewrote a block nobody
+// touched. Found by a session test doing a no-op edit.
+func TestMarshal_PreservesNestedPropertyOrder(t *testing.T) {
+	src := []byte(`{
+  "schemaVersion": 1,
+  "components": {
+    "Waypoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "y": { "type": "number" },
+          "x": { "type": "number" }
+        }
+      }
+    },
+    "Deep": {
+      "type": "object",
+      "properties": {
+        "outer": {
+          "type": "object",
+          "properties": {
+            "zeta":  { "type": "string" },
+            "alpha": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "entityTypes": {
+    "T": {
+      "requiredComponents": ["Waypoints"],
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    }
+  }
+}
+`)
+	loaded, err := LoadSchema(src)
+	if err != nil {
+		t.Fatalf("LoadSchema: %v", err)
+	}
+	got, err := Marshal(loaded)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !bytes.Equal(got, src) {
+		t.Errorf("nested order was not preserved\n%s", firstDifference(src, got))
+	}
+
+	s := string(got)
+	if strings.Index(s, `"y"`) > strings.Index(s, `"x"`) {
+		t.Error("properties inside items were sorted alphabetically")
+	}
+	if strings.Index(s, `"zeta"`) > strings.Index(s, `"alpha"`) {
+		t.Error("properties nested two deep were sorted alphabetically")
+	}
+}

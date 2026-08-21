@@ -6,8 +6,14 @@ bin/
 .claude/
 /game
 
-# Playwright screenshots, and the generated e2e fixture database
+# Playwright screenshots and scratch output
 tmp/
+
+# The generated e2e fixture database lives inside the fixture project so that
+# project is self-contained; *.db above covers it. These are the sidecars the
+# destructive specs stash while they test the offline state — an interrupted
+# run leaves them behind, and .db.stash is not matched by *.db.
+*.stash
 
 # Playwright run artefacts
 e2e/test-results/

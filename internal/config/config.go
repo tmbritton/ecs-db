@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -118,7 +119,45 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
 	}
 	applyDefaults(&cfg)
+	resolvePaths(&cfg, filepath.Dir(path))
 	return &cfg, nil
+}
+
+// resolvePaths rewrites every relative path in the config to be relative to the
+// config file that declared it.
+//
+// A path in game.toml names a file near game.toml, not near wherever the
+// process happened to be started. Without this, `ecs-db run -c ../other/game.toml`
+// looks for schema.json in the current directory, and — the way this surfaced —
+// the engine and Forge disagreed about which file a config meant. The engine
+// read these fields verbatim while internal/forge/project resolved them against
+// the config, and the repo's own project hid it completely: game.toml sits at
+// the repo root with "./schema.json", where both readings coincide.
+//
+// Resolving once, here, is what makes every consumer agree by construction
+// rather than by each remembering to.
+func resolvePaths(cfg *Config, root string) {
+	rel := func(p string) string {
+		// Empty means "not configured" and must stay that way. Resolving it
+		// would yield the project directory, which callers treat as a real
+		// location: an assets-only mod would suddenly declare a behaviors
+		// directory and every stray .json in the project root would be scanned
+		// as a machine.
+		if p == "" || filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Clean(filepath.Join(root, p))
+	}
+
+	cfg.Database.Path = rel(cfg.Database.Path)
+	cfg.Schema.Path = rel(cfg.Schema.Path)
+	cfg.Map.Path = rel(cfg.Map.Path)
+	for i := range cfg.Mods {
+		cfg.Mods[i].Behaviors = rel(cfg.Mods[i].Behaviors)
+		cfg.Mods[i].Actions = rel(cfg.Mods[i].Actions)
+		cfg.Mods[i].Guards = rel(cfg.Mods[i].Guards)
+		cfg.Mods[i].Assets = rel(cfg.Mods[i].Assets)
+	}
 }
 
 // applyDefaults fills in values whose zero value would be actively wrong, for

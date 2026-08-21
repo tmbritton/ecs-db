@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,15 +22,21 @@ import (
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/savereport"
+	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // Config is the subset of application config the HTTP layer needs.
 type Config struct {
 	Addr string
+	// Session is the editable schema.json both SCHEMA and ENTS work on. Nil
+	// when the project could not be opened, which leaves the modes readable
+	// and the reason visible rather than failing the whole editor.
+	Session *session.Session
 	// Engine describes the game database to report on. Zero-valued in tests
 	// that do not care, which reports offline — the honest default.
 	Engine status.Config
@@ -101,6 +108,11 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
+	mux.HandleFunc("POST /dev/schema/bump", s.handleDevSchemaBump)
+	mux.HandleFunc("POST /forge/schema/save", s.handleSchemaSave)
+	mux.HandleFunc("POST /forge/schema/discard", s.handleSchemaDiscard)
+	mux.HandleFunc("POST /forge/schema/reload", s.handleSchemaReload)
+	mux.HandleFunc("POST /forge/schema/overwrite", s.handleSchemaOverwrite)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -130,7 +142,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	}
 	// Rendered server-side on load so the menu bar is never blank before the
 	// first patch arrives; the stream takes over from there.
-	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), s.saves.All(), content()))
+	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), s.saves.All(), s.footer(), content()))
 }
 
 // handleModeEvents is the single SSE subscription a mode page opens.
@@ -165,7 +177,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 
-	var lastStatus, lastSaves string
+	var lastStatus, lastSaves, lastFooter string
 	for {
 		// Everything that changes on the page goes down this one connection.
 		// Engine status shows on every mode, so it is pushed whatever m is;
@@ -183,6 +195,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		}{
 			{"engine status", s.renderEngineStatus, &lastStatus},
 			{"save reports", s.renderSaveReports, &lastSaves},
+			{"save footer", s.renderFooter, &lastFooter},
 		} {
 			cur, err := part.render()
 			if err != nil {
@@ -220,6 +233,31 @@ func (s *Server) ReportSave(path string, saveErr error) {
 // it — closing the file, say.
 func (s *Server) ClearSaveReport(path string) { s.saves.Clear(path) }
 
+// footer renders the save footer from the session's real state. A project that
+// failed to open has no session and therefore nothing to save.
+func (s *Server) footer() templates.Component {
+	if s.cfg.Session == nil {
+		return templates.NoFooter()
+	}
+	dirty, err := s.cfg.Session.Dirty()
+	if err != nil {
+		// A schema that will not serialise cannot be saved, and saying "clean"
+		// would be worse than saying "dirty" — at least dirty prompts a look.
+		slog.Error("computing dirty state", "path", s.cfg.Session.Path(), "err", err)
+		dirty = true
+	}
+	return templates.SchemaFooter(filepath.Base(s.cfg.Session.Path()), dirty)
+}
+
+func (s *Server) renderFooter() (string, error) {
+	var buf bytes.Buffer
+	c := templates.SaveFooterRegion(s.footer())
+	if err := c.Render(context.Background(), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 func (s *Server) renderSaveReports() (string, error) {
 	var buf bytes.Buffer
 	c := components.SaveReports(components.SaveReportsProps{Reports: s.saves.All()})
@@ -248,6 +286,108 @@ func (s *Server) openStreams() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.streams
+}
+
+// sameOrigin refuses a write initiated by another site.
+//
+// Binding to loopback is not a security boundary: a POST with no custom headers
+// is a "simple request", so any page the user visits can fire one at
+// 127.0.0.1:7777 with no preflight and no consent, and the side effect lands.
+// These endpoints write to the user's schema.json, so that matters.
+//
+// Sec-Fetch-Site is sent by every browser that can make the attacking request
+// in the first place. A missing header means a non-browser client — curl, a
+// test — which is allowed: this is a same-origin check, not authentication.
+func sameOrigin(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "", "same-origin", "none":
+		return true
+	default:
+		return false
+	}
+}
+
+// handleDevSchemaBump makes one real edit to the session — bumping
+// schemaVersion — so the editing path can be driven end to end before Story 2
+// puts controls on the page.
+//
+// It exercises production code rather than standing in for it: the same
+// Session.Edit every real control will use. It disappears when SCHEMA mode has
+// a version badge to click, and until then a browser test of the session would
+// otherwise have to mock the thing under test.
+func (s *Server) handleDevSchemaBump(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin write refused", http.StatusForbidden)
+		return
+	}
+	if s.cfg.Session == nil {
+		http.Error(w, "no project is open", http.StatusConflict)
+		return
+	}
+	if err := s.cfg.Session.Edit(func(d *schema.DatabaseSchema) error {
+		d.SchemaVersion++
+		return nil
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// The schema actions. Each mutates the session and answers 204: the changed
+// footer and the save report reach the page on the SSE stream it already holds,
+// rather than as a body here. One push path, not two — the stream is already
+// where every other live change arrives.
+func (s *Server) handleSchemaSave(w http.ResponseWriter, r *http.Request) {
+	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Save() }, true)
+}
+
+func (s *Server) handleSchemaOverwrite(w http.ResponseWriter, r *http.Request) {
+	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.SaveOverwriting() }, true)
+}
+
+func (s *Server) handleSchemaDiscard(w http.ResponseWriter, r *http.Request) {
+	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Discard() }, false)
+}
+
+func (s *Server) handleSchemaReload(w http.ResponseWriter, r *http.Request) {
+	s.runSchemaAction(w, r, func(sess *session.Session) error {
+		if err := sess.Reload(); err != nil {
+			return err
+		}
+		// Taking what is on disk makes the last save outcome moot — whether it
+		// succeeded or was refused, it describes a version of the file that is
+		// no longer the one being edited. Leaving it up would be reporting on
+		// something that no longer exists.
+		s.ClearSaveReport(sess.Path())
+		return nil
+	}, false)
+}
+
+// runSchemaAction is the shape every editing action takes. Actions that write
+// record a save report; discard and reload do not, because nothing was saved
+// and reporting one would be a claim about the file that is not true.
+func (s *Server) runSchemaAction(
+	w http.ResponseWriter, r *http.Request,
+	do func(*session.Session) error,
+	reports bool,
+) {
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin write refused", http.StatusForbidden)
+		return
+	}
+	sess := s.cfg.Session
+	if sess == nil {
+		http.Error(w, "no project is open", http.StatusConflict)
+		return
+	}
+	err := do(sess)
+	if reports {
+		s.ReportSave(sess.Path(), err)
+	} else if err != nil {
+		slog.ErrorContext(r.Context(), "schema action", "path", sess.Path(), "err", err)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleDevNoop is the sink the /dev/tokens gallery posts to. The gallery

@@ -71,20 +71,15 @@ func Open(configPath string) (*Project, error) {
 		return nil, fmt.Errorf("project: %w", err)
 	}
 
-	// Paths in game.toml are relative to the file that names them, not to the
-	// process's working directory — Forge may be started from anywhere.
-	root := filepath.Dir(configPath)
-	abs := func(p string) string {
-		if filepath.IsAbs(p) {
-			return p
-		}
-		return filepath.Clean(filepath.Join(root, p))
-	}
-
+	// Paths arrive already resolved against the config file that declared them
+	// — config.resolvePaths does it once, at load, so the engine, the project
+	// model and the engine-status readout cannot disagree about which file a
+	// config means. Resolving again here would be a second place claiming that
+	// rule, and the two would eventually drift.
 	p := &Project{
 		ConfigPath: configPath,
-		SchemaPath: abs(cfg.Schema.Path),
-		DBPath:     abs(cfg.Database.Path),
+		SchemaPath: cfg.Schema.Path,
+		DBPath:     cfg.Database.Path,
 	}
 
 	raw, err := os.ReadFile(p.SchemaPath)
@@ -101,13 +96,10 @@ func Open(configPath string) (*Project, error) {
 	p.Schema = loaded
 
 	for _, m := range cfg.Mods {
-		mod := Mod{Name: m.Name}
-		// Left empty rather than resolved: abs("") is the project root, and a
-		// mod that declares no behaviors directory has none, not that one.
-		if m.Behaviors != "" {
-			mod.Behaviors = abs(m.Behaviors)
-		}
-		p.Mods = append(p.Mods, mod)
+		// An empty Behaviors stays empty: a mod that declares no behaviors
+		// directory has none, not the project root. config.resolvePaths
+		// preserves that distinction for the same reason.
+		p.Mods = append(p.Mods, Mod{Name: m.Name, Behaviors: m.Behaviors})
 	}
 
 	p.Machines, p.Problems = loadMachines(p.Mods, loaded, cfg.Map.Path != "")

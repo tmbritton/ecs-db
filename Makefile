@@ -44,6 +44,10 @@ e2e-seed:
 
 test: generate
 	go test ./...
+# -race on the packages that have concurrency to get wrong. Without it
+# TestSession_IsSafeForConcurrentUse proves nothing: a missing mutex only shows
+# up under the detector.
+	go test -race ./internal/forge/... ./internal/agent/
 # run.go is behind the ebitengine tag, so `go test ./...` never compiles the
 # game composition root. Typecheck it so a refactor can't break the tagged
 # build with every other signal still green.

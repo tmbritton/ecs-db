@@ -42,11 +42,14 @@ assets    = "./mods/expansion/assets/"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Database.Path != "./myworld.db" {
-		t.Errorf("Database.Path = %q, want ./myworld.db", cfg.Database.Path)
+	// Resolved against the config file rather than left as written — see
+	// config.resolvePaths. internal/config/paths_test.go covers the rule; this
+	// only needs to not assert the old one.
+	if want := filepath.Join(filepath.Dir(f), "myworld.db"); cfg.Database.Path != want {
+		t.Errorf("Database.Path = %q, want %q", cfg.Database.Path, want)
 	}
-	if cfg.Schema.Path != "./myschema.json" {
-		t.Errorf("Schema.Path = %q, want ./myschema.json", cfg.Schema.Path)
+	if want := filepath.Join(filepath.Dir(f), "myschema.json"); cfg.Schema.Path != want {
+		t.Errorf("Schema.Path = %q, want %q", cfg.Schema.Path, want)
 	}
 	if len(cfg.Mods) != 2 {
 		t.Fatalf("len(Mods) = %d, want 2", len(cfg.Mods))

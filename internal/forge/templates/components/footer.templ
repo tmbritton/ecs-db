@@ -14,7 +14,7 @@ type SaveFooterProps struct {
 }
 
 templ SaveFooter(props SaveFooterProps) {
-	<div class={ classes("save-footer", when(props.Dirty, "save-footer--dirty")) }>
+	<div class={ classes("save-footer", when(props.Dirty, "save-footer--dirty")) } data-testid="save-footer">
 		<div class="save-footer__hint mono">
 			if props.Dirty {
 				● unsaved

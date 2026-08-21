@@ -161,9 +161,7 @@ func propertyValue(p Property, indent string) (string, error) {
 	if len(p.Properties) > 0 {
 		b.WriteString(",\n")
 		fmt.Fprintf(&b, "%s  \"properties\": {\n", indent)
-		// Nested properties have no recorded order of their own — Property
-		// carries none — so they sort. Deterministic either way.
-		if err := writeProperties(&b, indent+"    ", nil, p.Properties); err != nil {
+		if err := writeProperties(&b, indent+"    ", p.PropertyOrder, p.Properties); err != nil {
 			return "", err
 		}
 		fmt.Fprintf(&b, "%s  }", indent)
