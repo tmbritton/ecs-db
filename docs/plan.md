@@ -373,7 +373,9 @@ The engine has **no file-writing code at all** today — no `schema.json` writer
   - Override detection derived from the loader's own behaviour, not a second copy of the rule
   - A broken machine is a reportable problem; a broken schema is fatal
 
-- [ ] **`schema.Marshal`** — Serializer for `DatabaseSchema` that produces clean `git diff`s.
+- [x] **`schema.Marshal`** — Serializer for `DatabaseSchema` that produces clean `git diff`s.
+  - Authored order recorded at load and honoured on save; unrecorded keys sort and append
+  - The authored layout turned out to be deterministic, so the round trip is byte-stable with no reformat
 
 - [ ] **XState emitter** — `MachineDefinition` back to JSON that still imports into Stately Studio.
 

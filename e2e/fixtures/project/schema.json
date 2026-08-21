@@ -26,14 +26,15 @@
     "TestDummy": {
       "requiredComponents": ["Position", "E2EProbe"],
       "optionalComponents": ["Health"],
-      "validationLevel": "strict",
-      "allowExtraComponents": false
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
     },
     "TestGoblin": {
       "behavior": "e2e-wander",
       "requiredComponents": ["Position", "Health"],
-      "validationLevel": "strict",
-      "allowExtraComponents": false
+      "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
     }
   }
 }

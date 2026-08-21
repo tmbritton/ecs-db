@@ -14,6 +14,20 @@ type DatabaseSchema struct {
 	SchemaVersion int                   `json:"schemaVersion"`
 	Components    map[string]Component  `json:"components"`
 	EntityTypes   map[string]EntityType `json:"entityTypes"`
+
+	// ComponentOrder and EntityTypeOrder record the order these keys appeared
+	// in when the schema was loaded, so Marshal can write the file back the way
+	// its author arranged it. Grouping is intent — Position, Health and Sprite
+	// sit together because they belong together — and a Go map has thrown that
+	// away by the time the value exists.
+	//
+	// Empty for a schema built in code, in which case Marshal sorts. Never map
+	// order: that would make every save a spurious whole-file diff.
+	//
+	// json:"-" because they are not part of the file format. LoadSchema fills
+	// them from the raw bytes; the interpreter ignores them entirely.
+	ComponentOrder  []string `json:"-"`
+	EntityTypeOrder []string `json:"-"`
 }
 
 // EntityType is a named template declaring which components an entity of

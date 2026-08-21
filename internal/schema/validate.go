@@ -41,6 +41,48 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 		return DatabaseSchema{}, fmt.Errorf("failed to parse schema.json: %w", err)
 	}
 
+	// The decoded maps have lost the authored key order, which Marshal needs to
+	// write the file back the way it was arranged. Read it from the raw bytes.
+	var rawSections struct {
+		Components  json.RawMessage `json:"components"`
+		EntityTypes json.RawMessage `json:"entityTypes"`
+	}
+	if err := json.Unmarshal(jsonData, &rawSections); err != nil {
+		return DatabaseSchema{}, fmt.Errorf("failed to parse schema.json: %w", err)
+	}
+	componentOrder, err := keyOrder(rawSections.Components)
+	if err != nil {
+		return DatabaseSchema{}, fmt.Errorf("reading component order: %w", err)
+	}
+	entityTypeOrder, err := keyOrder(rawSections.EntityTypes)
+	if err != nil {
+		return DatabaseSchema{}, fmt.Errorf("reading entity type order: %w", err)
+	}
+
+	// Property order, per component, from the same source.
+	var rawComponents map[string]json.RawMessage
+	if err := json.Unmarshal(rawSections.Components, &rawComponents); err != nil && len(rawSections.Components) > 0 {
+		return DatabaseSchema{}, fmt.Errorf("reading components: %w", err)
+	}
+	for name, rawComp := range rawComponents {
+		comp, ok := raw.Components[name]
+		if !ok {
+			continue
+		}
+		var section struct {
+			Properties json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(rawComp, &section); err != nil {
+			return DatabaseSchema{}, fmt.Errorf("reading component %q: %w", name, err)
+		}
+		order, err := keyOrder(section.Properties)
+		if err != nil {
+			return DatabaseSchema{}, fmt.Errorf("reading property order for %q: %w", name, err)
+		}
+		comp.PropertyOrder = order
+		raw.Components[name] = comp
+	}
+
 	// ── schemaVersion: must be a JSON integer ──
 	var version float64
 	if err := json.Unmarshal(raw.SchemaVersion, &version); err != nil {
@@ -60,9 +102,11 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	}
 
 	return DatabaseSchema{
-		SchemaVersion: int(version),
-		Components:    raw.Components,
-		EntityTypes:   raw.EntityTypes,
+		SchemaVersion:   int(version),
+		Components:      raw.Components,
+		EntityTypes:     raw.EntityTypes,
+		ComponentOrder:  componentOrder,
+		EntityTypeOrder: entityTypeOrder,
 	}, nil
 }
 

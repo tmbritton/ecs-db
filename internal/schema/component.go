@@ -33,6 +33,10 @@ type Component struct {
 	Behavior   string              `json:"behavior,omitempty"`
 	Properties map[string]Property `json:"properties,omitempty"`
 	Items      *Property           `json:"items,omitempty"`
+
+	// PropertyOrder records the authored order of Properties, on the same terms
+	// as DatabaseSchema.ComponentOrder. See that field for why.
+	PropertyOrder []string `json:"-"`
 }
 
 // UnmarshalJSON implements polymorphic decoding based on the "type" field.
