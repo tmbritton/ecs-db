@@ -138,12 +138,26 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
       text += decoder.decode(chunk.value, { stream: true });
     }
     await reader.cancel();
-    return (text.match(/event: datastar-patch-elements/g) || []).length;
+
+    // Counted per element, not in total. The page has two live regions, so the
+    // opening burst is legitimately two frames — but "two frames" is also what
+    // you get if one region is sent twice and the other never, which is the
+    // regression this is meant to catch.
+    // Anchored on the leading space. `data-testid="engine-status"` ends with
+    // the substring `id="engine-status"`, so an unanchored match counts the
+    // test id as well and reports two patches where there was one. The same
+    // collision has now bitten three times in this project — checkbox__box,
+    // the engine-status id, and here.
+    return {
+      status: (text.match(/ id="engine-status"/g) || []).length,
+      saves: (text.match(/ id="save-reports"/g) || []).length,
+      total: (text.match(/event: datastar-patch-elements/g) || []).length,
+    };
   });
 
-  // Exactly one: the state never changed, and the first frame is sent
-  // immediately so a reconnecting client is not briefly blank.
-  expect(frames, `server sent ${frames} patches over ~6s with nothing changing`).toBe(1);
+  expect(frames.status, `engine status sent ${frames.status} times in ~6s`).toBe(1);
+  expect(frames.saves, `save reports sent ${frames.saves} times in ~6s`).toBe(1);
+  expect(frames.total, `${frames.total} patches in total`).toBe(2);
 });
 
 test("the readout is announced to assistive tech when it changes", async ({ page }) => {
@@ -151,4 +165,17 @@ test("the readout is announced to assistive tech when it changes", async ({ page
   // It updates without a page load, so a screen reader has to be told. Stated
   // explicitly because test-id selectors notice none of this on their own.
   await expect(byTestId(page, "engine-status")).toHaveRole("status");
+});
+
+// The save-report container has to exist on first paint. A patch finds its
+// target by id, so a page that rendered nothing until the first save would have
+// nowhere to put it.
+test("the save-report container is present before anything is saved", async ({ page }) => {
+  const resp = await page.goto("/forge/map");
+  expect(await resp.text(), "the patch target is missing from the served HTML").toContain(
+    'id="save-reports"'
+  );
+  await expect(byTestId(page, "save-reports")).toBeAttached();
+  // Empty, though — nothing has been saved.
+  await expect(page.locator('[data-testid="save-report"]')).toHaveCount(0);
 });

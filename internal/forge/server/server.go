@@ -20,6 +20,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
@@ -59,6 +60,10 @@ type Server struct {
 	mu      sync.Mutex
 	ln      net.Listener
 	streams int
+
+	// The latest save outcome per file, pushed down the page stream alongside
+	// the engine status. Its own type carries the locking.
+	saves *savereport.Set
 }
 
 func New(cfg Config, static fs.FS) *Server {
@@ -75,7 +80,11 @@ func New(cfg Config, static fs.FS) *Server {
 		cfg.PollInterval = config.DefaultForgePollSeconds * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{cfg: cfg, static: static, streamsCtx: ctx, cancelStreams: cancel}
+	s := &Server{
+		cfg: cfg, static: static,
+		streamsCtx: ctx, cancelStreams: cancel,
+		saves: savereport.NewSet(),
+	}
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           s.routes(),
@@ -121,7 +130,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	}
 	// Rendered server-side on load so the menu bar is never blank before the
 	// first patch arrives; the stream takes over from there.
-	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), content()))
+	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), s.saves.All(), content()))
 }
 
 // handleModeEvents is the single SSE subscription a mode page opens.
@@ -156,22 +165,37 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 
-	var last string
+	var lastStatus, lastSaves string
 	for {
-		// Engine status shows on every mode, so it is pushed whatever m is.
-		// Epic 12's DDL preview and Epic 18's world_version traffic join it
-		// here, on this same connection.
-		switch cur, err := s.renderEngineStatus(); {
-		case err != nil:
-			slog.ErrorContext(ctx, "rendering engine status", "err", err)
-		case cur != last:
-			// Suppressing identical patches is not just economy: a stream that
-			// emits every tick forever makes the browser's EventStream log
-			// useless for debugging the busier traffic that lands on it later.
+		// Everything that changes on the page goes down this one connection.
+		// Engine status shows on every mode, so it is pushed whatever m is;
+		// save reports join it here, and Epic 18's world_version traffic will
+		// too. Each is diffed separately so one changing does not re-patch the
+		// other.
+		//
+		// Suppressing identical patches is not just economy: a stream that
+		// emits every tick forever makes the browser's EventStream log useless
+		// for debugging the busier traffic that lands on it later.
+		for _, part := range []struct {
+			name   string
+			render func() (string, error)
+			last   *string
+		}{
+			{"engine status", s.renderEngineStatus, &lastStatus},
+			{"save reports", s.renderSaveReports, &lastSaves},
+		} {
+			cur, err := part.render()
+			if err != nil {
+				slog.ErrorContext(ctx, "rendering "+part.name, "err", err)
+				continue
+			}
+			if cur == *part.last {
+				continue
+			}
 			if err := sse.PatchElements(cur); err != nil {
 				return // client gone
 			}
-			last = cur
+			*part.last = cur
 		}
 
 		select {
@@ -180,6 +204,29 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 	}
+}
+
+// ReportSave records what became of a save and lets every open page know.
+//
+// The report reaches the browser on the next poll of the page-level stream
+// rather than through a channel of its own: one stream per page is the
+// architecture, and a second notification path would be a second thing to get
+// right. Epic 12's save button is the caller.
+func (s *Server) ReportSave(path string, saveErr error) {
+	s.saves.Record(savereport.Observe(path, saveErr, status.Check(s.cfg.Engine).State))
+}
+
+// ClearSaveReport removes a file's report, for a caller that wants to dismiss
+// it — closing the file, say.
+func (s *Server) ClearSaveReport(path string) { s.saves.Clear(path) }
+
+func (s *Server) renderSaveReports() (string, error) {
+	var buf bytes.Buffer
+	c := components.SaveReports(components.SaveReportsProps{Reports: s.saves.All()})
+	if err := c.Render(context.Background(), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 // renderEngineStatus checks the database and renders the readout to a string.

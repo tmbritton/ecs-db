@@ -110,6 +110,11 @@ func runGame(cmd *cobra.Command, args []string) error {
 	}
 
 	watcher := agent.NewWatcher(loader, watchedDirs, 0)
+	// Hot-swapping a machine can leave an entity sitting in a state the new
+	// definition no longer has. The Reconciler has handled that since Epic 4
+	// and has never had a caller; Forge makes the scenario reachable through
+	// the UI, since deleting a state is an ordinary edit.
+	watcher.SetReconcileFunc(agent.ReconcileOnReload(ctx, store.DB(), loader, &agent.Reconciler{}))
 	go func() {
 		if err := watcher.Start(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "watcher: %v\n", err)

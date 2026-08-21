@@ -195,3 +195,50 @@ func TestValidateMachine_RealMachinesStillValidate(t *testing.T) {
 		})
 	}
 }
+
+// An editor needs every failure at once, and a validation hook takes one error.
+// errors.Join carries the list across that boundary.
+func TestValidateMachineError_JoinsEveryFailure(t *testing.T) {
+	def, err := ParseMachine([]byte(`{"id":"m","initial":"nowhere","states":{
+		"a":{"entry":"noSuchAction","on":{"GO":{"target":"a","cond":"noSuchGuard"}}}
+	}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	joined := ValidateMachineError(def, NewRegistry(), initialSchema())
+	if joined == nil {
+		t.Fatal("want an error")
+	}
+
+	unwrapped, ok := joined.(interface{ Unwrap() []error })
+	if !ok {
+		t.Fatalf("error does not unwrap to a list; a caller cannot show them separately: %v", joined)
+	}
+	parts := unwrapped.Unwrap()
+	if len(parts) < 3 {
+		t.Errorf("got %d errors, want every failure: %v", len(parts), parts)
+	}
+
+	for _, want := range []string{"noSuchAction", "noSuchGuard", "nowhere"} {
+		var found bool
+		for _, p := range parts {
+			if strings.Contains(p.Error(), want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no error mentions %q; got %v", want, parts)
+		}
+	}
+}
+
+func TestValidateMachineError_NilWhenValid(t *testing.T) {
+	def, err := ParseMachine([]byte(`{"id":"m","initial":"idle","states":{"idle":{}}}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := ValidateMachineError(def, NewRegistry(), initialSchema()); got != nil {
+		t.Errorf("ValidateMachineError = %v, want nil for a valid machine", got)
+	}
+}

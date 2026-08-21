@@ -11,6 +11,7 @@ import (
 	"github.com/a-h/templ"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 )
 
@@ -27,7 +28,7 @@ func renderShellWith(t *testing.T, active mode.Mode, engine status.Status) strin
 		_, err := io.WriteString(w, "<p>STUB-CONTENT</p>")
 		return err
 	})
-	if err := Shell(active, engine, body).Render(context.Background(), &buf); err != nil {
+	if err := Shell(active, engine, nil, body).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
 	}
 	return buf.String()
@@ -118,6 +119,36 @@ func TestShell_RendersTheContentItIsGiven(t *testing.T) {
 	}
 	if !strings.Contains(got, `id="mode-content"`) {
 		t.Error("shell has no mode-content region for later epics to patch into")
+	}
+}
+
+// A Datastar patch finds its target by id. Without this element in the served
+// HTML, every save report the server pushes lands on nothing and is dropped in
+// silence — and deleting the component from the shell left every Go test green.
+func TestShell_RendersTheSaveReportTarget(t *testing.T) {
+	got := renderShell(t, mode.Default)
+	if !regexp.MustCompile(`\sid="save-reports"`).MatchString(got) {
+		t.Errorf("the shell has no save-report patch target\n%s", got)
+	}
+}
+
+// And it renders the reports it is given, so a page loaded after a failed save
+// shows it on first paint rather than waiting for the next stream tick.
+func TestShell_RendersTheReportsItIsGiven(t *testing.T) {
+	var buf bytes.Buffer
+	body := templ.ComponentFunc(func(_ context.Context, w io.Writer) error { return nil })
+	reports := []savereport.Report{{
+		Path:     "/p/goblin.json",
+		Outcome:  savereport.OutcomeRejected,
+		Problems: []string{"unknown action alpha"},
+	}}
+	if err := Shell(mode.Default, status.Status{}, reports, body).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{"goblin.json", "unknown action alpha"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("the shell did not render %q", want)
+		}
 	}
 }
 

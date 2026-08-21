@@ -25,7 +25,7 @@ type Watcher struct {
 	debounce  time.Duration
 	mu        sync.Mutex
 	timers    map[string]*time.Timer // keyed by absolute file path
-	reconcile ReconcileFunc          // optional; nil until wired in Epic 5
+	reconcile ReconcileFunc          // optional; see ReconcileOnReload
 }
 
 // NewWatcher creates a Watcher. debounce controls how long to wait after the

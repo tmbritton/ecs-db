@@ -846,6 +846,65 @@ button.list-row:not(.list-row--active):hover {
   color: var(--text-faint);
 }
 
+/* --- save reports -----------------------------------------------------------
+   What became of the last save of each file. Fixed to the bottom-right rather
+   than in the flow: it appears in response to an action, and must not shift the
+   layout of whatever the user is editing. */
+
+.save-reports {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+  z-index: 20;
+}
+
+.save-report {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px;
+  background: var(--raised);
+  border: var(--border-w) solid var(--border);
+  box-shadow: var(--shadow-node);
+  font-size: 11px;
+}
+
+.save-report--ok {
+  border-color: var(--green);
+}
+
+/* Saved, but nothing was listening. Worth noticing, not a problem — amber
+   rather than red, because reporting it as a failure would be false. */
+.save-report--idle {
+  border-color: var(--amber);
+}
+
+.save-report--bad {
+  border-color: var(--red);
+}
+
+.save-report__file {
+  color: var(--text-hi);
+}
+
+.save-report__summary {
+  color: var(--text-dim);
+}
+
+.save-report__problems {
+  margin: 2px 0 0;
+  padding-left: 14px;
+  color: var(--red);
+}
+
+.save-report__problem {
+  margin: 1px 0;
+}
+
 /* --- mode stubs ------------------------------------------------------------
    Placeholders until Epics 12-16. Each names itself and the epic that replaces
    it, so an unfinished build reads as unfinished rather than as broken. */

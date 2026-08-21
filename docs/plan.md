@@ -390,7 +390,14 @@ The engine has **no file-writing code at all** today — no `schema.json` writer
   - Delegates to `natefinch/atomic`, already a dependency and already correct
   - Its temp names are invisible to the engine watcher's `.json` filter — checked, not assumed
 
-- [ ] **Hot-reload feedback** — Surface reload success/failure in the UI, and wire `agent.Reconciler.Reconcile` via `Watcher.SetReconcileFunc` (written and tested in Epic 4, never given a caller).
+- [x] **Hot-reload feedback** — Surface reload success/failure in the UI, and wire `agent.Reconciler.Reconcile` via `Watcher.SetReconcileFunc` (written and tested in Epic 4, never given a caller).
+  - `internal/forge/savereport` — four outcomes, precise about what Forge can actually know
+  - Pushed per file down the existing page stream; "nothing listening" is not a failure
+  - `agent.ReconcileOnReload` bridges the callback to the reconciler; the stale "nil until wired" comment is gone
+
+**Epic 11 is complete.** Forge can resolve a project, round-trip `schema.json` and the
+XState machines byte-stably, know exactly what is unsaved, save without ever showing the
+engine a half-written file, and say what became of each save.
 
 ---
 

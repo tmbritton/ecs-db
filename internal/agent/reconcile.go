@@ -12,6 +12,49 @@ import (
 // current states no longer exist in the new definition.
 type Reconciler struct{}
 
+// ReconcileOnReload adapts a Reconciler to the callback the loader invokes
+// after a successful hot-reload.
+//
+// The two do not fit directly: ReconcileFunc is handed a machine ID and its
+// valid states, while Reconcile also needs a database, a context, and the
+// machine's initial state to reset to. The initial state is recovered from the
+// loader, which by then holds the newly loaded definition.
+//
+// Errors are logged rather than returned, because there is nobody to return
+// them to — this runs on a timer goroutine the watcher starts, after the file
+// has already been accepted. An unrecovered panic there kills the process, not
+// merely the watcher, so the awkward cases are handled rather than assumed
+// away.
+//
+// A nil Reconciler yields a nil callback, which the loader treats as "no
+// reconciliation", rather than a callback that panics on first use.
+func ReconcileOnReload(ctx context.Context, db *sql.DB, loader *Loader, r *Reconciler) ReconcileFunc {
+	if r == nil || db == nil || loader == nil {
+		return nil
+	}
+	return func(machineID string, validStates map[string]bool) {
+		def, ok := loader.Get(machineID)
+		if !ok {
+			// Reloaded but not retrievable: nothing to reset toward.
+			fmt.Printf("[hot-reload] reconcile skipped: machine %q is not loaded\n", machineID)
+			return
+		}
+		// A machine with no states at all validates — validateInitial only
+		// requires an initial when there are children — so def.Initial can be
+		// empty, and resetting to it would write [""] into current_states.
+		// That leaves the entity pointing at a state that does not exist,
+		// which is the corruption this whole callback exists to prevent.
+		// Leaving it where it is is strictly better than moving it nowhere.
+		if def.Initial == "" || !validStates[def.Initial] {
+			fmt.Printf("[hot-reload] reconcile skipped: machine %q has no usable initial state\n", machineID)
+			return
+		}
+		if err := r.Reconcile(ctx, db, machineID, validStates, def.Initial); err != nil {
+			fmt.Printf("[hot-reload] reconcile failed for %q: %v\n", machineID, err)
+		}
+	}
+}
+
 // Reconcile queries behavior_components for all rows where machine_id = machineID.
 // For each entity: if all current states are in validStates, it is skipped;
 // otherwise current_states is reset to [initial] and any pending event_queue

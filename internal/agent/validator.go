@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -82,6 +83,29 @@ func ValidateMachine(def *MachineDefinition, registry *Registry, s schema.Databa
 	}
 
 	return errs
+}
+
+// ValidateMachineError is ValidateMachine as a single error, joining every
+// failure rather than collapsing to the first.
+//
+// It exists because that is the shape an editor needs. ValidateMachine returns
+// a slice precisely so all of what is wrong can be shown at once — a
+// first-failure-only report sends someone round the edit-save loop once per
+// mistake — but a validation hook takes one error. errors.Join preserves the
+// list, so a caller can pull it back apart with Unwrap() []error.
+//
+// Loader.LoadMachine deliberately keeps its own semicolon-joined string: its
+// audience is a log line, not a list.
+func ValidateMachineError(def *MachineDefinition, registry *Registry, s schema.DatabaseSchema) error {
+	errs := ValidateMachine(def, registry, s)
+	if len(errs) == 0 {
+		return nil
+	}
+	joined := make([]error, len(errs))
+	for i, e := range errs {
+		joined[i] = e
+	}
+	return errors.Join(joined...)
 }
 
 // collectStateIDs returns the set of all valid state identifiers in the tree:

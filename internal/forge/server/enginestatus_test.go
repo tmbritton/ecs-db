@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -266,26 +267,47 @@ func TestModeEvents_DoesNotRepeatAnUnchangedStatus(t *testing.T) {
 	defer cancel()
 
 	ch := frames(t, ctx, srv.URL+mode.Default.Path()+"/events")
-	awaitFrame(t, ch, "hot-reload live", "first frame")
 
 	// Well over a dozen poll intervals with nothing changing.
 	time.Sleep(20 * testPoll)
 
-	var extra int
-	for {
-		select {
-		case _, ok := <-ch:
-			if !ok {
-				t.Fatal("stream ended unexpectedly")
+	// Counted per element, not in total. The page has two live regions — the
+	// engine status and the save reports — so the opening burst is legitimately
+	// two frames. What must not happen is either being sent again.
+	perElement := map[string]int{}
+	drain := func() {
+		for {
+			select {
+			case f, ok := <-ch:
+				if !ok {
+					t.Fatal("stream ended unexpectedly")
+				}
+				switch {
+				case strings.Contains(f, `id="engine-status"`):
+					perElement["engine-status"]++
+				case strings.Contains(f, `id="save-reports"`):
+					perElement["save-reports"]++
+				default:
+					perElement["unknown"]++
+				}
+				continue
+			default:
 			}
-			extra++
-			continue
-		default:
+			return
 		}
-		break
 	}
-	if extra != 0 {
-		t.Errorf("got %d redundant patches over ~20 poll intervals, want 0", extra)
+	drain()
+
+	if perElement["engine-status"] != 1 {
+		t.Errorf("engine status patched %d times over ~20 intervals with nothing changing, want 1",
+			perElement["engine-status"])
+	}
+	if perElement["save-reports"] != 1 {
+		t.Errorf("save reports patched %d times over ~20 intervals with nothing changing, want 1",
+			perElement["save-reports"])
+	}
+	if perElement["unknown"] != 0 {
+		t.Errorf("%d frames patched something unrecognised", perElement["unknown"])
 	}
 }
 
@@ -297,6 +319,10 @@ func TestModeEvents_EndsWhenTheClientDisconnects(t *testing.T) {
 
 	srv, s := statusServer(t, db, writeSchema(t, dir, 3))
 	ctx, cancel := context.WithCancel(context.Background())
+	// Deferred as well as called below: without it, a t.Fatal before the
+	// explicit cancel leaves the request open, httptest.Server.Close blocks in
+	// cleanup, and the package hits its ten-minute timeout instead of failing.
+	defer cancel()
 
 	ch := frames(t, ctx, srv.URL+mode.Default.Path()+"/events")
 	awaitFrame(t, ch, "hot-reload live", "first frame")
@@ -305,4 +331,102 @@ func TestModeEvents_EndsWhenTheClientDisconnects(t *testing.T) {
 	cancel()
 	waitFor(t, func() bool { return s.openStreams() == 0 },
 		"the handler did not return when the client disconnected")
+}
+
+// A save report has to reach the page, on the same stream everything else uses.
+// Epic 12's save button is the production caller; this drives the same method
+// it will.
+func TestModeEvents_PushesSaveReports(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "ecs.db")
+	bootstrapDB(t, db, 3)
+
+	srv, s := statusServer(t, db, writeSchema(t, dir, 3))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := frames(t, ctx, srv.URL+mode.Default.Path()+"/events")
+	awaitFrame(t, ch, `id="save-reports"`, "the empty report container")
+
+	// A save that failed validation, with more than one problem.
+	s.ReportSave("/p/goblin.json", errors.Join(
+		errors.New("unknown action alpha"),
+		errors.New("unknown guard beta"),
+	))
+
+	f := awaitFrame(t, ch, "goblin.json", "the rejection")
+	for _, want := range []string{"not saved", "unknown action alpha", "unknown guard beta"} {
+		if !strings.Contains(f, want) {
+			t.Errorf("the report does not mention %q:\n%s", want, f)
+		}
+	}
+
+	// A different file succeeding must not clear the first one's failure.
+	s.ReportSave("/p/schema.json", nil)
+	f = awaitFrame(t, ch, "schema.json", "the success")
+	if !strings.Contains(f, "goblin.json") {
+		t.Errorf("saving one file cleared another's report:\n%s", f)
+	}
+	// The database is present and matches, so something is listening.
+	if !strings.Contains(f, "hot-reload live") {
+		t.Errorf("a save with a compatible database should say hot-reload live:\n%s", f)
+	}
+
+	// And it can be dismissed.
+	s.ClearSaveReport("/p/goblin.json")
+	f = awaitFrame(t, ch, `id="save-reports"`, "after clearing")
+	deadline := time.After(3 * time.Second)
+	for strings.Contains(f, "goblin.json") {
+		select {
+		case next, ok := <-ch:
+			if !ok {
+				t.Fatal("stream ended")
+			}
+			f = next
+		case <-deadline:
+			t.Fatal("the cleared report never disappeared")
+		}
+	}
+}
+
+// With no game running, a save is not a failure — that is the normal case while
+// authoring, and reporting it as an error would train people to ignore it.
+func TestModeEvents_SaveWithNoEngineIsNotAnError(t *testing.T) {
+	dir := t.TempDir()
+	// No database at all.
+	srv, s := statusServer(t, filepath.Join(dir, "absent.db"), writeSchema(t, dir, 3))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := frames(t, ctx, srv.URL+mode.Default.Path()+"/events")
+	awaitFrame(t, ch, `id="save-reports"`, "the empty report container")
+
+	s.ReportSave("/p/schema.json", nil)
+	f := awaitFrame(t, ch, "schema.json", "the save")
+
+	if !strings.Contains(f, "no game running") {
+		t.Errorf("want the no-engine wording:\n%s", f)
+	}
+	if strings.Contains(f, "save-report--bad") {
+		t.Errorf("a save with nothing listening is styled as a failure:\n%s", f)
+	}
+}
+
+// Finding from review: nothing covered the server passing existing reports into
+// the shell. Navigating between modes after a failed save would have dropped the
+// report from first paint until the next stream tick.
+func TestModePage_RendersExistingSaveReports(t *testing.T) {
+	dir := t.TempDir()
+	db := filepath.Join(dir, "ecs.db")
+	bootstrapDB(t, db, 3)
+
+	srv, s := statusServer(t, db, writeSchema(t, dir, 3))
+	s.ReportSave("/p/goblin.json", errors.New("unknown action alpha"))
+
+	_, body := get(t, srv, mode.Default.Path())
+	for _, want := range []string{"goblin.json", "unknown action alpha", "not saved"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the served page does not show the existing report (%q missing)", want)
+		}
+	}
 }

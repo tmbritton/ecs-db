@@ -1,0 +1,32 @@
+package components
+
+// SaveReports renders the outcome of the most recent save of each file.
+//
+// The id is on the container so Datastar's default `outer` patch mode can morph
+// it in place, the same arrangement the engine-status readout uses. An empty
+// container is rendered rather than nothing at all: a patch needs an element to
+// find, and a page that started with no reports would otherwise have nowhere to
+// put the first one.
+templ SaveReports(props SaveReportsProps) {
+	<div id="save-reports" class="save-reports" role="status" data-testid="save-reports">
+		for _, r := range props.Reports {
+			if r.Rendered() {
+				<div
+					class={ "save-report", saveReportClass(r.Outcome) }
+					data-testid="save-report"
+					data-file={ r.Path }
+				>
+					<span class="save-report__file mono">{ baseName(r.Path) }</span>
+					<span class="save-report__summary mono" data-testid="save-report-summary">{ r.Summary() }</span>
+					if len(r.Problems) > 0 {
+						<ul class="save-report__problems" data-testid="save-report-problems">
+							for _, p := range r.Problems {
+								<li class="save-report__problem mono">{ p }</li>
+							}
+						</ul>
+					}
+				</div>
+			}
+		}
+	</div>
+}
