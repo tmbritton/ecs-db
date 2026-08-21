@@ -1,0 +1,185 @@
+package components
+
+// SegmentOption is one cell of a SegmentedControl. Accent is the hue the cell
+// takes when it is the selected one — the design colours only the active
+// segment, so accent and selection are rendered together.
+type SegmentOption struct {
+	Value  string
+	Label  string
+	Accent Accent
+}
+
+// SegmentedControlProps is an n-way selector. Its primary caller is the
+// AUTHORED/LIVE/REPLAY source lens; the TILES tabs use it with no accent and
+// inherit amber.
+//
+// It renders radio inputs bound to Signal, for the same reason Dropdown does:
+// an action posts the page's signals, and a `value` attribute is not one, so a
+// group whose selection never enters the store is invisible to every other
+// action on the page. Datastar's radio adapter assigns the shared `name` from
+// the signal path, so exclusivity and arrow-key navigation come from the
+// browser — which n buttons with aria-pressed cannot express.
+type SegmentedControlProps struct {
+	Label    string // accessible name for the group
+	Signal   string
+	Options  []SegmentOption
+	Selected string
+	Action   string
+}
+
+templ SegmentedControl(props SegmentedControlProps) {
+	<div
+		class="segmented"
+		role="radiogroup"
+		aria-label={ props.Label }
+		if props.Action != "" {
+			data-on:change={ props.Action }
+		}
+	>
+		for _, opt := range props.Options {
+			{{ selected := opt.Value == props.Selected }}
+			<label
+				class={ classes(
+					"segment",
+					when(selected, "segment--selected"),
+					when(selected, opt.Accent.class("segment")),
+				) }
+			>
+				<input
+					type="radio"
+					class="segment__input"
+					value={ opt.Value }
+					checked?={ selected }
+					if props.Signal != "" {
+						data-bind={ props.Signal }
+					}
+				/>
+				<span>{ opt.Label }</span>
+			</label>
+		}
+	</div>
+}
+
+// Option is a value/label pair for a Dropdown.
+type Option struct {
+	Value string
+	Label string
+}
+
+// DropdownProps renders a real <select>. The design draws a bordered box with
+// a ▾, but a native select is what gives keyboard and screen-reader behaviour
+// for free; the caret is a decorative sibling and the select is styled to
+// match.
+//
+// Signal is the Datastar signal the control is bound to, and it is what
+// carries the chosen value to the server: an action posts the page's signals,
+// so a control with no data-bind fires a request the server cannot interpret.
+// A plain HTML name attribute does nothing here — there is no form submission
+// in this architecture.
+type DropdownProps struct {
+	Label    string
+	Signal   string
+	Options  []Option
+	Selected string
+	Action   string
+}
+
+templ Dropdown(props DropdownProps) {
+	<label class="dropdown">
+		if props.Label != "" {
+			<span class="dropdown__label">{ props.Label }</span>
+		}
+		<span class="dropdown__control">
+			<select
+				class="dropdown__select"
+				if props.Signal != "" {
+					data-bind={ props.Signal }
+				}
+				if props.Action != "" {
+					data-on:change={ props.Action }
+				}
+			>
+				for _, opt := range props.Options {
+					<option value={ opt.Value } selected?={ opt.Value == props.Selected }>{ opt.Label }</option>
+				}
+			</select>
+			<span class="dropdown__caret" aria-hidden="true">▾</span>
+		</span>
+	</label>
+}
+
+// CheckboxProps is a two-state toggle. There is no indeterminate state.
+//
+// Both halves of the control — the box and the label — take their appearance
+// from Checked, server-side. Revealing the ✓ with a :checked CSS rule would
+// split the control between two sources of truth and desynchronise it the
+// instant a user clicked, for the whole SSE round trip and permanently if the
+// patch failed.
+//
+// See DropdownProps.Signal: without a binding, the toggle's new state never
+// reaches the server.
+type CheckboxProps struct {
+	Label   string
+	Signal  string
+	Checked bool
+	Action  string
+}
+
+templ Checkbox(props CheckboxProps) {
+	<label class={ classes("checkbox", when(props.Checked, "checkbox--on")) }>
+		<input
+			type="checkbox"
+			class="checkbox__input"
+			checked?={ props.Checked }
+			if props.Signal != "" {
+				data-bind={ props.Signal }
+			}
+			if props.Action != "" {
+				data-on:change={ props.Action }
+			}
+		/>
+		<span class={ classes("checkbox__box", when(props.Checked, "checkbox__box--on")) } aria-hidden="true">
+			if props.Checked {
+				✓
+			}
+		</span>
+		if props.Label != "" {
+			<span class="checkbox__label">{ props.Label }</span>
+		}
+	</label>
+}
+
+// IconButtonProps is the 26px square glyph-only button.
+//
+// Title is the control's accessible name and should always be set. When it is
+// not, the glyph is left visible to the accessibility tree so the button is at
+// least announced as its character; hiding it as decoration with no name to
+// replace it would leave a control announced only as "button".
+type IconButtonProps struct {
+	Glyph    string
+	Title    string
+	Variant  ButtonVariant
+	Disabled bool
+	Action   string
+}
+
+templ IconButton(props IconButtonProps) {
+	<button
+		type="button"
+		class={ classes("icon-btn", props.Variant.class()) }
+		if props.Title != "" {
+			title={ props.Title }
+			aria-label={ props.Title }
+		}
+		disabled?={ props.Disabled }
+		if props.Action != "" && !props.Disabled {
+			data-on:click={ props.Action }
+		}
+	>
+		if props.Title != "" {
+			<span aria-hidden="true">{ props.Glyph }</span>
+		} else {
+			<span>{ props.Glyph }</span>
+		}
+	</button>
+}

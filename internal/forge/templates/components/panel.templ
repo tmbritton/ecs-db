@@ -1,0 +1,46 @@
+package components
+
+// SectionHeadingProps is the 10px mono caps label at the top of a panel.
+// Source is an optional right-hand suffix — "◂ world.sqlite" — marking a panel
+// that is reading live data rather than authored files.
+type SectionHeadingProps struct {
+	Label  string
+	Source string
+}
+
+templ SectionHeading(props SectionHeadingProps) {
+	<div class="section-heading">
+		{ props.Label }
+		if props.Source != "" {
+			<span class="section-heading__source">{ props.Source }</span>
+		}
+	</div>
+}
+
+// PanelProps is a bordered container. Heading is nil for a panel that carries
+// no title; Width is px and 0 means "flex to fit".
+//
+// There is deliberately no Class escape hatch. A caller that needs a panel to
+// look different should get an enumerated variant, so the set of appearances
+// stays finite — an open class field would also let one primitive inject
+// another's state modifier.
+type PanelProps struct {
+	Heading *SectionHeadingProps
+	Width   int
+}
+
+templ Panel(props PanelProps) {
+	<div
+		class="panel"
+		if props.Width > 0 {
+			style={ pxWidth(props.Width) }
+		}
+	>
+		if props.Heading != nil {
+			@SectionHeading(*props.Heading)
+		}
+		<div class="panel__body">
+			{ children... }
+		</div>
+	</div>
+}

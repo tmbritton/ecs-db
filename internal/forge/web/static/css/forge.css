@@ -33,6 +33,10 @@ body {
 }
 
 .section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 1.5px;
@@ -45,6 +49,9 @@ body {
 .section-heading__source {
   color: var(--cyan);
   letter-spacing: 0.5px;
+  /* The suffix is a path or a table name — engine-owned text, which the
+     heading's uppercasing would misrepresent. */
+  text-transform: none;
 }
 
 .value {
@@ -122,6 +129,555 @@ a:hover {
   .dev__ants {
     animation: none;
   }
+}
+
+/* --- primitives ------------------------------------------------------------
+   The shared vocabulary in internal/forge/templates/components. Appearance
+   lives here; the Go props describe only *what* a thing is. Hover and focus
+   states in particular are CSS's business — a props struct should never carry
+   a "hovered" flag. */
+
+.panel {
+  background: var(--panel);
+  border: var(--border-w) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel > .section-heading {
+  padding: 12px var(--gutter) 4px;
+}
+
+.panel__body {
+  padding: 6px var(--gutter) var(--gutter);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Rows are 4-5px vertical padding. The 3px left edge is reserved on every row
+   so selection does not shift the label sideways. */
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: var(--row-pad) 8px;
+  background: none;
+  border: 0;
+  border-left: 3px solid transparent;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+/* Only the button form is activatable — a ListRow with no Action renders as a
+   div, and must not advertise a click it will not honour. */
+button.list-row {
+  cursor: pointer;
+}
+
+button.list-row:not(.list-row--active):hover {
+  background: var(--hover);
+}
+
+.list-row--active {
+  background: var(--active);
+  border-left-color: var(--amber);
+  color: var(--text-hi);
+}
+
+.list-row--muted {
+  color: var(--text-faint);
+}
+
+/* A query layer is a debug overlay backed by SQL — same row, red content. */
+.list-row--danger {
+  color: var(--red);
+}
+
+.list-row__glyph {
+  color: var(--text-dim);
+  flex: none;
+}
+
+.list-row__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-row__value {
+  font-size: 11px;
+  color: var(--text-dim);
+  flex: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+  padding: 3px 10px;
+  width: max-content;
+  font-size: 12.5px;
+}
+
+.chip__name {
+  color: var(--text-hi);
+}
+
+/* The lock is the schema contract, not decoration: this component is required
+   by the entity type and cannot be detached. */
+.chip__lock {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.chip__remove,
+.modal__close {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.chip__remove:hover {
+  color: var(--red);
+}
+
+.segmented {
+  display: flex;
+  border: var(--border-w) solid var(--border);
+  width: max-content;
+  font-size: 11px;
+}
+
+.segment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ui);
+  padding: 4px 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* Clipped, not display:none, so the radio keeps its place in the focus order
+   and its native arrow-key group behaviour. */
+.segment__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.segment__input:focus-visible ~ span {
+  outline: var(--border-w) solid var(--amber);
+  outline-offset: 2px;
+}
+
+.segment:not(.segment--selected):hover {
+  background: var(--hover);
+}
+
+/* Only the selected segment takes an accent — that is what selection looks
+   like here. Authored is amber (files), live cyan (world.sqlite), replay
+   violet (the transitions log). */
+.segment--selected {
+  background: var(--active);
+  color: var(--amber);
+}
+
+.segment--amber {
+  color: var(--amber);
+}
+
+.segment--green {
+  color: var(--green);
+}
+
+.segment--cyan {
+  color: var(--cyan);
+}
+
+.segment--violet {
+  color: var(--violet);
+}
+
+.segment--red {
+  color: var(--red);
+}
+
+.dropdown {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+}
+
+.dropdown__label {
+  color: var(--text-dim);
+}
+
+.dropdown__control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+  min-width: 120px;
+}
+
+.dropdown__control:hover {
+  border-color: var(--border-hi);
+}
+
+/* A real <select>, restyled: the design draws a bordered box with a caret, but
+   native keyboard and screen-reader behaviour is worth more than a custom
+   popup. The caret is a decorative sibling. */
+.dropdown__select {
+  appearance: none;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-hi);
+  padding: 3px 26px 3px 9px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.dropdown__select:focus {
+  outline: none;
+}
+
+.dropdown__control:focus-within {
+  border-color: var(--amber);
+}
+
+.dropdown__caret {
+  position: absolute;
+  right: 8px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+
+.checkbox {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+/* Clipped rather than display:none, so the real control keeps its place in the
+   focus order and the accessibility tree. */
+.checkbox__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.checkbox__box {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  border: var(--border-w) solid var(--border);
+}
+
+.checkbox__box--on {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.checkbox__input:focus-visible + .checkbox__box {
+  outline: var(--border-w) solid var(--amber);
+  outline-offset: 1px;
+}
+
+.checkbox__label {
+  color: var(--text-dim);
+}
+
+.checkbox--on .checkbox__label {
+  color: var(--text);
+}
+
+.icon-btn {
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  cursor: pointer;
+}
+
+.icon-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+/* Button variants, shared by .icon-btn and any future text button. */
+.btn--primary {
+  background: var(--amber);
+  border: var(--border-w) solid var(--amber);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--amber-hi);
+  border-color: var(--amber-hi);
+}
+
+.btn--outline {
+  background: var(--active);
+  border: var(--border-w) solid var(--amber);
+  color: var(--amber);
+}
+
+.btn--outline:hover:not(:disabled) {
+  border-color: var(--amber-hi);
+  color: var(--amber-hi);
+}
+
+.btn--ghost {
+  background: none;
+  border: var(--border-w) solid var(--border);
+  color: var(--text-dim);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  border-color: var(--border-hi);
+  color: var(--text);
+}
+
+.btn--dashed {
+  background: none;
+  border: var(--border-w) dashed var(--border-dashed);
+  color: var(--text-dim);
+}
+
+.btn--dashed:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.btn--danger {
+  background: none;
+  border: var(--border-w) solid var(--border);
+  color: var(--red);
+}
+
+.btn--danger:hover:not(:disabled) {
+  border-color: var(--red);
+}
+
+.ctx-menu {
+  background: var(--raised);
+  border: var(--border-w) solid var(--border);
+  width: max-content;
+  min-width: 190px;
+  box-shadow: var(--shadow-node);
+  padding-bottom: 3px;
+}
+
+.ctx-menu__title {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--amber);
+  padding: 5px 12px 3px;
+}
+
+.ctx-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+
+.ctx-menu__item:hover {
+  background: var(--hover);
+}
+
+.ctx-menu__item--danger {
+  color: var(--red);
+}
+
+.ctx-menu__shortcut {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.ctx-menu__submenu {
+  color: var(--text-dim);
+}
+
+.ctx-menu__divider {
+  height: var(--border-w);
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* The design's scrim is #100e0c at 62%; pure black reads identically over
+   --void and keeps every colour in this file inside the palette. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: var(--panel);
+  border: var(--border-w) solid var(--border);
+  box-shadow: var(--shadow-modal);
+  display: flex;
+  flex-direction: column;
+  max-height: 86vh;
+  max-width: calc(100vw - 40px);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 16px;
+  background: var(--raised);
+  border-bottom: var(--border-w) solid var(--border);
+}
+
+.modal__close {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.modal__close:hover {
+  color: var(--red);
+}
+
+.modal__body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.modal__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 11px 16px;
+  border-top: var(--border-w) solid var(--border);
+}
+
+.save-footer {
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  background: var(--panel);
+  border-top: var(--border-w) solid var(--border);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.save-footer__hint {
+  font-size: 9.5px;
+  color: var(--text-faint);
+}
+
+.save-footer--dirty .save-footer__hint {
+  color: var(--amber);
+}
+
+.save-footer__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.save-footer__discard,
+.save-footer__save {
+  flex: 1;
+  text-align: center;
+  padding: 5px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.save-footer__discard {
+  background: none;
+  border: var(--border-w) solid var(--border);
+  color: var(--text-faint);
+}
+
+.save-footer--dirty .save-footer__discard {
+  border-color: var(--border-hi);
+  color: var(--red);
+}
+
+.save-footer__save {
+  background: var(--hover);
+  border: var(--border-w) solid var(--hover);
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+.save-footer--dirty .save-footer__save {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--ink);
+}
+
+/* Clean means there is nothing to commit and nothing to throw away. */
+.save-footer__discard:disabled,
+.save-footer__save:disabled {
+  cursor: default;
 }
 
 /* --- /dev/tokens reference page -------------------------------------------
@@ -256,4 +812,61 @@ a:hover {
   stroke-width: 2;
   stroke-dasharray: 6 6;
   animation: fdash 0.6s linear infinite;
+}
+
+/* Gallery scaffolding for section 07-08. These classes exist only to lay the
+   primitives out for review; no mode uses them. */
+
+.dev__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+/* Rows butt against each other in a real layer panel — no gap. */
+.dev__stack0 {
+  display: flex;
+  flex-direction: column;
+}
+
+.dev__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* A save footer is sticky to the bottom of a panel, so give it a panel to sit
+   in rather than letting it float on the card. */
+.dev__well {
+  width: 100%;
+  background: var(--panel);
+  border: var(--border-w) solid var(--border);
+}
+
+.dev__density b {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.dev__btn {
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* The modal renders position:fixed over the whole viewport, which would cover
+   the page. Contain it so the gallery can show it in place. */
+.dev__modalstage {
+  position: relative;
+  height: 300px;
+  overflow: hidden;
+  border: var(--border-w) solid var(--border);
+  background: var(--ink);
+}
+
+.dev__modalstage .modal-backdrop {
+  position: absolute;
 }

@@ -252,3 +252,24 @@ func TestDevTokens(t *testing.T) {
 		}
 	}
 }
+
+// The gallery's primitives post here. If it 405s, every click on the design
+// reference page logs a console error.
+func TestRoutes_DevNoop(t *testing.T) {
+	srv := New(Config{}, testFS())
+
+	post := httptest.NewRequest(http.MethodPost, "/dev/noop", nil)
+	rec := httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, post)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("POST /dev/noop = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+
+	// It is a sink for the reference page, not a general endpoint.
+	get := httptest.NewRequest(http.MethodGet, "/dev/noop", nil)
+	rec = httptest.NewRecorder()
+	srv.routes().ServeHTTP(rec, get)
+	if rec.Code == http.StatusNoContent {
+		t.Error("GET /dev/noop should not be routed")
+	}
+}

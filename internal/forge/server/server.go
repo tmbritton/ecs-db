@@ -56,8 +56,20 @@ func (s *Server) routes() http.Handler {
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
+	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
+}
+
+// handleDevNoop is the sink the /dev/tokens gallery posts to. The gallery
+// wires real Datastar actions rather than decorative ones — a handler that
+// only looks wired is how the whole package shipped with `data-on-click`,
+// which parses as a plugin named "on-click" and is silently ignored — so the
+// actions need somewhere to land that is not a 405 in the console.
+//
+// 204: nothing to patch, which is a valid Datastar response.
+func (s *Server) handleDevNoop(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // staticHandler serves the embedded asset tree. Assets are immutable for the

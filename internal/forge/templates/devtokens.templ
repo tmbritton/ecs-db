@@ -18,12 +18,10 @@ templ DevTokens(surfaces, borders, text, accents []Swatch) {
 				<span class="dev__title">Design tokens</span>
 				<span class="mono dev__note">the reference a visual change is checked against</span>
 			</header>
-
 			@swatchGroup("01 · surfaces", surfaces)
 			@swatchGroup("02 · borders", borders)
 			@swatchGroup("03 · text", text)
 			@swatchGroupWide("04 · semantic accents — each hue means exactly one thing", accents)
-
 			<div class="section-heading dev__sh">05 · type</div>
 			<div class="dev__grid2">
 				<div class="dev__card">
@@ -42,7 +40,6 @@ templ DevTokens(surfaces, borders, text, accents []Swatch) {
 					<div class="dev__t11">Paths, tick counts, ids, computed values, SQL and section headers are always mono — it signals "this comes from the engine, not you."</div>
 				</div>
 			</div>
-
 			<div class="section-heading dev__sh">06 · shape &amp; motion</div>
 			<div class="dev__grid2">
 				<div class="dev__card dev__shadownode">
@@ -70,6 +67,7 @@ templ DevTokens(surfaces, borders, text, accents []Swatch) {
 					</svg>
 				</div>
 			</div>
+			@devComponents()
 		</div>
 	}
 }
@@ -95,7 +93,8 @@ templ swatches_(swatches []Swatch) {
 		<div>
 			<div class="dev__swatch" style={ swatchStyle(s.Hex) }></div>
 			<div class="mono dev__lbl">
-				<b>{ s.Token }</b> { s.Hex }<br/>
+				<b>{ s.Token }</b> { s.Hex }
+				<br/>
 				{ s.Meaning }
 			</div>
 		</div>

@@ -1,0 +1,47 @@
+package components
+
+// SaveFooterProps is the sticky save/discard bar shared by SCHEMA, ENTS,
+// AGENTS and MAP.
+//
+// It is deliberately dumb: it takes a dirty flag, the name of the file the
+// mode is editing, and two Datastar expressions. It knows nothing about what
+// is being saved — that is the caller's business.
+type SaveFooterProps struct {
+	Dirty         bool
+	File          string // display only, e.g. "overworld.tmx"
+	SaveAction    string
+	DiscardAction string
+}
+
+templ SaveFooter(props SaveFooterProps) {
+	<div class={ classes("save-footer", when(props.Dirty, "save-footer--dirty")) }>
+		<div class="save-footer__hint mono">
+			if props.Dirty {
+				● unsaved
+			} else {
+				✓ saved
+			}
+			if props.File != "" {
+				<span class="save-footer__file">· { props.File }</span>
+			}
+		</div>
+		<div class="save-footer__actions">
+			<button
+				type="button"
+				class="save-footer__discard"
+				disabled?={ !props.Dirty }
+				if props.Dirty && props.DiscardAction != "" {
+					data-on:click={ props.DiscardAction }
+				}
+			>Discard</button>
+			<button
+				type="button"
+				class="save-footer__save"
+				disabled?={ !props.Dirty }
+				if props.Dirty && props.SaveAction != "" {
+					data-on:click={ props.SaveAction }
+				}
+			>Save</button>
+		</div>
+	</div>
+}

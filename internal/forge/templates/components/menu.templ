@@ -1,0 +1,61 @@
+package components
+
+// MenuItem is one row of a ContextMenu. Divider makes it a rule instead of a
+// row, so a menu is expressed as a single ordered list rather than as groups
+// the caller has to assemble.
+type MenuItem struct {
+	Label    string
+	Shortcut string // right-aligned mono hint, e.g. "⌘D"
+	Action   string
+	Danger   bool // destructive — rendered red
+	Submenu  bool // opens a submenu; rendered with ▸
+	Divider  bool
+}
+
+// ContextMenuProps is the right-click menu. Every edit-pane target has one:
+// layer rows, the entity-type palette, placed spawns, tiles, state nodes and
+// live entities.
+type ContextMenuProps struct {
+	Title string // mono caps, e.g. "GOBLIN · SPAWN #12"
+	Items []MenuItem
+}
+
+templ ContextMenu(props ContextMenuProps) {
+	<div class="ctx-menu">
+		if props.Title != "" {
+			// Outside the role="menu" element: a bare div is not a permitted
+			// child of menu, and role="presentation" would hide the element
+			// without removing its text from the subtree.
+			<div class="ctx-menu__title mono">{ props.Title }</div>
+		}
+		<div
+			role="menu"
+			if props.Title != "" {
+				aria-label={ props.Title }
+			}
+		>
+			for _, item := range props.Items {
+				if item.Divider {
+					<div class="ctx-menu__divider" role="separator"></div>
+				} else {
+					<button
+						type="button"
+						role="menuitem"
+						class={ classes("ctx-menu__item", when(item.Danger, "ctx-menu__item--danger")) }
+						if item.Action != "" {
+							data-on:click={ item.Action }
+						}
+					>
+						<span class="ctx-menu__label">{ item.Label }</span>
+						if item.Submenu {
+							<span class="ctx-menu__submenu" aria-hidden="true">▸</span>
+						}
+						if item.Shortcut != "" {
+							<span class="ctx-menu__shortcut mono">{ item.Shortcut }</span>
+						}
+					</button>
+				}
+			}
+		</div>
+	</div>
+}

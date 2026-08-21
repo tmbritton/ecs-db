@@ -1,0 +1,40 @@
+package components
+
+// ChipProps is a component chip, as shown on an entity type or a spawn.
+//
+// The affordance carries the schema contract: 🔒 means the entity type
+// requires this component and it cannot be detached; ✕ means it is optional.
+// ContextSeeded adds the ƒ ctx badge — a value the engine computes at spawn
+// from the bound machine's context, and therefore read-only here.
+//
+// ChipRequired is the zero value on purpose. A chip whose Kind was never set
+// shows a lock, which withholds an affordance; the alternative default would
+// offer a detach control for a component the schema forbids detaching, and an
+// action that cannot succeed is worse than one that is not offered.
+type ChipProps struct {
+	Name          string
+	Kind          ChipKind
+	ContextSeeded bool
+	RemoveAction  string // Datastar expression; ignored when Kind is ChipRequired
+}
+
+templ Chip(props ChipProps) {
+	<span class="chip">
+		<span class="chip__name">{ props.Name }</span>
+		if props.ContextSeeded {
+			<span class="badge-ctx">ƒ ctx</span>
+		}
+		if props.Kind == ChipRequired {
+			<span class="chip__lock" role="img" aria-label="required by type">🔒</span>
+		} else {
+			<button
+				type="button"
+				class="chip__remove"
+				aria-label="detach component"
+				if props.RemoveAction != "" {
+					data-on:click={ props.RemoveAction }
+				}
+			><span aria-hidden="true">✕</span></button>
+		}
+	</span>
+}

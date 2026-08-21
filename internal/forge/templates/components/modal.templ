@@ -1,0 +1,60 @@
+package components
+
+// ModalShellProps is the centred dialog card: mono uppercase title, a ✕, a
+// scrollable body and an optional footer. Widths in the design run 400–680px.
+type ModalShellProps struct {
+	Title       string
+	CloseAction string
+	Width       int
+	Footer      Component // nil for a dialog with no actions
+}
+
+// ModalShell renders the dialog and its scrim.
+//
+// Dismiss is `evt.target === el && <action>` on the backdrop. Two wrong
+// answers were tried first. A bare handler on the backdrop fires for every
+// click that bubbles out of the dialog, closing it whenever a user touches a
+// control inside — Datastar compiles data-on-* to a plain addEventListener
+// with no target filtering. The __outside modifier does filter, but it binds
+// the listener to the *document* and asks "was this click outside the card",
+// which is a different question: it fires for clicks anywhere else on the
+// page, not just on this scrim.
+templ ModalShell(props ModalShellProps) {
+	<div
+		class="modal-backdrop"
+		if props.CloseAction != "" {
+			data-on:click={ scrimDismiss(props.CloseAction) }
+		}
+	>
+		<div
+			class="modal"
+			role="dialog"
+			aria-modal="true"
+			aria-label={ props.Title }
+			if props.Width > 0 {
+				style={ pxWidth(props.Width) }
+			}
+		>
+			<div class="modal__head">
+				<span class="section-heading">{ props.Title }</span>
+				if props.CloseAction != "" {
+					<button
+						type="button"
+						class="modal__close"
+						title="close"
+						aria-label="close"
+						data-on:click={ props.CloseAction }
+					><span aria-hidden="true">✕</span></button>
+				}
+			</div>
+			<div class="modal__body">
+				{ children... }
+			</div>
+			if props.Footer != nil {
+				<div class="modal__foot">
+					@props.Footer
+				</div>
+			}
+		</div>
+	</div>
+}

@@ -1,0 +1,54 @@
+package components
+
+// ListRowProps is the dense selectable row used for layers, machines,
+// components, entity types and — because a debug overlay is just a layer
+// backed by SQL — query layers too.
+//
+// Active is selection (amber left edge + active fill). Tone is content colour.
+// The two are independent: a selected row can still be muted or danger.
+//
+// A row with an Action renders as a <button>, so it is reachable by keyboard
+// and activates on Enter and Space with no handler of our own. Selection is
+// announced with aria-current, which is valid standalone; when a mode wraps a
+// list in a role="listbox" container it can upgrade these to role="option"
+// plus aria-selected.
+type ListRowProps struct {
+	Label  string
+	Glyph  string // decorative leading glyph; a row has one Action, so this is
+	       // not itself a control — a per-glyph visibility toggle needs its own
+	       // affordance, which the layer panel will introduce.
+	Value  string // optional right-aligned value, always mono
+	Active bool
+	Tone   Tone
+	Mono   bool   // render the label mono — for SQL predicates and paths
+	Action string // Datastar expression run on activation
+}
+
+templ ListRow(props ListRowProps) {
+	if props.Action != "" {
+		<button
+			type="button"
+			class={ listRowClass(props) }
+			aria-current={ boolAttr(props.Active) }
+			data-on:click={ props.Action }
+		>
+			@listRowContent(props)
+		</button>
+	} else {
+		<div class={ listRowClass(props) }>
+			@listRowContent(props)
+		</div>
+	}
+}
+
+templ listRowContent(props ListRowProps) {
+	if props.Glyph != "" {
+		<span class="list-row__glyph" aria-hidden="true">{ props.Glyph }</span>
+	}
+	<span class={ classes("list-row__label", when(props.Mono, "mono")) }>
+		{ props.Label }
+	</span>
+	if props.Value != "" {
+		<span class="list-row__value mono">{ props.Value }</span>
+	}
+}

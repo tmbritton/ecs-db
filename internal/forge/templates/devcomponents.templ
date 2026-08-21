@@ -1,0 +1,121 @@
+package templates
+
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
+// devComponents renders every primitive in each of its documented states. This
+// is the section reviewed side by side with the design system prototype — if a
+// state is not on this page, nobody sees it until a mode ships it wrong.
+templ devComponents() {
+	<div class="section-heading dev__sh">07 · components</div>
+	<div class="dev__grid3">
+		<div class="dev__card">
+			<div class="mono dev__lbl">LIST ROWS — layers &amp; query layers</div>
+			<div class="dev__stack0">
+				@components.ListRow(components.ListRowProps{Label: "Terrain", Glyph: "👁", Active: true, Value: "128", Action: "@post('/dev/noop')"})
+				@components.ListRow(components.ListRowProps{Label: "Props", Glyph: "👁", Action: "@post('/dev/noop')"})
+				@components.ListRow(components.ListRowProps{Label: "Collision", Glyph: "👁", Tone: components.ToneMuted, Action: "@post('/dev/noop')"})
+				@components.ListRow(components.ListRowProps{Label: "hp < 20% · pulse", Glyph: "👁", Tone: components.ToneDanger, Mono: true, Action: "@post('/dev/noop')"})
+				@components.ListRow(components.ListRowProps{Label: "Backdrop (locked)", Glyph: "👁", Tone: components.ToneMuted})
+			</div>
+			<div class="mono dev__lbl">selected = active fill + amber edge. A debug overlay is just a layer backed by SQL.</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">COMPONENT CHIPS</div>
+			<div class="dev__stack">
+				@components.Chip(components.ChipProps{Name: "Position", Kind: components.ChipRequired})
+				@components.Chip(components.ChipProps{Name: "Velocity", Kind: components.ChipOptional, RemoveAction: "@post('/dev/noop')"})
+				@components.Chip(components.ChipProps{Name: "hp", Kind: components.ChipOptional, ContextSeeded: true, RemoveAction: "@post('/dev/noop')"})
+			</div>
+			<div class="mono dev__lbl">🔒 required by type · locked · ✕ optional · detachable. ƒ ctx = computed by the engine at spawn.</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">SOURCE LENS — what the panels read</div>
+			<div class="dev__stack">
+				@components.SegmentedControl(components.SegmentedControlProps{Label: "source lens", Signal: "lensA", Selected: string(components.LensAuthored), Options: lensOptions, Action: "@post('/dev/noop')"})
+				@components.SegmentedControl(components.SegmentedControlProps{Label: "source lens", Signal: "lensB", Selected: string(components.LensLive), Options: lensOptions, Action: "@post('/dev/noop')"})
+				@components.SegmentedControl(components.SegmentedControlProps{Label: "source lens", Signal: "lensC", Selected: string(components.LensReplay), Options: lensOptions, Action: "@post('/dev/noop')"})
+			</div>
+			<div class="mono dev__lbl">Authored = files (amber) · Live = world.sqlite (cyan) · Replay = transitions log (violet).</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">INPUTS</div>
+			<div class="dev__stack">
+				@components.Dropdown(components.DropdownProps{Label: "Behavior", Signal: "behavior", Selected: "wander", Options: behaviorOptions, Action: "@post('/dev/noop')"})
+				@components.Checkbox(components.CheckboxProps{Label: "checkbox · on = green", Signal: "on", Checked: true, Action: "@post('/dev/noop')"})
+				@components.Checkbox(components.CheckboxProps{Label: "checkbox · off", Signal: "off", Action: "@post('/dev/noop')"})
+			</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">ICON BUTTONS — 26px square</div>
+			<div class="dev__row">
+				@components.IconButton(components.IconButtonProps{Glyph: "◈", Title: "stamp", Variant: components.ButtonOutline, Action: "@post('/dev/noop')"})
+				@components.IconButton(components.IconButtonProps{Glyph: "▢", Title: "rect", Action: "@post('/dev/noop')"})
+				@components.IconButton(components.IconButtonProps{Glyph: "✕", Title: "delete layer", Variant: components.ButtonDanger})
+				@components.IconButton(components.IconButtonProps{Glyph: "+", Title: "add tileset", Variant: components.ButtonDashed})
+				@components.IconButton(components.IconButtonProps{Glyph: "▶", Title: "preview", Variant: components.ButtonPrimary})
+				@components.IconButton(components.IconButtonProps{Glyph: "▶", Title: "preview (disabled)", Disabled: true})
+			</div>
+			<div class="mono dev__lbl">outline · ghost · danger · dashed · primary · disabled</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">PANEL</div>
+			@components.Panel(components.PanelProps{Width: 212, Heading: &components.SectionHeadingProps{Label: "entities", Source: "◂ world.sqlite"}}) {
+				@components.ListRow(components.ListRowProps{Label: "goblin #12", Glyph: "◉", Active: true, Action: "@post('/dev/noop')"})
+				@components.ListRow(components.ListRowProps{Label: "player #1", Glyph: "◉", Action: "@post('/dev/noop')"})
+			}
+			<div class="mono dev__lbl">panels 210–290px · gutters 12–14px · a cyan source suffix means live data</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">CONTEXT MENU</div>
+			@components.ContextMenu(spawnMenu)
+			<div class="mono dev__lbl">Mono caps title, right-aligned shortcut hints, 2px divider, danger rows in red.</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">SAVE FOOTER — both states</div>
+			<div class="dev__stack">
+				<div class="dev__well">
+					@components.SaveFooter(components.SaveFooterProps{Dirty: true, File: "overworld.tmx", SaveAction: "@post('/dev/noop')", DiscardAction: "@post('/dev/noop')"})
+				</div>
+				<div class="dev__well">
+					@components.SaveFooter(components.SaveFooterProps{File: "overworld.tmx"})
+				</div>
+			</div>
+			<div class="mono dev__lbl">Clean disables both buttons — nothing to commit, nothing to throw away.</div>
+		</div>
+		<div class="dev__card">
+			<div class="mono dev__lbl">DENSITY &amp; RHYTHM</div>
+			<div class="dev__t13 dev__density">
+				Panels <b class="mono">210–290px</b>
+				<br/>
+				Rows <b class="mono">4–5px</b> vertical padding
+				<br/>
+				Panel gutters <b class="mono">12–14px</b>
+				<br/>
+				Borders always <b class="mono">2px</b>, never rounded
+				<br/>
+				Icon buttons <b class="mono">26px</b> square
+			</div>
+		</div>
+	</div>
+	<div class="section-heading dev__sh">08 · modal shell</div>
+	<div class="dev__modalstage">
+		@components.ModalShell(components.ModalShellProps{
+			Title:       "resize map",
+			CloseAction: "@post('/dev/noop')",
+			Width:       480,
+			Footer:      resizeFooter(),
+		}) {
+			<div class="dev__stack">
+				@components.Dropdown(components.DropdownProps{Label: "Anchor", Signal: "anchor", Selected: "tl", Options: anchorOptions})
+				@components.Checkbox(components.CheckboxProps{Label: "Clip spawns outside the new bounds", Signal: "clip", Checked: true})
+			</div>
+		}
+	</div>
+}
+
+// resizeFooter is the modal's action row — two buttons, rendered with the same
+// variant classes the icon buttons use.
+templ resizeFooter() {
+	<button type="button" class="btn--ghost dev__btn">Cancel</button>
+	<button type="button" class="btn--primary dev__btn">Resize</button>
+}

@@ -344,7 +344,7 @@ This epic is the floor everything else stands on: a `forge` subcommand that buil
   - Chakra Petch for UI, JetBrains Mono for anything the engine owns
   - 2px borders, no border-radius, no gradients, hard offset shadows; `fpulse`/`fblink`/`fdash` keyframes
 
-- [ ] **Templ primitives** — Panel, SectionHeading, ListRow, Chip, SegmentedControl, Dropdown, Checkbox, IconButton, ContextMenu, ModalShell, SaveFooter.
+- [x] **Templ primitives** — Panel, SectionHeading, ListRow, Chip, SegmentedControl, Dropdown, Checkbox, IconButton, ContextMenu, ModalShell, SaveFooter.
 
 - [ ] **App shell** — Menu bar, 62px mode rail with the six modes + settings cog, routed mode content.
 

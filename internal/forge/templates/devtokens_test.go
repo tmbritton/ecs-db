@@ -1,6 +1,9 @@
 package templates
 
 import (
+	"bytes"
+	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -72,5 +75,53 @@ func TestSwatchStyle(t *testing.T) {
 				t.Errorf("swatchStyle(%q) = %q, want %q", tt.hex, got, tt.want)
 			}
 		})
+	}
+}
+
+// The gallery is the page a visual change is reviewed against, so a primitive
+// missing from it is invisible until a mode ships it wrong. This renders the
+// whole page and checks each primitive appears — and that both states of the
+// ones whose two states carry different meaning are present.
+func TestDevTokens_RendersEveryPrimitive(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DevTokens(Surfaces, Borders, TextTones, Accents).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+
+	// Each marker is chosen to be unique to its primitive. "✕" would not do:
+	// it is drawn by the optional chip, an icon button and every modal close,
+	// so a missing chip would still find it.
+	for _, want := range []string{
+		// one marker per primitive
+		"class=\"panel\"", "section-heading__source", "list-row__label", "chip__name",
+		"role=\"radiogroup\"", "segment__input", "dropdown__caret", `class="checkbox__box"`, "class=\"icon-btn",
+		"ctx-menu__item", "modal-backdrop", "save-footer__actions",
+		// states that mean different things
+		"list-row--active", "list-row--danger",
+		// both ListRow element forms: the activatable button and the inert
+		// div, which forge.css deliberately styles differently
+		`aria-current="true"`, `<div class="list-row`,
+		"chip__lock", "chip__remove", "badge-ctx",
+		"checkbox__box--on", "checkbox--on",
+		"save-footer--dirty", "✓ saved", "● unsaved",
+		"ctx-menu__item--danger", "ctx-menu__divider", "ctx-menu__submenu",
+		// every lens accent, so all three are exercised on one page
+		"segment--amber", "segment--cyan", "segment--violet",
+		// every button variant
+		"btn--primary", "btn--outline", "btn--ghost", "btn--dashed", "btn--danger",
+		// the clean save footer, whose disabled state carries meaning
+		"save-footer__save",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gallery is missing %q", want)
+		}
+	}
+
+	// A disabled control has to appear somewhere, since disabled is a state a
+	// reviewer needs to see. Matched by pattern because the attribute follows
+	// the button's accessible name, which is sample copy.
+	if !regexp.MustCompile(`<button[^>]*icon-btn[^>]*disabled`).MatchString(out) {
+		t.Error("gallery shows no disabled icon button")
 	}
 }

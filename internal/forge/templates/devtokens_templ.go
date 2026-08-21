@@ -71,7 +71,15 @@ func DevTokens(surfaces, borders, text, accents []Swatch) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"section-heading dev__sh\">05 · type</div><div class=\"dev__grid2\"><div class=\"dev__card\"><div class=\"mono dev__lbl\">CHAKRA PETCH — UI, labels, body</div><div class=\"dev__t26\">Forge the world</div><div class=\"dev__t17\">Semibold 600 · panel titles &amp; buttons</div><div class=\"dev__t13\">Regular 400 · 13px is the workspace body size</div><div class=\"dev__t11\">11px · captions, secondary labels</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">JETBRAINS MONO — engine-owned text</div><div class=\"mono value\">mods/core/assets/maps/overworld.tmx</div><div><span class=\"badge-ctx\">ƒ level×4</span></div><div class=\"mono dev__t11\">tick 4,312 · world_v 88,201</div><div class=\"section-heading\">panel header</div><div class=\"dev__t11\">Paths, tick counts, ids, computed values, SQL and section headers are always mono — it signals \"this comes from the engine, not you.\"</div></div></div><div class=\"section-heading dev__sh\">06 · shape &amp; motion</div><div class=\"dev__grid2\"><div class=\"dev__card dev__shadownode\"><div class=\"mono dev__lbl\">--shadow-node</div><div class=\"dev__t13\">4px 4px 0 — statechart nodes</div></div><div class=\"dev__card dev__shadowmodal\"><div class=\"mono dev__lbl\">--shadow-modal</div><div class=\"dev__t13\">8px 8px 0 — dialogs</div></div></div><div class=\"dev__grid3\"><div class=\"dev__card\"><div class=\"mono dev__lbl\">fpulse — low-hp halo</div><div class=\"dev__halo halo\"></div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">fblink</div><div class=\"dev__blink\">●</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">fdash — marching ants</div><svg width=\"120\" height=\"40\" aria-hidden=\"true\"><rect class=\"dev__ants\" x=\"2\" y=\"2\" width=\"112\" height=\"34\" fill=\"none\"></rect></svg></div></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"section-heading dev__sh\">05 · type</div><div class=\"dev__grid2\"><div class=\"dev__card\"><div class=\"mono dev__lbl\">CHAKRA PETCH — UI, labels, body</div><div class=\"dev__t26\">Forge the world</div><div class=\"dev__t17\">Semibold 600 · panel titles &amp; buttons</div><div class=\"dev__t13\">Regular 400 · 13px is the workspace body size</div><div class=\"dev__t11\">11px · captions, secondary labels</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">JETBRAINS MONO — engine-owned text</div><div class=\"mono value\">mods/core/assets/maps/overworld.tmx</div><div><span class=\"badge-ctx\">ƒ level×4</span></div><div class=\"mono dev__t11\">tick 4,312 · world_v 88,201</div><div class=\"section-heading\">panel header</div><div class=\"dev__t11\">Paths, tick counts, ids, computed values, SQL and section headers are always mono — it signals \"this comes from the engine, not you.\"</div></div></div><div class=\"section-heading dev__sh\">06 · shape &amp; motion</div><div class=\"dev__grid2\"><div class=\"dev__card dev__shadownode\"><div class=\"mono dev__lbl\">--shadow-node</div><div class=\"dev__t13\">4px 4px 0 — statechart nodes</div></div><div class=\"dev__card dev__shadowmodal\"><div class=\"mono dev__lbl\">--shadow-modal</div><div class=\"dev__t13\">8px 8px 0 — dialogs</div></div></div><div class=\"dev__grid3\"><div class=\"dev__card\"><div class=\"mono dev__lbl\">fpulse — low-hp halo</div><div class=\"dev__halo halo\"></div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">fblink</div><div class=\"dev__blink\">●</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">fdash — marching ants</div><svg width=\"120\" height=\"40\" aria-hidden=\"true\"><rect class=\"dev__ants\" x=\"2\" y=\"2\" width=\"112\" height=\"34\" fill=\"none\"></rect></svg></div></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = devComponents().Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -108,20 +116,20 @@ func swatchGroupWide(heading string, swatches []Swatch) templ.Component {
 			templ_7745c5c3_Var3 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<div class=\"section-heading dev__sh\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"section-heading dev__sh\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(heading)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 80, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 78, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div><div class=\"dev__grid6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div><div class=\"dev__grid6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -129,7 +137,7 @@ func swatchGroupWide(heading string, swatches []Swatch) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -158,20 +166,20 @@ func swatchGroup(heading string, swatches []Swatch) templ.Component {
 			templ_7745c5c3_Var5 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"section-heading dev__sh\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"section-heading dev__sh\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(heading)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 87, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 85, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div><div class=\"dev__grid4\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div><div class=\"dev__grid4\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -179,7 +187,7 @@ func swatchGroup(heading string, swatches []Swatch) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -209,59 +217,59 @@ func swatches_(swatches []Swatch) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		for _, s := range swatches {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div><div class=\"dev__swatch\" style=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div><div class=\"dev__swatch\" style=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(swatchStyle(s.Hex))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 96, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 94, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"></div><div class=\"mono dev__lbl\"><b>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"></div><div class=\"mono dev__lbl\"><b>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var9 string
 			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(s.Token)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 98, Col: 16}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 96, Col: 16}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</b> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</b> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(s.Hex)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 98, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 96, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<br>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<br>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(s.Meaning)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 99, Col: 15}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/devtokens.templ`, Line: 98, Col: 15}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
