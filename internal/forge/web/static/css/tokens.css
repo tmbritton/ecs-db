@@ -1,0 +1,55 @@
+/* Forge design tokens.
+ *
+ * Declarations only — no rules live here, which is what makes the
+ * "no hue outside the palette" test in palette_test.go enforceable.
+ *
+ * Colour is semantic: every hue means exactly one thing. If something needs
+ * emphasis, reach for weight, border, or the active-row fill — not a new hue.
+ */
+:root {
+  /* --- surfaces --- */
+  --void: #1a1714;    /* app backdrop */
+  --ink: #201d1a;     /* canvas, inset wells */
+  --inset: #1c1916;   /* deep inset: generated-DDL block */
+  --panel: #252220;   /* side panels */
+  --raised: #282420;  /* bars, mode rail */
+  --canvas: #242019;  /* map canvas */
+  --active: #332e28;  /* selected row */
+  --hover: #2a2622;
+
+  /* --- borders: always 2px, never rounded --- */
+  --border: #3d372f;         /* default stroke */
+  --border-dashed: #4a4337;  /* add / empty slots */
+  --border-hi: #5a5142;      /* hover / focus stroke */
+
+  /* --- text --- */
+  --text-hi: #f2ead9;         /* headings, values */
+  --text: #d8d2c8;            /* body */
+  --text-secondary: #b8ae9e;
+  --text-dim: #9a8f7d;        /* labels, units */
+  --text-faint: #6e675c;      /* hints, captions */
+
+  /* --- semantic accents: one meaning each --- */
+  --amber: #ffb454;     /* authoring, action, selection, the tool itself */
+  --amber-hi: #ffc678;  /* amber hover */
+  --green: #9ece6a;     /* entities, valid, on/true */
+  --cyan: #56c5d0;      /* live source, active statechart node */
+  --violet: #c8a4ff;    /* engine-computed values, replay source */
+  --red: #e06c60;       /* danger, collision, breakpoint hit */
+
+  /* --- type --- */
+  --font-ui: 'Chakra Petch', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* --- shape --- */
+  --border-w: 2px;
+  --shadow-node: 4px 4px 0 rgba(0, 0, 0, 0.25);
+  --shadow-modal: 8px 8px 0 rgba(0, 0, 0, 0.4);
+
+  /* --- density and rhythm --- */
+  --row-pad: 5px;      /* rows: 4-5px vertical padding */
+  --gutter: 13px;      /* panel gutters: 12-14px */
+  --icon-size: 26px;   /* icon buttons are 26px square */
+  --rail-w: 62px;
+  --menubar-h: 34px;
+}

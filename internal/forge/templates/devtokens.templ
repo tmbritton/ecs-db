@@ -1,0 +1,103 @@
+package templates
+
+// Swatch is one palette entry, rendered with the single thing its hue means.
+type Swatch struct {
+	Token   string
+	Hex     string
+	Meaning string
+}
+
+// DevTokens is the in-repo counterpart to the design-system prototype: the
+// page a visual change is reviewed against. It is a development aid, not part
+// of the app shell.
+templ DevTokens(surfaces, borders, text, accents []Swatch) {
+	@Layout("Forge — tokens") {
+		<div class="dev">
+			<header class="dev__head">
+				<span class="dev__wordmark">⚒ FORGE</span>
+				<span class="dev__title">Design tokens</span>
+				<span class="mono dev__note">the reference a visual change is checked against</span>
+			</header>
+
+			@swatchGroup("01 · surfaces", surfaces)
+			@swatchGroup("02 · borders", borders)
+			@swatchGroup("03 · text", text)
+			@swatchGroupWide("04 · semantic accents — each hue means exactly one thing", accents)
+
+			<div class="section-heading dev__sh">05 · type</div>
+			<div class="dev__grid2">
+				<div class="dev__card">
+					<div class="mono dev__lbl">CHAKRA PETCH — UI, labels, body</div>
+					<div class="dev__t26">Forge the world</div>
+					<div class="dev__t17">Semibold 600 · panel titles &amp; buttons</div>
+					<div class="dev__t13">Regular 400 · 13px is the workspace body size</div>
+					<div class="dev__t11">11px · captions, secondary labels</div>
+				</div>
+				<div class="dev__card">
+					<div class="mono dev__lbl">JETBRAINS MONO — engine-owned text</div>
+					<div class="mono value">mods/core/assets/maps/overworld.tmx</div>
+					<div><span class="badge-ctx">ƒ level×4</span></div>
+					<div class="mono dev__t11">tick 4,312 · world_v 88,201</div>
+					<div class="section-heading">panel header</div>
+					<div class="dev__t11">Paths, tick counts, ids, computed values, SQL and section headers are always mono — it signals "this comes from the engine, not you."</div>
+				</div>
+			</div>
+
+			<div class="section-heading dev__sh">06 · shape &amp; motion</div>
+			<div class="dev__grid2">
+				<div class="dev__card dev__shadownode">
+					<div class="mono dev__lbl">--shadow-node</div>
+					<div class="dev__t13">4px 4px 0 — statechart nodes</div>
+				</div>
+				<div class="dev__card dev__shadowmodal">
+					<div class="mono dev__lbl">--shadow-modal</div>
+					<div class="dev__t13">8px 8px 0 — dialogs</div>
+				</div>
+			</div>
+			<div class="dev__grid3">
+				<div class="dev__card">
+					<div class="mono dev__lbl">fpulse — low-hp halo</div>
+					<div class="dev__halo halo"></div>
+				</div>
+				<div class="dev__card">
+					<div class="mono dev__lbl">fblink</div>
+					<div class="dev__blink">●</div>
+				</div>
+				<div class="dev__card">
+					<div class="mono dev__lbl">fdash — marching ants</div>
+					<svg width="120" height="40" aria-hidden="true">
+						<rect class="dev__ants" x="2" y="2" width="112" height="34" fill="none"></rect>
+					</svg>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// swatchGroupWide lays a group out in one row. The five accents belong
+// together on a single line — the design reads them as one statement.
+templ swatchGroupWide(heading string, swatches []Swatch) {
+	<div class="section-heading dev__sh">{ heading }</div>
+	<div class="dev__grid6">
+		@swatches_(swatches)
+	</div>
+}
+
+templ swatchGroup(heading string, swatches []Swatch) {
+	<div class="section-heading dev__sh">{ heading }</div>
+	<div class="dev__grid4">
+		@swatches_(swatches)
+	</div>
+}
+
+templ swatches_(swatches []Swatch) {
+	for _, s := range swatches {
+		<div>
+			<div class="dev__swatch" style={ swatchStyle(s.Hex) }></div>
+			<div class="mono dev__lbl">
+				<b>{ s.Token }</b> { s.Hex }<br/>
+				{ s.Meaning }
+			</div>
+		</div>
+	}
+}

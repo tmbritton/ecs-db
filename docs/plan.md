@@ -339,7 +339,7 @@ This epic is the floor everything else stands on: a `forge` subcommand that buil
   - `internal/forge/web/static/` served from `go:embed`; self-hosted fonts, no CDN
   - `internal/forge/server` — `net/http`, `[forge]` config section, graceful shutdown
 
-- [ ] **Design tokens** — The palette and type system as CSS custom properties.
+- [x] **Design tokens** — The palette and type system as CSS custom properties.
   - Surfaces, borders, four text weights, five semantic accents (amber/green/cyan/violet/red)
   - Chakra Petch for UI, JetBrains Mono for anything the engine owns
   - 2px borders, no border-radius, no gradients, hard offset shadows; `fpulse`/`fblink`/`fdash` keyframes

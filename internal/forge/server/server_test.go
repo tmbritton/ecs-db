@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/web"
 )
 
 func testFS() fstest.MapFS {
@@ -204,5 +205,50 @@ func TestRoot_NonGETIsMethodNotAllowed(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
+	}
+}
+
+// /dev/tokens is the page a visual change is reviewed against, so it must
+// render every palette group and both type scales.
+func TestDevTokens(t *testing.T) {
+	srv := newTestServer(t)
+	resp, err := srv.Client().Get(srv.URL + "/dev/tokens")
+	if err != nil {
+		t.Fatalf("GET /dev/tokens: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	got := string(body)
+
+	// Case-insensitive: the design renders these as uppercase mono labels, and
+	// the test should pin that the page documents them, not how it cases them.
+	// "text" is deliberately absent from this list — it appears in every swatch
+	// label (--text-hi, --text-dim) whether or not the group heading renders,
+	// so asserting on it would assert nothing.
+	lower := strings.ToLower(got)
+	for _, want := range []string{
+		"surfaces", "borders", "semantic accents",
+		"chakra petch", "jetbrains mono",
+		// The keyframe demos are an explicit AC: the page must show them.
+		"fpulse", "fblink", "fdash",
+		"shadow-node", "shadow-modal",
+	} {
+		if !strings.Contains(lower, want) {
+			t.Errorf("page does not mention %q", want)
+		}
+	}
+
+	// Every palette hex must render, not just the accents — the page's job is
+	// to show the whole palette.
+	for token, hex := range web.Palette {
+		if !strings.Contains(lower, strings.ToLower(hex)) {
+			t.Errorf("page does not render %s (%s)", token, hex)
+		}
 	}
 }

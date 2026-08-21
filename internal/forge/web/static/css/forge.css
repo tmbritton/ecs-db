@@ -1,6 +1,259 @@
-/* Forge stylesheet.
+/* Forge element defaults and shape language.
  *
- * Placeholder: the design tokens, element defaults and shape language land in
- * Epic 10 Story 3. Linked from the layout now so the toolchain is wired
- * end-to-end and the asset route is exercised.
+ * Every colour here is a var(--token) from tokens.css. No literal hues — see
+ * palette_test.go, which enforces it.
+ *
+ * The look is deliberate and load-bearing for the product's identity: dark,
+ * dense, mono-labelled, 2px hard borders, square corners, no gradients.
  */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-radius: 0;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Mono signals "this comes from the engine, not you" — paths, ticks, ids,
+   computed values, SQL, and section headers. */
+.mono {
+  font-family: var(--font-mono);
+}
+
+.section-heading {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+/* A source suffix on a heading — "◂ world.sqlite" — marks a panel reading live
+   data rather than authored files. */
+.section-heading__source {
+  color: var(--cyan);
+  letter-spacing: 0.5px;
+}
+
+.value {
+  font-family: var(--font-mono);
+  color: var(--text-hi);
+}
+
+/* The ƒ badge: a value the engine computes at spawn, read-only here. */
+.badge-ctx {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--violet);
+  background: rgba(200, 164, 255, 0.12);
+  padding: 1px 7px;
+}
+
+a {
+  color: var(--amber);
+}
+
+a:hover {
+  color: var(--amber-hi);
+}
+
+:focus-visible {
+  outline: var(--border-w) solid var(--amber);
+  outline-offset: 1px;
+}
+
+/* The two documented exceptions to square corners: statechart graph ports and
+   the low-hp halo. Opt-in classes, not overrides of the reset. */
+.port {
+  border-radius: 50%;
+}
+
+.halo {
+  border-radius: 50%;
+  animation: fpulse 1.2s ease-in-out infinite;
+}
+
+@keyframes fpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes fblink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Marching ants, for the selection marquee on the map canvas. */
+@keyframes fdash {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Every animated element must be listed here by class. `fpulse`/`fblink`/
+   `fdash` are keyframes names, not classes — selecting on those matches
+   nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .halo,
+  .dev__blink,
+  .dev__ants {
+    animation: none;
+  }
+}
+
+/* --- /dev/tokens reference page -------------------------------------------
+   A development aid, not part of the app shell. */
+
+.dev {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.dev__head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  border-bottom: var(--border-w) solid var(--border);
+  padding-bottom: 18px;
+}
+
+.dev__wordmark {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 2px;
+}
+
+.dev__title {
+  font-size: 17px;
+  color: var(--text-hi);
+}
+
+.dev__note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.dev__sh {
+  margin: 34px 0 14px;
+}
+
+.dev__grid6,
+.dev__grid4,
+.dev__grid3,
+.dev__grid2 {
+  display: grid;
+  gap: 14px;
+}
+
+.dev__grid6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.dev__grid4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.dev__grid3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.dev__grid2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.dev__swatch {
+  height: 52px;
+  border: var(--border-w) solid var(--border);
+}
+
+.dev__lbl {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+
+.dev__lbl b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.dev__card {
+  background: var(--panel);
+  border: var(--border-w) solid var(--border);
+  padding: var(--gutter) 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dev__t26 {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.dev__t17 {
+  font-size: 17px;
+}
+
+.dev__t13 {
+  font-size: 13px;
+}
+
+.dev__t11 {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.dev__shadownode {
+  box-shadow: var(--shadow-node);
+}
+
+.dev__shadowmodal {
+  box-shadow: var(--shadow-modal);
+}
+
+.dev__halo {
+  width: 34px;
+  height: 34px;
+  border: var(--border-w) solid var(--red);
+}
+
+.dev__blink {
+  color: var(--green);
+  animation: fblink 1s step-end infinite;
+}
+
+.dev__ants {
+  stroke: var(--amber);
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+  animation: fdash 0.6s linear infinite;
+}

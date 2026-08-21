@@ -55,6 +55,7 @@ func (s *Server) routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
+	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
 }
@@ -74,6 +75,13 @@ func (s *Server) staticHandler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		files.ServeHTTP(w, r)
 	})
+}
+
+// handleDevTokens renders the design-token reference. It is deliberately not
+// reachable from the app shell — it is a development aid.
+func (s *Server) handleDevTokens(w http.ResponseWriter, r *http.Request) {
+	s.render(w, r, templates.DevTokens(
+		templates.Surfaces, templates.Borders, templates.TextTones, templates.Accents))
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
