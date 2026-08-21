@@ -3,6 +3,9 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/tmbritton/ecs-db/internal/jsonorder"
 )
 
 // StateType values matching XState v4 semantics.
@@ -36,6 +39,12 @@ type Transition struct {
 }
 
 // StateNode is one node in the machine tree.
+//
+// The *Order fields record the order keys appeared in the source file so the
+// emitter can write it back that way. States are usually authored in the order
+// they run rather than alphabetically, and alphabetising them on save would be
+// a whole-file diff nobody asked for. Empty for a node built in code, in which
+// case the emitter sorts — deterministic either way, never map order.
 type StateNode struct {
 	ID       string
 	Type     StateType
@@ -48,6 +57,10 @@ type StateNode struct {
 	After    map[string][]Transition // key = raw duration string ("500", "1000ms")
 	History  string                  // "shallow" or "deep"; history nodes only
 	Target   string                  // default history target; history nodes only
+
+	StateOrder []string // authored order of Children
+	OnOrder    []string // authored order of On's event keys
+	AfterOrder []string // authored order of After's duration keys
 }
 
 // MachineDefinition is the parsed in-memory representation of an XState v4 machine.
@@ -57,6 +70,10 @@ type MachineDefinition struct {
 	Context         map[string]any
 	States          map[string]*StateNode // top-level states
 	ContextManifest map[string]string     // field → component name; populated by ValidateMachine
+
+	// See StateNode for why these exist.
+	StateOrder   []string
+	ContextOrder []string
 }
 
 // ── Raw JSON structs ──────────────────────────────────────────────────────────
@@ -109,12 +126,63 @@ func ParseMachine(data []byte) (*MachineDefinition, error) {
 		states[name] = node
 	}
 
+	sections, err := sectionsOf(data)
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: %w", rm.ID, err)
+	}
+	stateOrder, err := rawKeyOrder(sections, "states")
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: reading state order: %w", rm.ID, err)
+	}
+	contextOrder, err := rawKeyOrder(sections, "context")
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: reading context order: %w", rm.ID, err)
+	}
+
+	context := rm.Context
+	if len(context) == 0 {
+		// Same normalisation as an empty action list, for the same reason.
+		context = nil
+	}
+
 	return &MachineDefinition{
-		ID:      rm.ID,
-		Initial: rm.Initial,
-		Context: rm.Context,
-		States:  states,
+		ID:           rm.ID,
+		Initial:      rm.Initial,
+		Context:      context,
+		States:       states,
+		StateOrder:   stateOrder,
+		ContextOrder: contextOrder,
 	}, nil
+}
+
+// sectionsOf splits a JSON object into its raw top-level values once, so the
+// order of several sections can be read without re-parsing the whole subtree
+// for each — which made ParseMachine several times slower on a large machine.
+func sectionsOf(data []byte) (map[string]json.RawMessage, error) {
+	var sections map[string]json.RawMessage
+	if err := json.Unmarshal(data, &sections); err != nil {
+		return nil, err
+	}
+	return sections, nil
+}
+
+// rawKeyOrder reads the authored key order of one section.
+//
+// The lookup is case-insensitive because encoding/json's field matching is:
+// a machine authored with "States" or "On" decodes perfectly well, and an
+// exact-match lookup here would silently record no order for it and fall back
+// to alphabetical — the whole-file diff on save that internal/jsonorder exists
+// to prevent.
+func rawKeyOrder(sections map[string]json.RawMessage, field string) ([]string, error) {
+	if raw, ok := sections[field]; ok {
+		return jsonorder.Keys(raw)
+	}
+	for key, raw := range sections {
+		if strings.EqualFold(key, field) {
+			return jsonorder.Keys(raw)
+		}
+	}
+	return nil, nil
 }
 
 // ── Tree builder ──────────────────────────────────────────────────────────────
@@ -153,17 +221,37 @@ func parseStateNode(machineID, name string, data json.RawMessage, parent *StateN
 		return nil, fmt.Errorf("machine %q: state %q: after: %w", machineID, name, err)
 	}
 
+	sections, err := sectionsOf(data)
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: state %q: %w", machineID, name, err)
+	}
+	stateOrder, err := rawKeyOrder(sections, "states")
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: state %q: reading state order: %w", machineID, name, err)
+	}
+	onOrder, err := rawKeyOrder(sections, "on")
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: state %q: reading event order: %w", machineID, name, err)
+	}
+	afterOrder, err := rawKeyOrder(sections, "after")
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: state %q: reading after order: %w", machineID, name, err)
+	}
+
 	node := &StateNode{
-		ID:      id,
-		Type:    stateType,
-		Parent:  parent,
-		Initial: raw.Initial,
-		On:      on,
-		Entry:   entry,
-		Exit:    exit,
-		After:   after,
-		History: raw.History,
-		Target:  raw.Target,
+		ID:         id,
+		Type:       stateType,
+		Parent:     parent,
+		Initial:    raw.Initial,
+		On:         on,
+		Entry:      entry,
+		Exit:       exit,
+		After:      after,
+		History:    raw.History,
+		Target:     raw.Target,
+		StateOrder: stateOrder,
+		OnOrder:    onOrder,
+		AfterOrder: afterOrder,
 	}
 
 	if len(raw.States) > 0 {
@@ -220,6 +308,17 @@ func parseActionSpecs(data json.RawMessage) ([]ActionSpec, error) {
 		var raws []json.RawMessage
 		if err := json.Unmarshal(data, &raws); err != nil {
 			return nil, err
+		}
+		if len(raws) == 0 {
+			// An empty list and an absent one mean the same thing here: no
+			// actions. Normalising at parse is what makes the emitter's
+			// round-trip property actually true — otherwise "entry": []
+			// comes back nil and the definitions no longer compare equal.
+			//
+			// Deliberately unlike an action's params, where {} and absent are
+			// genuinely different: {} is a parameter set that happens to be
+			// empty, and specObject preserves that distinction.
+			return nil, nil
 		}
 		specs := make([]ActionSpec, 0, len(raws))
 		for _, r := range raws {

@@ -377,7 +377,10 @@ The engine has **no file-writing code at all** today — no `schema.json` writer
   - Authored order recorded at load and honoured on save; unrecorded keys sort and append
   - The authored layout turned out to be deterministic, so the round trip is byte-stable with no reformat
 
-- [ ] **XState emitter** — `MachineDefinition` back to JSON that still imports into Stately Studio.
+- [x] **XState emitter** — `MachineDefinition` back to JSON that still imports into Stately Studio.
+  - Long form emitted consistently: the authored file uses it, and the parsed form cannot recover which was written
+  - Key order recorded at parse; `internal/jsonorder` now shared with `schema.Marshal`
+  - ⚠ Unknown fields (`meta`, `description`, `tags`) are dropped — `meta` is Stately's layout. See the story.
 
 - [ ] **Dirty tracking & save/discard** — Against an on-disk snapshot, driving the shared save footer.
 
