@@ -150,7 +150,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 
 That is the whole handler. One representation, always the full document.
 
-It is worth being explicit about why, because the HTMX-shaped instinct is strong and this story is where it would take root. Datastar is **HTML over the wire via SSE**: the server renders a complete page, the page subscribes to a stream, and every subsequent change arrives as a `datastar-patch-elements` event carrying HTML. Actions (`@get`, `@post`) are not requests for a resource — their response *is* a patch stream. So there is no second representation of `/forge/schema` to negotiate, no `Datastar-Request` header to branch on, and no `history.pushState` to write, because navigation is navigation.
+It is worth being explicit about why, because the HTMX-shaped instinct is strong and this story is where it would take root. Datastar is **HTML over the wire via SSE**: the server renders a complete page, the page subscribes to a stream, and every subsequent change arrives as a `datastar-patch-elements` event carrying HTML. Actions (`@get`, `@post`) are not requests for a resource — their response *is* a patch stream. So there is no second representation of `/forge/schema` to negotiate and no `history.pushState` to write, because navigation is navigation. (The client does send a `Datastar-Request` header — verified in the v1.0.2 bundle — but it marks an action-initiated fetch, not a request for a fragment. Branching page rendering on it would be reinventing content negotiation Datastar does not ask for.)
 
 ### The page-level event stream
 
