@@ -382,9 +382,13 @@ The engine has **no file-writing code at all** today — no `schema.json` writer
   - Key order recorded at parse; `internal/jsonorder` now shared with `schema.Marshal`
   - ⚠ Unknown fields (`meta`, `description`, `tags`) are dropped — `meta` is Stately's layout. See the story.
 
-- [ ] **Dirty tracking & save/discard** — Against an on-disk snapshot, driving the shared save footer.
+- [x] **Dirty tracking & save/discard** — Against an on-disk snapshot, driving the shared save footer.
+  - Dirty is a comparison of serialised bytes, so an edit and its exact reversal comes out clean
+  - Save refuses an invalid value or an externally-modified file, without discarding the edit
 
-- [ ] **Atomic writes** — Temp file + rename, so hot reload never sees a partial file.
+- [x] **Atomic writes** — Temp file + rename, so hot reload never sees a partial file.
+  - Delegates to `natefinch/atomic`, already a dependency and already correct
+  - Its temp names are invisible to the engine watcher's `.json` filter — checked, not assumed
 
 - [ ] **Hot-reload feedback** — Surface reload success/failure in the UI, and wire `agent.Reconciler.Reconcile` via `Watcher.SetReconcileFunc` (written and tested in Epic 4, never given a caller).
 
