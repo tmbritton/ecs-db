@@ -22,6 +22,49 @@ than assumed. All three are real, and two are worse or narrower than described:
 The last one settles the design: a hand-written emitter is required, not a
 struct-tag fix.
 
+## Found while building
+
+**`ValidateMachine` accepts an `initial` that names a state which does not
+exist.** A transition targeting a missing state is rejected —
+`transition target "nowhere" is not a known state` — but the machine's own
+`initial` is not checked. Verified against the real validator:
+
+| Machine | Result |
+|---|---|
+| `"initial":"nowhere"`, no such state | **accepted** |
+| `"on":{"GO":"nowhere"}`, no such state | rejected |
+| unregistered entry action | rejected |
+| unregistered guard | rejected |
+
+**Fixed.** `ValidateMachine` now checks that every `initial` names a child of
+the state declaring it, and that a compound state with children names one at all.
+
+Scope was the subtle part. Transition targets are validated against every state
+in the machine, but `initial` chooses among *children* — validating it against
+the machine-wide set would accept a compound state whose `initial` names a state
+in an unrelated branch, which is exactly as broken at runtime as naming one that
+does not exist. Both the bare child key and the fully qualified dotted id are
+accepted, since the codebase treats those interchangeably for targets and making
+`initial` the one place a dotted id is rejected would be a trap rather than a
+rule. Parallel states are exempt: their regions are all entered at once, so an
+initial would be meaningless rather than missing.
+
+This mattered for Epic 13. Deleting a state on the statechart canvas is one
+click; if the deleted state was the machine's `initial`, the file saved clean,
+passed every validation Forge could run, and failed at runtime.
+
+| Shape | Before | After |
+|---|---|---|
+| `initial` names a missing state | accepted | rejected |
+| the state that was `initial` is deleted | accepted | rejected |
+| nested `initial` names a missing child | accepted | rejected |
+| nested `initial` names a state in another branch | accepted | rejected |
+| compound state with children and no `initial` | accepted | rejected |
+| valid flat, nested, and parallel machines | accepted | accepted |
+
+Both real machines in the repo and all 19 test packages still pass — a rule that
+rejected working files would be worse than the gap it closes.
+
 ## Stories
 
 | # | Story | Delivers |

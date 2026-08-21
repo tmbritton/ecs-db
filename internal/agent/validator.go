@@ -26,6 +26,7 @@ func (e ValidationError) Error() string {
 // ValidateMachine checks a parsed machine definition for semantic correctness:
 //   - every action and guard name exists in registry
 //   - every transition target and history default target is a known state
+//   - every initial state names a child of the state that declares it
 //   - every context key matches exactly one component field in s
 //
 // All errors are collected; the machine is rejected as a whole if any are found.
@@ -57,6 +58,14 @@ func ValidateMachine(def *MachineDefinition, registry *Registry, s schema.Databa
 			})
 		}
 	}
+
+	if def.Initial == "" && len(def.States) > 0 {
+		errs = append(errs, ValidationError{
+			MachineID: def.ID,
+			Message:   "machine has child states but no initial state",
+		})
+	}
+	errs = append(errs, validateInitial(def.ID, "", def.Initial, def.States)...)
 
 	for _, node := range def.States {
 		errs = append(errs, validateStateNode(def.ID, node, registry, knownStates)...)
@@ -136,6 +145,14 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 			errs = append(errs, validateTransition(machineID, node.ID, t, registry, knownStates)...)
 		}
 	}
+	if node.Initial == "" && requiresInitial(node) {
+		errs = append(errs, ValidationError{
+			MachineID: machineID, StateID: node.ID,
+			Message: "state has child states but no initial state",
+		})
+	}
+	errs = append(errs, validateInitial(machineID, node.ID, node.Initial, node.Children)...)
+
 	if node.Type == StateTypeHistory && node.Target != "" {
 		if !knownStates[node.Target] {
 			errs = append(errs, ValidationError{
@@ -149,6 +166,45 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 	}
 
 	return errs
+}
+
+// validateInitial checks that an initial state names one of the children it is
+// choosing between.
+//
+// Scope is the point. Transition targets are validated against every state in
+// the machine, but `initial` selects a child of the state that declares it —
+// validating it against the machine-wide set would accept a compound state
+// whose initial names a state in a different branch entirely, which is exactly
+// as broken at runtime as naming one that does not exist.
+//
+// Both forms are accepted: the bare child key as written in JSON, and the
+// child's fully qualified dotted id. The rest of the codebase treats those
+// interchangeably for targets, and making `initial` the one place a dotted id
+// is rejected would be a trap rather than a rule.
+//
+// Parallel states are exempt: their regions are all entered at once, so an
+// initial would be meaningless rather than missing. Final and history states
+// have no children to choose between.
+func validateInitial(machineID, stateID, initial string, children map[string]*StateNode) []ValidationError {
+	if initial == "" {
+		return nil
+	}
+	for name, child := range children {
+		if initial == name || initial == child.ID {
+			return nil
+		}
+	}
+	return []ValidationError{{
+		MachineID: machineID, StateID: stateID, Field: initial,
+		Message: fmt.Sprintf("initial state %q is not a child state", initial),
+	}}
+}
+
+// requiresInitial reports whether a node with children must name one to enter.
+// A compound state without an initial has no defined entry point: the engine
+// would enter it and settle in none of its children.
+func requiresInitial(node *StateNode) bool {
+	return len(node.Children) > 0 && node.Type != StateTypeParallel
 }
 
 func validateTransition(machineID, stateID string, t Transition, registry *Registry, knownStates map[string]bool) []ValidationError {

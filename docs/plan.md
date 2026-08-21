@@ -368,8 +368,10 @@ Forge writes the files the engine reads. This epic is the read/write spine: reso
 
 The engine has **no file-writing code at all** today — no `schema.json` writer, no XState emitter. Both are built here, and both have traps: Go map marshalling reorders keys, `EntityType` serializes nil slices as `null`, and `StateNode.Parent` is a back-pointer that makes naive `json.Marshal` recurse.
 
-- [ ] **Project model** — Resolve `game.toml`, mod load order, and behavior-file override semantics.
-  - Add the missing `agent.Loader.List()`/`Sources()` accessors — the machine list panel has nothing to call today
+- [x] **Project model** — Resolve `game.toml`, mod load order, and behavior-file override semantics.
+  - `agent.Loader.List()`/`Sources()` added, both returning copies
+  - Override detection derived from the loader's own behaviour, not a second copy of the rule
+  - A broken machine is a reportable problem; a broken schema is fatal
 
 - [ ] **`schema.Marshal`** — Serializer for `DatabaseSchema` that produces clean `git diff`s.
 

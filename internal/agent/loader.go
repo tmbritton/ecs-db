@@ -129,6 +129,39 @@ func (l *Loader) ReloadFile(path, modName string, fn ReconcileFunc) error {
 	return nil
 }
 
+// List returns the currently loaded machines keyed by ID.
+//
+// The map is a copy. The loader's own map is replaced entry-by-entry by
+// ReloadFile under lock, driven by the watcher goroutine, so handing out the
+// real map would both race with it and let a caller unload a machine from the
+// running engine by deleting a key.
+//
+// The copy is shallow, and deliberately so: ReloadFile *replaces* the pointer
+// rather than mutating a definition in place, so a caller holding an older
+// pointer sees a consistent previous version rather than a torn new one.
+func (l *Loader) List() map[string]*MachineDefinition {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	out := make(map[string]*MachineDefinition, len(l.machines))
+	for id, def := range l.machines {
+		out[id] = def
+	}
+	return out
+}
+
+// Sources returns machineID → "modName:filepath" for every loaded machine, as
+// a copy, on the same terms as List. This is what tells the machine-list panel
+// which mod a machine came from.
+func (l *Loader) Sources() map[string]string {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	out := make(map[string]string, len(l.sources))
+	for id, src := range l.sources {
+		out[id] = src
+	}
+	return out
+}
+
 // Get returns the currently active definition for machineID, or (nil, false)
 // if the machine has never been successfully loaded.
 func (l *Loader) Get(machineID string) (*MachineDefinition, bool) {
