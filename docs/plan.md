@@ -1,6 +1,6 @@
 # Plan: ECS-in-SQLite game engine with declarative behaviors
 
-Implementation plan derived from the architecture doc. Build the schema system as a complete unit first, then the agents runtime, then a working monolithic game (interpreter + Ebitengine renderer in one binary), then the debugger as the one natural process boundary, then time-travel, effects, and polish. Each epic will be refined into concrete tasks in a follow-up pass.
+Implementation plan derived from the architecture doc. Build the schema system as a complete unit first, then the agents runtime, then a working monolithic game (interpreter + Ebitengine renderer in one binary), then the debugger as the one natural process boundary, then time-travel, effects, and polish. Epics 10 onward build **Forge**, the content-authoring front-end, against the file formats and read layer the engine epics establish. Each epic will be refined into concrete tasks in a follow-up pass.
 
 ---
 
@@ -200,14 +200,18 @@ Refined into stories: See [`docs/stories/epic-5/`](docs/stories/epic-5/).
 
 ---
 
-## Epic 6: Debugger process
+## Epic 6: Debugger read layer
 
-The one natural process boundary: read-only, different lifecycle, optional in shipped builds, remotely accessible. This is where the "SQLite as game state" benefits become most tangible. The debugger is where you answer "what happened and why?" without touching the game.
+The one natural process boundary: read-only, different lifecycle, optional in shipped builds, remotely accessible. This is where the "SQLite as game state" benefits become most tangible — where you answer "what happened and why?" without touching the game.
 
-- [ ] **HTTP server binary** — Go, using standard library `net/http` and a pure-Go SQLite driver.
-  - Opens `world.sqlite` read-only with WAL
-  - Polls `world_version` on each refresh; skips full query when unchanged
-  - Refuses to start on `schema_version` mismatch
+Scope note: this epic delivers the **read layer and its HTTP routes**, not a bespoke UI. Forge's LIVE mode (Epic 18) is the graphical debugger, and consumes the same `internal/inspect` package in-process. The JSON and ASCII routes remain valuable on their own — they are what `curl`, `watch`, and a phone over SSH talk to.
+
+- [ ] **`internal/inspect` read-only query layer** — The reusable core, no HTTP in it.
+  - Opens the game database read-only (`file:<path>?mode=ro`), never through `NewSQLiteStore` (which bootstraps and migrates)
+  - Reads the `world_version` watermark; callers skip the full query when unchanged
+  - Refuses to attach on `schema_version` mismatch (`storage.ReadSchemaVersion`)
+
+- [ ] **HTTP server binary** — Go, standard library `net/http`, pure-Go SQLite driver.
 
 - [ ] **Endpoint: entities** — Roster view.
   - All entities with type and a summary of attached components
@@ -218,6 +222,7 @@ The one natural process boundary: read-only, different lifecycle, optional in sh
 - [ ] **Endpoint: transitions** — The "why did the goblin attack?" view.
   - Most recent N, newest first, filterable by `entity_id`, `machine_id`, event type
   - Shows `from_states`, `to_states`, `cond_result`, `actions_run`
+  - `transitions` is write-only today; this story adds the first read API
 
 - [ ] **Endpoint: schema** — Reference data.
   - Serve current `schema.json` verbatim
@@ -226,10 +231,6 @@ The one natural process boundary: read-only, different lifecycle, optional in sh
   - Entity positions, types, and key component values rendered as text
   - Replaces a separate "second renderer process" — same information, one HTTP route
   - Works with `curl` and `watch` for zero-setup monitoring
-
-- [ ] **Single-page HTML UI** — Polls the endpoints, no build step.
-  - Auto-refreshes; per-entity drill-in: state, context, recent transitions
-  - Filter transitions by entity / machine / event
 
 - [ ] **Remote debugging verified** — A claim only worth making if tested.
   - Confirm working over Tailscale and over SSH tunnel from a phone
@@ -319,6 +320,203 @@ Run reliably during development; ship cleanly. Two processes: the game binary an
 
 ---
 
+## Epic 10: Forge — foundation, toolchain & design system
+
+**Refined into stories:** See [`docs/stories/epic-10/`](stories/epic-10/).
+
+Forge is the content-authoring front-end for the engine — a single-window, six-mode editor for `schema.json`, `behaviors/*.json`, tilemaps, tilesets and sprite animations, served as a webapp from this same binary. The UI is recreated from a design handoff — a written spec plus an interactive HTML prototype — kept in [Claude Design](https://claude.ai/design/p/d2402254-cab9-4972-9987-bf689dc6329a) rather than vendored into this repo. See [`docs/stories/epic-10/README.md`](stories/epic-10/README.md) for what it contains and how to work against it.
+
+This epic is the floor everything else stands on: a `forge` subcommand that builds and runs without X11 or CGO, the Go + Templ + Datastar toolchain, and the token/primitive layer every later mode renders through. The "technical instrument" look — dark, dense, mono-labelled, 2px hard borders, no rounded corners, no gradients — is load-bearing for the product's identity and is specified exactly in the handoff.
+
+- [ ] **CLI restructure** — Split the Cobra tree out of the `ebitengine` build tag so Forge can build headless.
+  - `cmd/game/` → `cmd/ecs-db/`; root command `Use: "ecs-db"` with `run`, `schema validate`, `forge`
+  - Tag-free root; `run` behind `//go:build ebitengine` with a `!ebitengine` stub that errors clearly
+  - `make build-headless` proves `CGO_ENABLED=0 go build ./cmd/ecs-db` works with no tags
+
+- [ ] **Web toolchain** — templ + Datastar + embedded assets, no frontend build step.
+  - `github.com/a-h/templ` as a go.mod `tool` dependency; `templ generate` wired into `make generate`
+  - Datastar Go SDK `github.com/starfederation/datastar-go`; client JS vendored under `static/js/vendor/`
+  - `internal/forge/web/static/` served from `go:embed`; self-hosted fonts, no CDN
+  - `internal/forge/server` — `net/http`, `[forge]` config section, graceful shutdown
+
+- [ ] **Design tokens** — The palette and type system as CSS custom properties.
+  - Surfaces, borders, four text weights, five semantic accents (amber/green/cyan/violet/red)
+  - Chakra Petch for UI, JetBrains Mono for anything the engine owns
+  - 2px borders, no border-radius, no gradients, hard offset shadows; `fpulse`/`fblink`/`fdash` keyframes
+
+- [ ] **Templ primitives** — Panel, SectionHeading, ListRow, Chip, SegmentedControl, Dropdown, Checkbox, IconButton, ContextMenu, ModalShell, SaveFooter.
+
+- [ ] **App shell** — Menu bar, 62px mode rail with the six modes + settings cog, routed mode content.
+
+- [ ] **Engine-status readout** — Connected vs watcher-offline, pushed over SSE.
+
+---
+
+## Epic 11: Forge — project model & engine file I/O
+
+Forge writes the files the engine reads. This epic is the read/write spine: resolve a project, round-trip its files, track dirty state, and save without ever letting the engine's fsnotify watcher see a half-written file.
+
+The engine has **no file-writing code at all** today — no `schema.json` writer, no XState emitter. Both are built here, and both have traps: Go map marshalling reorders keys, `EntityType` serializes nil slices as `null`, and `StateNode.Parent` is a back-pointer that makes naive `json.Marshal` recurse.
+
+- [ ] **Project model** — Resolve `game.toml`, mod load order, and behavior-file override semantics.
+  - Add the missing `agent.Loader.List()`/`Sources()` accessors — the machine list panel has nothing to call today
+
+- [ ] **`schema.Marshal`** — Serializer for `DatabaseSchema` that produces clean `git diff`s.
+
+- [ ] **XState emitter** — `MachineDefinition` back to JSON that still imports into Stately Studio.
+
+- [ ] **Dirty tracking & save/discard** — Against an on-disk snapshot, driving the shared save footer.
+
+- [ ] **Atomic writes** — Temp file + rename, so hot reload never sees a partial file.
+
+- [ ] **Hot-reload feedback** — Surface reload success/failure in the UI, and wire `agent.Reconciler.Reconcile` via `Watcher.SetReconcileFunc` (written and tested in Epic 4, never given a caller).
+
+---
+
+## Epic 12: Forge — SCHEMA & ENTS modes
+
+Both halves of `schema.json`: components with a live generated-DDL preview, and entity types with their component contracts. The DDL panel is driven by the **real** generator, so the preview cannot drift from what the interpreter emits.
+
+- [ ] **SCHEMA mode** — Component list, `v<N>` schemaVersion badge, shape cycling, fields table, behavior binding, reserved-`Behavior`-name enforcement.
+
+- [ ] **Generated-SQL panel** — Live `CREATE TABLE comp_*` via `storage.MigrateComponent`.
+  - Fix first: `componentTableBuilder.go` iterates the properties map unsorted, so column order is non-deterministic and a live preview visibly reshuffles
+
+- [ ] **Migration framing** — `schema.Diff` against the live DB shape, rendered as the migration warning; `MigrationConfirm` policy surfaces destructive statements in a confirmation dialog.
+
+- [ ] **ENTS mode** — Type list and editor: primary behavior, required/optional component chips, validation level, allow-extras, read-only CONTEXT SEEDS panel.
+
+- [ ] **Usage panel** — Spawn and live-instance counts; degrades gracefully with no database attached.
+
+- [ ] **Inline validation** — `ValidateSchema` + `ValidateBehaviorRefs` (the latter has no caller anywhere today), plus a live warning when a context key matches two components' fields.
+
+---
+
+## Epic 13: Forge — AGENTS mode
+
+Visual authoring of behavior machines that round-trips with Stately Studio and hot-swaps into a running game. The statechart canvas is one of only two hand-written client-JS surfaces in Forge; everything else is Datastar-driven hypermedia.
+
+The action/guard dropdowns are fed from `agent.Registry.Actions()`/`Guards()`, which already expose `ParamSchema` metadata and a written description per built-in. Those methods were written for exactly this and have never had a caller.
+
+- [ ] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`.
+
+- [ ] **Statechart canvas** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu, click to select. Layout persists in a sidecar so the machine JSON stays valid Stately input.
+
+- [ ] **Transition inspector** — Event dropdown, `cond` dropdown, and a param form generated from the guard's registered schema. Registered names only, never free-typed.
+
+- [ ] **State inspector** — Name, entry actions, set-initial.
+
+- [ ] **Validation** — `agent.ValidateMachine` returns every error at once; render them as a list.
+
+- [ ] **XState v4 round-trip** — Import an exported Stately machine, edit, save, re-import.
+
+---
+
+## Epic 14: Tiled map & tileset formats
+
+An engine epic, and the largest prerequisite in the Forge sequence. The map is a bespoke TOML file of `.` and `#` characters with no tilesets, no layers and no spawns; Forge's MAP and TILES modes have no format to write to until this lands.
+
+There is a subtler problem: `LoadMap` is a one-time bootstrap that skips entirely if any `Tile` entity exists, so after first run the database — not the file — is the source of truth. A map edited in Forge would appear to do nothing.
+
+- [ ] **TMX/TMJ parser** — Multiple tile layers, CSV and base64/zlib encodings, map properties.
+
+- [ ] **TSX tileset parser** — Image reference, tile size, margin/spacing, per-tile custom properties for collision / terrain / class / animation.
+
+- [ ] **Passability from tile properties** — `TileGrid.Rebuild` stops keying off `'#'`.
+
+- [ ] **Map re-import semantics** — Diff the file's tiles against `comp_tile` instead of skipping when tiles exist.
+
+- [ ] **Tileset rendering** — Draw tile layers from tileset images rather than colouring by `tile_type` string.
+
+- [ ] **Object-layer spawns** — Entity type + component overrides at startup, replacing `ensurePlayerEntity`/`ensureGoblinEntity`.
+
+- [ ] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
+
+- [ ] **Migrate `level1.toml` → `level1.tmx`** — Plus a starter tileset and a `game.toml` update.
+
+---
+
+## Epic 15: Forge — MAP mode (AUTHORED)
+
+The core map editor: layers, tile painting, spawn placement and spawn editing. The paint canvas is the second and last hand-written client-JS surface.
+
+- [ ] **Layer panel & tileset palette** — Visibility toggles, active row, tile selection.
+
+- [ ] **Paint canvas** — Stamp / rect / eraser / select, rotate and flip, grid and snap toggles.
+
+- [ ] **Spawn placement** — Drag from the entity-type palette onto the canvas; serialized as TMX objects.
+
+- [ ] **Spawn inspector** — Behavior dropdown, component list with required locks and context-seed badges, attach/detach.
+
+- [ ] **Context menus** — Layers, tiles, spawns.
+
+---
+
+## Epic 16: Forge — TILES & SPRT modes
+
+Tileset metadata authoring and sprite-sheet slicing. Both write formats the engine already hot-reloads.
+
+- [ ] **TILES mode** — Tileset grid and enlarged tile with Collision / Animation / Terrain / Class tabs, written as TSX per-tile properties.
+
+- [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
+  - Constrain the UI to what the renderer supports: 1×N horizontal strips of `tileSize` squares, frames as column indices. Multi-row grids are renderer work.
+
+- [ ] **Import Sprite Sheet dialog** — Wired to the slicing flow.
+
+---
+
+## Epic 17: Forge — dialogs & preferences
+
+The modal set, each computing its live derived values, backed by a persisted preferences store.
+
+- [ ] **Map dialogs** — New Map, Open Map, Map Properties, Resize Map (9-point anchor + clip warning).
+
+- [ ] **Asset dialogs** — Add Tileset (live tile-count grid), Import Sprite Sheet (frame count, grid, loop duration).
+
+- [ ] **Shell dialogs** — Keyboard Shortcuts, Preferences, About.
+
+- [ ] **Preferences persistence** — Written to disk, restored on launch.
+
+---
+
+## Epic 18: Forge — LIVE inspector
+
+The LIVE source lens: attach read-only to a running game and inspect it. This is the graphical debugger the Epic 6 read layer was built for, and the first place Forge touches the database rather than files.
+
+Forge writes nothing here. The one-writer-per-table contract is honoured by construction — a read-only connection, asserted in a test.
+
+- [ ] **Read-only attach** — Via `internal/inspect`; `schema_version` gate; the DB path comes from `cfg.Database.Path`.
+
+- [ ] **`world_version`-gated SSE streaming** — The watermark has had a producer since Epic 5 and no consumer; this is the consumer.
+
+- [ ] **Live map overlays** — Entity positions, hp labels, aggro radii; paint tools gated off; tick readout with step/pause.
+
+- [ ] **Live debugger inspector** — Statechart with the active state lit, plus a filtered transitions history list.
+
+---
+
+## Epic 19: Forge — REPLAY & time-travel
+
+The REPLAY source lens: scrub the `transitions` log with checkpoints, breakpoints and forking. The headline capability of the architecture, delivered as an authoring-tool feature.
+
+- [ ] **Timeline dock** — Transition-density waveform, scrub, checkpoint diamonds, breakpoint markers, playhead.
+
+- [ ] **Fork from tick** — Branch a new session from any point in the log.
+
+- [ ] **Transition history navigation** — Click a transition to jump the timeline; entity trails on the canvas.
+
+---
+
+## Epic 20: Forge — query layers
+
+Saved SQL predicates rendered as map overlays — `hp < 20% · pulse`, aggro ranges — toggled like any other layer. Debug views authored in SQL rather than compiled in.
+
+- [ ] **Query layer authoring** — Named, parameterised, read-only predicates with per-layer styling.
+
+- [ ] **Overlay rendering** — Matching live entities highlighted on the map canvas.
+
+---
+
 ## Deferred / not yet epics
 
 Listed here so they aren't forgotten, but explicitly out of scope until earlier epics are real:
@@ -326,6 +524,4 @@ Listed here so they aren't forgotten, but explicitly out of scope until earlier 
 - **Extract renderer process** — The "database as contract" convention within the monolith can be promoted to an enforced process boundary if a concrete need surfaces (different graphics language, crash isolation requirements, multi-renderer). The architecture supports it; it is not currently scheduled.
 - WASM browser deployment (interpreter to wasm32, SQLite-WASM, JS renderer like Phaser)
 - Lua actions and guards — extend the action library for mods without WASM; registry already designed for this (`LuaActionHandler` implements `ActionHandler`)
-- Visual state machine editor (web UI; introspects registry and schema.json for action/guard pickers)
-- Schema visual editor with automatic migration generation
 - Networked multiplayer via replicated `event_queue` and deterministic lockstep

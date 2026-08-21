@@ -5,3 +5,11 @@ bin/
 *.sqlite
 .claude/
 /game
+
+# Playwright screenshots
+tmp/
+
+# Design handoff bundle for Forge — the .dc.html prototypes plus their runtime
+# are ~430K of vendored reference material. Kept locally, not in the repo.
+# See docs/stories/epic-10/README.md for where to get it.
+docs/design_handoff_forge_editor/

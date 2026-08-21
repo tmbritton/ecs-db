@@ -1,5 +1,21 @@
 [tools]
-go = "1.26"
+go            = "1.26"
 golangci-lint = "latest"
-staticcheck = "latest"
-gofumpt = "latest"
+staticcheck   = "latest"
+gofumpt       = "latest"
+
+# sqlite3 CLI. Not a build dependency — the engine uses the pure-Go
+# modernc.org/sqlite driver — but the architecture treats `sqlite3 ecs.db` as a
+# first-class debugging tool, so pin it rather than hoping it's on the box.
+sqlite = "latest"
+
+# Node exists only for Playwright: scripts/screenshot.js and the Playwright MCP
+# server, both used to verify Forge's UI against the design handoff. Forge
+# itself has no frontend build step.
+node                 = "26"
+"npm:playwright"     = "latest"
+"npm:@playwright/mcp" = "latest"
+
+# Deliberately NOT here: templ. It's a go.mod `tool` dependency
+# (`go run github.com/a-h/templ/cmd/templ generate`), so its version is locked
+# to the module and a clean checkout needs no extra install step.
