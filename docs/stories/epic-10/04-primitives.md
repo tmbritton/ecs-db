@@ -33,6 +33,33 @@ The two rows that carry meaning beyond layout are worth naming up front. A **chi
 - [x] Table-driven render tests per primitive asserting the state-carrying output — active row emits the active class, required chip emits `🔒` and not `✕`, unchecked checkbox emits no `✓`, non-dirty save footer disables both buttons
 - [x] `go test ./...` passes
 
+## Playwright steps
+
+`e2e/specs/04-primitives.spec.js`, driving the `/dev/tokens` gallery. This is the
+spec that would have caught the defect this story shipped: every handler in the
+package was inert, and the markup, the unit tests and the screenshots were all
+correct. So these assert on **effects** — a request on the wire, a class that
+changed — never on the presence of an attribute.
+
+- [x] Each action-bearing primitive fires and reaches `POST /dev/noop`:
+      ListRow, Chip remove, SegmentedControl, IconButton, ContextMenu, SaveFooter
+- [x] A disabled IconButton fires nothing
+- [x] The SegmentedControl's radios share one browser-assigned `name` — that is
+      what makes them exclusive, and Datastar derives it from the bound signal,
+      so its absence means the control's value never enters the signal store
+- [x] Selecting a segment moves the selection
+- [x] The Dropdown is signal-bound
+- [x] The modal dismisses from the scrim, **and does not** dismiss from a click
+      inside the dialog, **and does not** dismiss from a click elsewhere on the
+      page — three separate tests, because the two wrong implementations each
+      pass one of them
+- [x] Accessibility, stated explicitly since test-id selectors do not check it
+      by accident: an activatable row is a real `<button>`; the chip's remove
+      control is not announced as `✕`; clipped radio and checkbox inputs remain
+      in the focus order; the dialog is `aria-modal` with an accessible name
+- [x] Selection reads as the active fill plus an amber edge, and hover does not
+      erase it
+
 ## Notes
 
 - Test templ components by rendering to a `bytes.Buffer` via `Component.Render(ctx, &buf)` and asserting on the output. Assert on the *meaningful* signal — a class name, a glyph, a `disabled` attribute — not on whole-HTML equality, which turns every future style tweak into a test failure.

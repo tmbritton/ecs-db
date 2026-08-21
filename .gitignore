@@ -6,8 +6,14 @@ bin/
 .claude/
 /game
 
-# Playwright screenshots
+# Playwright screenshots, and the generated e2e fixture database
 tmp/
+
+# Playwright run artefacts
+e2e/test-results/
+e2e/playwright-report/
+test-results/
+playwright-report/
 
 # Design handoff bundle for Forge — the .dc.html prototypes plus their runtime
 # are ~430K of vendored reference material. Kept locally, not in the repo.

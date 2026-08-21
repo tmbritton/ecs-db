@@ -15,8 +15,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/starfederation/datastar-go/datastar"
+
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 )
 
 // Config is the subset of application config the HTTP layer needs.
@@ -29,8 +33,23 @@ type Server struct {
 	static fs.FS
 	http   *http.Server
 
-	mu sync.Mutex
-	ln net.Listener
+	// Shutdown cancels this, which releases every open SSE stream. An SSE
+	// handler blocks for the life of its connection and http.Server.Shutdown
+	// waits for in-flight requests, so without it, stopping Forge would block
+	// for as long as a browser tab held a stream open.
+	//
+	// It is deliberately scoped to streams rather than wired through
+	// http.Server.BaseContext. A base context would cancel *every* in-flight
+	// request, and templ checks ctx.Err() at each component boundary — so an
+	// ordinary page render caught by Ctrl-C would be abandoned mid-write and
+	// the client would receive a truncated 200. That turns graceful shutdown
+	// into abortive shutdown for the whole server.
+	streamsCtx    context.Context
+	cancelStreams context.CancelFunc
+
+	mu      sync.Mutex
+	ln      net.Listener
+	streams int
 }
 
 func New(cfg Config, static fs.FS) *Server {
@@ -40,7 +59,8 @@ func New(cfg Config, static fs.FS) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = config.DefaultForgeAddr
 	}
-	s := &Server{cfg: cfg, static: static}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{cfg: cfg, static: static, streamsCtx: ctx, cancelStreams: cancel}
 	s.http = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           s.routes(),
@@ -57,8 +77,75 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
+	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
+	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
 	return mux
+}
+
+// handleMode serves one mode as a complete page. That is the only
+// representation there is: Datastar renders a whole document, the page
+// subscribes to an SSE stream, and every later change arrives as an HTML patch
+// pushed down it. There is no fragment form of a mode and nothing to
+// content-negotiate — switching modes is ordinary navigation, which is what
+// makes deep links, bookmarks and the back button work for free.
+func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
+	m, ok := mode.Lookup(r.PathValue("mode"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	content, ok := modes.Registry[m.Slug]
+	if !ok {
+		// mode.All and modes.Registry are checked against each other in
+		// modes/registry_test.go, so this is unreachable — but rendering a nil
+		// component panics, and a 500 is a better failure than a dead process.
+		slog.ErrorContext(r.Context(), "no content registered for mode", "mode", m.Slug)
+		http.Error(w, "mode not available", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, templates.Shell(m, content()))
+}
+
+// handleModeEvents is the single SSE subscription a mode page opens.
+// Everything that updates live on that page is pushed down this one stream —
+// one per page, not one per widget, because browsers cap concurrent
+// connections per origin.
+//
+// It holds the connection open and sends nothing yet. Story 6 pushes the
+// engine-status readout through it; later epics add each mode's live data.
+func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
+	if _, ok := mode.Lookup(r.PathValue("mode")); !ok {
+		http.NotFound(w, r)
+		return
+	}
+	// The stream ends when the client goes away *or* when the server is
+	// shutting down, and nothing else in the process is affected by the latter.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	defer context.AfterFunc(s.streamsCtx, cancel)()
+
+	sse := datastar.NewSSE(w, r, datastar.WithContext(ctx))
+
+	s.mu.Lock()
+	s.streams++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.streams--
+		s.mu.Unlock()
+	}()
+
+	<-sse.Context().Done()
+}
+
+// openStreams reports how many SSE connections are currently held open. It
+// exists so the shutdown test can prove a stream was actually open rather than
+// passing because the request never arrived.
+func (s *Server) openStreams() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.streams
 }
 
 // handleDevNoop is the sink the /dev/tokens gallery posts to. The gallery
@@ -98,12 +185,14 @@ func (s *Server) handleDevTokens(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// "GET /" is a catch-all in net/http's pattern syntax, so anything that
-	// matched no other route lands here. Only the root is a real page.
+	// matched no other route lands here.
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, r, templates.Layout("Forge"))
+	// The root is not a page of its own — it lands you in the default mode, so
+	// there stays exactly one canonical URL per mode.
+	http.Redirect(w, r, mode.Default.Path(), http.StatusFound)
 }
 
 // render writes a templ component as a complete HTML document.
@@ -146,7 +235,13 @@ func (s *Server) Serve() error {
 	return err
 }
 
-func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
+// Shutdown stops the server. Releasing the SSE streams first is what makes it
+// return: they would otherwise keep Shutdown waiting for the life of every
+// open browser tab. Ordinary requests are left to finish normally.
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.cancelStreams()
+	return s.http.Shutdown(ctx)
+}
 
 // Addr reports the address actually bound once Listen has run, falling back to
 // the configured address before that.

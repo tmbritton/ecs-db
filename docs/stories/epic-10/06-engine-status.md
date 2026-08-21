@@ -49,6 +49,37 @@ This is the first thing to travel down Forge's SSE stream, and it is deliberatel
 - [ ] Table-driven tests covering all three states, using temp-file databases
 - [ ] `go test ./...` passes
 
+## Playwright steps
+
+`e2e/specs/06-engine-status.spec.js`, to be written **before** the handler. This
+is the first thing to travel down Forge's SSE stream, and the failure mode is
+the one the whole suite exists for: a status that never arrives looks exactly
+like a status that has not changed.
+
+The fixture project's database is at `tmp/e2e/e2e.db` with `schema_version` 7,
+matching `e2e/fixtures/project/schema.json`. All three states are reachable by
+manipulating that file, which is why the suite seeds its own rather than
+pointing at the developer's.
+
+- [ ] Connected: the readout shows the green marker and `hot-reload live`, and
+      names the fixture's own values (`v7`, `mods/e2e-core`) — which also proves
+      Forge read the fixture project rather than the repo's
+- [ ] The first patch arrives **without waiting a full poll interval**, so a
+      reconnecting client is not briefly blank
+- [ ] The patch is HTML on the page's existing stream, not a second connection:
+      assert the page still holds exactly one event-stream request
+- [ ] Deleting the database mid-stream flips the readout to `watcher offline`
+      within one poll interval — the test that actually pins the story's promise
+- [ ] Restoring it flips back to connected
+- [ ] A `schema_version` that disagrees renders the mismatch state with **both**
+      version numbers, and is distinguishable from offline
+- [ ] Identical status does **not** re-patch: count `datastar-patch-elements`
+      frames over several intervals and assert the count stops growing once the
+      state is steady
+- [ ] Closing the tab ends the handler — assert the server's open-stream count
+      returns to zero
+- [ ] Forge leaves no `-wal`/`-shm` files behind in the project directory
+
 ## Notes
 
 - Read-only is a correctness requirement, not a nicety. The architecture's one-writer-per-table contract makes the interpreter the sole writer of world state; Forge attaching read-write would be the architectural bug the contract exists to prevent. Add a test that asserts a write through this connection fails.

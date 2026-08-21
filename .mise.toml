@@ -9,11 +9,17 @@ gofumpt       = "latest"
 # first-class debugging tool, so pin it rather than hoping it's on the box.
 sqlite = "latest"
 
-# Node exists only for Playwright: scripts/screenshot.js and the Playwright MCP
-# server, both used to verify Forge's UI against the design handoff. Forge
-# itself has no frontend build step.
-node                 = "26"
-"npm:playwright"     = "latest"
+# Node exists only for Playwright: the e2e suite in e2e/, scripts/screenshot.js,
+# and the Playwright MCP server — all used to verify Forge's UI against the
+# design handoff. Forge itself still has no frontend build step; nothing here is
+# needed to build or run the binary.
+#
+# playwright and @playwright/test are pinned to the same version on purpose: the
+# runner and the browser bundle ship together, and a drift between them fails in
+# ways that read like test bugs.
+node                  = "26"
+"npm:playwright"      = "1.62.1"
+"npm:@playwright/test" = "1.62.1"
 "npm:@playwright/mcp" = "latest"
 
 # Deliberately NOT here: templ. It's a go.mod `tool` dependency

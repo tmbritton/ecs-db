@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 7,
+  "components": {
+    "Position": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "Health": {
+      "type": "object",
+      "properties": {
+        "hp":    { "type": "integer" },
+        "maxHp": { "type": "integer" }
+      }
+    },
+    "E2EProbe": {
+      "type": "object",
+      "properties": {
+        "marker": { "type": "string" }
+      }
+    }
+  },
+  "entityTypes": {
+    "TestDummy": {
+      "requiredComponents": ["Position", "E2EProbe"],
+      "optionalComponents": ["Health"],
+      "validationLevel": "strict",
+      "allowExtraComponents": false
+    },
+    "TestGoblin": {
+      "behavior": "e2e-wander",
+      "requiredComponents": ["Position", "Health"],
+      "validationLevel": "strict",
+      "allowExtraComponents": false
+    }
+  }
+}

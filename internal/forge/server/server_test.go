@@ -37,11 +37,13 @@ func TestRoutes(t *testing.T) {
 		wantHeaders map[string]string
 	}{
 		{
-			name:       "index renders the layout",
-			path:       "/",
-			wantStatus: http.StatusOK,
-			// The page must link Datastar and both stylesheets, or nothing
-			// downstream in Epic 10 works.
+			// Every page must link Datastar, or nothing on it is interactive.
+			// "/" is not asserted here: it redirects, and the client follows,
+			// so a case pointed at "/" would silently be testing this page
+			// anyway. TestRoot_RedirectsToDefaultMode covers the redirect.
+			name:        "a mode page links Datastar",
+			path:        "/forge/map",
+			wantStatus:  http.StatusOK,
 			wantBody:    "/static/js/vendor/datastar.js",
 			wantHeaders: map[string]string{"Content-Type": "text/html; charset=utf-8"},
 		},
@@ -96,28 +98,6 @@ func TestRoutes(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// The index must render a complete document. Datastar's model is a full page
-// load plus an SSE subscription — if this ever starts returning a fragment,
-// something has reintroduced content negotiation.
-func TestIndex_ReturnsCompleteDocument(t *testing.T) {
-	srv := newTestServer(t)
-	resp, err := srv.Client().Get(srv.URL + "/")
-	if err != nil {
-		t.Fatalf("GET /: %v", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("reading body: %v", err)
-	}
-	for _, want := range []string{"<!doctype html>", "<html", "</html>"} {
-		if !strings.Contains(strings.ToLower(string(body)), want) {
-			t.Errorf("body missing %q — not a complete document", want)
-		}
 	}
 }
 

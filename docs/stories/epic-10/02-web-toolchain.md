@@ -103,6 +103,24 @@ console errors, Datastar's module initialises, and both fonts load *and apply*
 from the embedded FS — checked with `document.fonts.check()` rather than trusting
 that a 200 on the woff2 meant the `@font-face` was right.
 
+## Playwright steps
+
+`e2e/specs/02-toolchain.spec.js`. This story's claim — that Forge is
+self-contained and needs no network — is a claim about what the browser fetches,
+so it can only be checked in a browser.
+
+- [x] Every request the page makes is same-origin; a CDN reference would work on
+      the developer's machine and fail on a plane
+- [x] All four assets are actually requested: `fonts.css`, `tokens.css`,
+      `forge.css`, `datastar.js`
+- [x] Datastar **executed**, not merely 200'd — inject a `data-text` element at
+      runtime and confirm the framework processes it. A bundle that failed to
+      parse leaves every attribute inert and reports nothing
+- [x] Both webfonts report `status === "loaded"`, so a silent substitution to a
+      system sans cannot pass a screenshot review
+- [x] Static assets carry `immutable`; `/static/`, `/static/css/` and
+      `/static/js/vendor/` are not browsable
+
 ## Notes
 
 - Client bundle source: `https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.2/bundles/datastar.js`. Download once, commit it, record the version. Do **not** reference the CDN at runtime.

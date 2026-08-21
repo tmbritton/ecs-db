@@ -680,6 +680,173 @@ button.list-row:not(.list-row--active):hover {
   cursor: default;
 }
 
+/* --- app shell -------------------------------------------------------------
+   Menu bar across the top, mode rail down the left, mode content filling the
+   rest. Full viewport, no page scroll: scrolling belongs inside panels, so a
+   mode with a long list scrolls its own panel rather than pushing the rail and
+   the menu bar off screen. */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.shell__body {
+  display: flex;
+  flex: 1;
+  /* Load-bearing. A flex child's default min-height is auto, so without this
+     a tall mode grows the row instead of scrolling inside it. */
+  min-height: 0;
+}
+
+.shell__content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--ink);
+}
+
+/* --- menu bar --- */
+
+.menubar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: none;
+  padding: 7px 14px;
+  background: var(--raised);
+  border-bottom: var(--border-w) solid var(--border);
+}
+
+.menubar__wordmark {
+  font-weight: 600;
+  color: var(--amber);
+  letter-spacing: 1.5px;
+}
+
+/* The menus open dialogs that arrive in Epic 17. They render as disabled
+   buttons: no pointer cursor, no hover, and announced as disabled — an
+   affordance that says "not yet" rather than one that silently does nothing. */
+.menu__item {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  cursor: default;
+}
+
+/* Dimmed uniformly rather than recoloured, so the menu bar keeps the design's
+   hue relationships (Engine stays amber) while still reading as not-yet-live.
+   Remove when Epic 17 wires the dialogs. */
+.menu__item:disabled {
+  opacity: 0.6;
+}
+
+.menu__item--accent:disabled {
+  color: var(--amber);
+}
+
+.menubar__status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* --- mode rail --- */
+
+.rail {
+  width: var(--rail-w);
+  flex: none;
+  background: var(--raised);
+  border-right: var(--border-w) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+}
+
+.rail__btn {
+  width: 46px;
+  padding: 7px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: none;
+  border: var(--border-w) solid var(--border);
+  /* Overrides the global anchor colour: an inactive mode is dim, and amber
+     means "this is the mode you are in". */
+  color: var(--text-dim);
+  text-decoration: none;
+  /* 10px/1.35 for both lines is what makes the button 46px square, matching
+     the rail in the design. Enlarging the glyph pushes it to 52px and the rail
+     stops reading as a column of squares. */
+  font-size: 10px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.rail__btn:not(.rail__btn--active):hover {
+  color: var(--text);
+  border-color: var(--border-hi);
+}
+
+.rail__btn--active,
+.rail__btn--active:hover {
+  background: var(--ink);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.rail__caption {
+  letter-spacing: 0.5px;
+}
+
+/* Pinned to the bottom of the rail. Disabled until Epic 17 wires Preferences —
+   there is no /forge/settings route, and a 404 in the primary navigation is
+   worse than a control that plainly is not ready. */
+.rail__cog {
+  margin-top: auto;
+  cursor: default;
+}
+
+.rail__cog:disabled {
+  color: var(--text-faint);
+}
+
+/* --- mode stubs ------------------------------------------------------------
+   Placeholders until Epics 12-16. Each names itself and the epic that replaces
+   it, so an unfinished build reads as unfinished rather than as broken. */
+
+.mode-stub {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+}
+
+.mode-stub__summary {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--text-dim);
+}
+
+.mode-stub__epic {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 /* --- /dev/tokens reference page -------------------------------------------
    A development aid, not part of the app shell. */
 

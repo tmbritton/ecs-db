@@ -1,0 +1,35 @@
+# The project the e2e suite points Forge at.
+#
+# Deliberately NOT the repo's own project. Every value here is distinctive —
+# schemaVersion 7 rather than 3, components and entity types prefixed with
+# "E2E"/"Test", a mod named "e2e-core" — so that a test asserting on them is
+# also asserting that Forge read *this* project. If a path resolution bug made
+# it fall back to the repo's real schema.json, the assertions fail loudly
+# instead of passing against the wrong data.
+#
+# Paths are relative to the repo root, which is where the suite runs Forge.
+
+[database]
+path = "./tmp/e2e/e2e.db"
+
+[schema]
+path = "./e2e/fixtures/project/schema.json"
+
+[[mods]]
+name      = "e2e-core"
+behaviors = "./e2e/fixtures/project/behaviors/"
+actions   = "./e2e/fixtures/project/actions/"
+guards    = "./e2e/fixtures/project/guards/"
+assets    = "./e2e/fixtures/project/assets/"
+
+[window]
+title    = "ECS e2e"
+width    = 640
+height   = 480
+tileSize = 32
+
+# No [map] section: Forge never loads one, and naming a file that does not exist
+# would be a trap for the first story that starts resolving it.
+
+[forge]
+addr = "127.0.0.1:7788"

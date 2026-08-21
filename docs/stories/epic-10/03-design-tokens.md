@@ -91,6 +91,19 @@ This story lands the tokens as CSS custom properties and a `/dev/tokens` referen
 Verified by rendering `/dev/tokens` in headless chromium and comparing against
 the design-system prototype side by side.
 
+## Playwright steps
+
+`e2e/specs/03-design-tokens.spec.js`. The Go palette test greps the stylesheets
+for hues outside the set. What it cannot see is whether a token *resolves*: a
+typo'd custom property name is not an error, it is an empty value, and the
+element quietly inherits something else.
+
+- [x] All 22 tokens resolve to their declared colour, asserted against the
+      value the browser computes
+- [x] The shape language holds where it is actually painted: 2px borders,
+      `border-radius: 0`, `background-image: none`
+- [x] `/dev/tokens` documents every token by name
+
 ## Notes
 
 - Define colours **only** as custom properties on `:root`. Every other rule references `var(--…)`. That is what makes the "no hue outside the set" test enforceable by grep.

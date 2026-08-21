@@ -5,10 +5,14 @@ import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 // devComponents renders every primitive in each of its documented states. This
 // is the section reviewed side by side with the design system prototype — if a
 // state is not on this page, nobody sees it until a mode ships it wrong.
+// Each card carries a data-testid naming the primitive it demonstrates. The
+// testid lives on the gallery rather than inside the primitives so the props
+// structs stay free of test concerns; a mode that needs to address a specific
+// instance can wrap it the same way.
 templ devComponents() {
 	<div class="section-heading dev__sh">07 · components</div>
 	<div class="dev__grid3">
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-listrow">
 			<div class="mono dev__lbl">LIST ROWS — layers &amp; query layers</div>
 			<div class="dev__stack0">
 				@components.ListRow(components.ListRowProps{Label: "Terrain", Glyph: "👁", Active: true, Value: "128", Action: "@post('/dev/noop')"})
@@ -19,7 +23,7 @@ templ devComponents() {
 			</div>
 			<div class="mono dev__lbl">selected = active fill + amber edge. A debug overlay is just a layer backed by SQL.</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-chip">
 			<div class="mono dev__lbl">COMPONENT CHIPS</div>
 			<div class="dev__stack">
 				@components.Chip(components.ChipProps{Name: "Position", Kind: components.ChipRequired})
@@ -28,7 +32,7 @@ templ devComponents() {
 			</div>
 			<div class="mono dev__lbl">🔒 required by type · locked · ✕ optional · detachable. ƒ ctx = computed by the engine at spawn.</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-segmented">
 			<div class="mono dev__lbl">SOURCE LENS — what the panels read</div>
 			<div class="dev__stack">
 				@components.SegmentedControl(components.SegmentedControlProps{Label: "source lens", Signal: "lensA", Selected: string(components.LensAuthored), Options: lensOptions, Action: "@post('/dev/noop')"})
@@ -37,7 +41,7 @@ templ devComponents() {
 			</div>
 			<div class="mono dev__lbl">Authored = files (amber) · Live = world.sqlite (cyan) · Replay = transitions log (violet).</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-inputs">
 			<div class="mono dev__lbl">INPUTS</div>
 			<div class="dev__stack">
 				@components.Dropdown(components.DropdownProps{Label: "Behavior", Signal: "behavior", Selected: "wander", Options: behaviorOptions, Action: "@post('/dev/noop')"})
@@ -45,7 +49,7 @@ templ devComponents() {
 				@components.Checkbox(components.CheckboxProps{Label: "checkbox · off", Signal: "off", Action: "@post('/dev/noop')"})
 			</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-iconbutton">
 			<div class="mono dev__lbl">ICON BUTTONS — 26px square</div>
 			<div class="dev__row">
 				@components.IconButton(components.IconButtonProps{Glyph: "◈", Title: "stamp", Variant: components.ButtonOutline, Action: "@post('/dev/noop')"})
@@ -57,7 +61,7 @@ templ devComponents() {
 			</div>
 			<div class="mono dev__lbl">outline · ghost · danger · dashed · primary · disabled</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-panel">
 			<div class="mono dev__lbl">PANEL</div>
 			@components.Panel(components.PanelProps{Width: 212, Heading: &components.SectionHeadingProps{Label: "entities", Source: "◂ world.sqlite"}}) {
 				@components.ListRow(components.ListRowProps{Label: "goblin #12", Glyph: "◉", Active: true, Action: "@post('/dev/noop')"})
@@ -65,12 +69,12 @@ templ devComponents() {
 			}
 			<div class="mono dev__lbl">panels 210–290px · gutters 12–14px · a cyan source suffix means live data</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-ctxmenu">
 			<div class="mono dev__lbl">CONTEXT MENU</div>
 			@components.ContextMenu(spawnMenu)
 			<div class="mono dev__lbl">Mono caps title, right-aligned shortcut hints, 2px divider, danger rows in red.</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-savefooter">
 			<div class="mono dev__lbl">SAVE FOOTER — both states</div>
 			<div class="dev__stack">
 				<div class="dev__well">
@@ -82,7 +86,7 @@ templ devComponents() {
 			</div>
 			<div class="mono dev__lbl">Clean disables both buttons — nothing to commit, nothing to throw away.</div>
 		</div>
-		<div class="dev__card">
+		<div class="dev__card" data-testid="demo-density">
 			<div class="mono dev__lbl">DENSITY &amp; RHYTHM</div>
 			<div class="dev__t13 dev__density">
 				Panels <b class="mono">210–290px</b>
@@ -98,7 +102,7 @@ templ devComponents() {
 		</div>
 	</div>
 	<div class="section-heading dev__sh">08 · modal shell</div>
-	<div class="dev__modalstage">
+	<div class="dev__modalstage" data-testid="demo-modal">
 		@components.ModalShell(components.ModalShellProps{
 			Title:       "resize map",
 			CloseAction: "@post('/dev/noop')",

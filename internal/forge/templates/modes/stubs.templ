@@ -1,0 +1,37 @@
+package modes
+
+// Placeholders for the six editors. Each names itself and the epic that
+// replaces it, so an unfinished build documents its own state instead of
+// showing a blank region that could equally be a rendering failure.
+
+templ stub(caption, summary, epic string) {
+	<div class="mode-stub" data-testid="mode-stub">
+		<div class="mode-stub__caption section-heading" data-testid="mode-stub-caption">{ caption }</div>
+		<p class="mode-stub__summary">{ summary }</p>
+		<p class="mode-stub__epic mono" data-testid="mode-stub-epic">{ epic }</p>
+	</div>
+}
+
+templ Map() {
+	@stub("MAP", "Tilemap painting, layers and spawn placement.", "Epic 15")
+}
+
+templ Tiles() {
+	@stub("TILES", "Tileset metadata: collision, animation, terrain and class.", "Epic 16")
+}
+
+templ Ents() {
+	@stub("ENTS", "Entity types: components, behavior binding and validation.", "Epic 12")
+}
+
+templ Schema() {
+	@stub("SCHEMA", "Components, fields and the generated CREATE TABLE preview.", "Epic 12")
+}
+
+templ Agents() {
+	@stub("AGENTS", "XState behavior machines on a statechart canvas.", "Epic 13")
+}
+
+templ Sprites() {
+	@stub("SPRT", "Sprite-sheet slicing and named animations.", "Epic 16")
+}

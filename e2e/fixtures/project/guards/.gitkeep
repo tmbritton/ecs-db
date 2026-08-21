@@ -1,0 +1,2 @@
+# Declared by e2e/fixtures/project/game.toml. Empty until a story needs it —
+# the directory has to exist so a loader that scans it does not error.

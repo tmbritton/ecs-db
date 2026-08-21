@@ -13,6 +13,10 @@ import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 // devComponents renders every primitive in each of its documented states. This
 // is the section reviewed side by side with the design system prototype — if a
 // state is not on this page, nobody sees it until a mode ships it wrong.
+// Each card carries a data-testid naming the primitive it demonstrates. The
+// testid lives on the gallery rather than inside the primitives so the props
+// structs stay free of test concerns; a mode that needs to address a specific
+// instance can wrap it the same way.
 func devComponents() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -34,7 +38,7 @@ func devComponents() templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"section-heading dev__sh\">07 · components</div><div class=\"dev__grid3\"><div class=\"dev__card\"><div class=\"mono dev__lbl\">LIST ROWS — layers &amp; query layers</div><div class=\"dev__stack0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"section-heading dev__sh\">07 · components</div><div class=\"dev__grid3\"><div class=\"dev__card\" data-testid=\"demo-listrow\"><div class=\"mono dev__lbl\">LIST ROWS — layers &amp; query layers</div><div class=\"dev__stack0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -58,7 +62,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div><div class=\"mono dev__lbl\">selected = active fill + amber edge. A debug overlay is just a layer backed by SQL.</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">COMPONENT CHIPS</div><div class=\"dev__stack\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</div><div class=\"mono dev__lbl\">selected = active fill + amber edge. A debug overlay is just a layer backed by SQL.</div></div><div class=\"dev__card\" data-testid=\"demo-chip\"><div class=\"mono dev__lbl\">COMPONENT CHIPS</div><div class=\"dev__stack\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -74,7 +78,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div><div class=\"mono dev__lbl\">🔒 required by type · locked · ✕ optional · detachable. ƒ ctx = computed by the engine at spawn.</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">SOURCE LENS — what the panels read</div><div class=\"dev__stack\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "</div><div class=\"mono dev__lbl\">🔒 required by type · locked · ✕ optional · detachable. ƒ ctx = computed by the engine at spawn.</div></div><div class=\"dev__card\" data-testid=\"demo-segmented\"><div class=\"mono dev__lbl\">SOURCE LENS — what the panels read</div><div class=\"dev__stack\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -90,7 +94,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div><div class=\"mono dev__lbl\">Authored = files (amber) · Live = world.sqlite (cyan) · Replay = transitions log (violet).</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">INPUTS</div><div class=\"dev__stack\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "</div><div class=\"mono dev__lbl\">Authored = files (amber) · Live = world.sqlite (cyan) · Replay = transitions log (violet).</div></div><div class=\"dev__card\" data-testid=\"demo-inputs\"><div class=\"mono dev__lbl\">INPUTS</div><div class=\"dev__stack\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -106,7 +110,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">ICON BUTTONS — 26px square</div><div class=\"dev__row\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</div></div><div class=\"dev__card\" data-testid=\"demo-iconbutton\"><div class=\"mono dev__lbl\">ICON BUTTONS — 26px square</div><div class=\"dev__row\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -134,7 +138,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><div class=\"mono dev__lbl\">outline · ghost · danger · dashed · primary · disabled</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">PANEL</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><div class=\"mono dev__lbl\">outline · ghost · danger · dashed · primary · disabled</div></div><div class=\"dev__card\" data-testid=\"demo-panel\"><div class=\"mono dev__lbl\">PANEL</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -168,7 +172,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"mono dev__lbl\">panels 210–290px · gutters 12–14px · a cyan source suffix means live data</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">CONTEXT MENU</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"mono dev__lbl\">panels 210–290px · gutters 12–14px · a cyan source suffix means live data</div></div><div class=\"dev__card\" data-testid=\"demo-ctxmenu\"><div class=\"mono dev__lbl\">CONTEXT MENU</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -176,7 +180,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"mono dev__lbl\">Mono caps title, right-aligned shortcut hints, 2px divider, danger rows in red.</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">SAVE FOOTER — both states</div><div class=\"dev__stack\"><div class=\"dev__well\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"mono dev__lbl\">Mono caps title, right-aligned shortcut hints, 2px divider, danger rows in red.</div></div><div class=\"dev__card\" data-testid=\"demo-savefooter\"><div class=\"mono dev__lbl\">SAVE FOOTER — both states</div><div class=\"dev__stack\"><div class=\"dev__well\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -192,7 +196,7 @@ func devComponents() templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div></div><div class=\"mono dev__lbl\">Clean disables both buttons — nothing to commit, nothing to throw away.</div></div><div class=\"dev__card\"><div class=\"mono dev__lbl\">DENSITY &amp; RHYTHM</div><div class=\"dev__t13 dev__density\">Panels <b class=\"mono\">210–290px</b><br>Rows <b class=\"mono\">4–5px</b> vertical padding<br>Panel gutters <b class=\"mono\">12–14px</b><br>Borders always <b class=\"mono\">2px</b>, never rounded<br>Icon buttons <b class=\"mono\">26px</b> square</div></div></div><div class=\"section-heading dev__sh\">08 · modal shell</div><div class=\"dev__modalstage\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div></div><div class=\"mono dev__lbl\">Clean disables both buttons — nothing to commit, nothing to throw away.</div></div><div class=\"dev__card\" data-testid=\"demo-density\"><div class=\"mono dev__lbl\">DENSITY &amp; RHYTHM</div><div class=\"dev__t13 dev__density\">Panels <b class=\"mono\">210–290px</b><br>Rows <b class=\"mono\">4–5px</b> vertical padding<br>Panel gutters <b class=\"mono\">12–14px</b><br>Borders always <b class=\"mono\">2px</b>, never rounded<br>Icon buttons <b class=\"mono\">26px</b> square</div></div></div><div class=\"section-heading dev__sh\">08 · modal shell</div><div class=\"dev__modalstage\" data-testid=\"demo-modal\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

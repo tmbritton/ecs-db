@@ -1,0 +1,13 @@
+{
+  "id": "e2e-wander",
+  "initial": "idle",
+  "context": { "hp": 0 },
+  "states": {
+    "idle": {
+      "on": { "SPOTTED": "chasing" }
+    },
+    "chasing": {
+      "on": { "LOST": "idle" }
+    }
+  }
+}

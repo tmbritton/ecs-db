@@ -1,4 +1,4 @@
-.PHONY: build build-headless run generate fmt clean test
+.PHONY: build build-headless run generate fmt clean test e2e e2e-seed
 
 BREW_PREFIX := /home/linuxbrew/.linuxbrew
 XORGPROTO   := $(shell brew --prefix xorgproto 2>/dev/null || echo $(BREW_PREFIX)/Cellar/xorgproto/2025.1)
@@ -27,6 +27,20 @@ fmt:
 clean:
 	rm -rf bin/
 	find ./internal ./cmd -name '*_templ.go' -delete
+
+# End-to-end suite: drives Forge in a real browser against the fixture project
+# in e2e/fixtures/project. It builds the binary and reseeds the database itself,
+# so this is the whole command.
+#
+# Forge's characteristic failure is silent — a Datastar attribute naming an
+# unregistered plugin renders perfectly and does nothing — and no Go test,
+# linter or screenshot can see it. That is what this suite is for.
+e2e:
+	./scripts/e2e.sh
+
+# Rebuild the fixture database on its own, for poking at it with sqlite3.
+e2e-seed:
+	go run ./e2e/fixtures/seed
 
 test: generate
 	go test ./...

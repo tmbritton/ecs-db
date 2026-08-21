@@ -170,6 +170,35 @@ func TestValidateFoo(t *testing.T) {
 
 **Integration boundaries:** One `*_integration_test.go` per adapter for end-to-end adapter verification. Everything else is unit tests.
 
+### Forge: browser end-to-end tests
+
+Anything with a browser surface also carries a Playwright spec in `e2e/specs/`.
+Run with `make e2e`. See [`e2e/README.md`](e2e/README.md) for the full guide.
+
+This is not optional polish. Forge's characteristic failure is **silent**: a
+Datastar attribute whose plugin name does not resolve is skipped with no error,
+no console warning and no visual difference. It has shipped twice — every
+primitive in Epic 10 Story 4 used `data-on-click`, which parses as a plugin
+named `on-click`; Story 5's plan called for `data-on-load`, which does not exist
+at all. Neither is visible to `go test`, `go vet`, `golangci-lint`, or a
+screenshot. A screenshot cannot see a handler that never fires.
+
+- **Select by `data-testid`**, not by role or text. Pin new test IDs from the Go
+  side too (`internal/forge/templates/testid_test.go`) so a rename fails in
+  seconds rather than as a browser timeout minutes later.
+- **Assert on effects, not markup** — a request on the wire, a class that
+  changed, a URL that moved. Go tests already cover what is rendered; a spec
+  that only checks an attribute is present is testing the wrong layer and will
+  pass against a broken page.
+- **Keep an explicit `accessibility` block.** Test-id selectors do not catch
+  accessibility regressions the way role-based ones do by accident, so that
+  coverage has to be deliberate.
+- **Break the feature on purpose and watch the spec fail** before trusting it. A
+  spec that passes against a deliberately broken implementation is worse than no
+  spec.
+- Each story file carries a **Playwright steps** section, written before the
+  code, listing what only a browser can confirm.
+
 ---
 
 ## Git Conventions
@@ -180,3 +209,4 @@ func TestValidateFoo(t *testing.T) {
   - **After completing a story, also mark it done in `docs/plan.md`** (Epic 1 section) with coverage figures. This keeps the roadmap current.
 - Implementation lives on `main`; feature branches only for parallel work
 - **Before every `git commit`: launch a fresh-context `reviewer` subagent to review the staged diff.** The reviewer should check for correctness, regressions, test quality, style alignment, and simplicity. Apply fixes worth doing now before committing.
+- **Before every commit that touches Forge: `make e2e` must pass**, alongside `make test` and the linter.

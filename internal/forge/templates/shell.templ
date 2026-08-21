@@ -1,0 +1,67 @@
+package templates
+
+import (
+	"strings"
+
+	"github.com/tmbritton/ecs-db/internal/forge/mode"
+)
+
+// Shell is the frame every Forge page is delivered in: menu bar across the
+// top, mode rail down the left, and the active mode's content filling the
+// rest. It knows nothing about what any mode contains — it renders the
+// component it is handed.
+templ Shell(active mode.Mode, content Component) {
+	@Layout("Forge — " + active.Title) {
+		<div class="shell" data-testid="shell" data-init={ eventStream(active) }>
+			@menuBar()
+			<div class="shell__body">
+				@modeRail(active)
+				<main id="mode-content" class="shell__content" data-testid="mode-content">
+					@content
+				</main>
+			</div>
+		</div>
+	}
+}
+
+// The menu items open dialogs that arrive in Epic 17. Until then they are
+// disabled buttons rather than spans styled to look clickable: a disabled
+// button reports its state to a screen reader, and cannot be tabbed to and
+// pressed to no effect.
+templ menuBar() {
+	<div class="menubar" data-testid="menubar">
+		<span class="menubar__wordmark" data-testid="wordmark">⚒ FORGE</span>
+		for _, label := range menuLabels {
+			<button
+				class={ "menu__item", kv("menu__item--accent", label == accentedMenu) }
+				type="button"
+				disabled
+				data-testid={ "menu-item-" + strings.ToLower(label) }
+			>{ label }</button>
+		}
+		<div id="engine-status" class="menubar__status mono" data-testid="engine-status"></div>
+	</div>
+}
+
+templ modeRail(active mode.Mode) {
+	<nav class="rail" aria-label="Editor modes" data-testid="mode-rail">
+		for _, m := range mode.All {
+			<a
+				href={ URL(m.Path()) }
+				class={ "rail__btn", kv("rail__btn--active", m.Slug == active.Slug) }
+				data-testid={ "rail-" + m.Slug }
+				data-active={ boolAttr(m.Slug == active.Slug) }
+				aria-label={ m.Title }
+				if m.Slug == active.Slug {
+					aria-current="page"
+				}
+			>
+				<span class="rail__glyph" aria-hidden="true">{ m.Glyph }</span>
+				<span class="rail__caption mono" data-testid={ "rail-caption-" + m.Slug }>{ m.Caption }</span>
+			</a>
+		}
+		<button class="rail__btn rail__cog" type="button" disabled title="Preferences" aria-label="Preferences" data-testid="rail-cog">
+			<span class="rail__glyph" aria-hidden="true">⚙</span>
+		</button>
+	</nav>
+}

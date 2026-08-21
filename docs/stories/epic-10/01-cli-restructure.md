@@ -85,6 +85,13 @@ Ebitengine is genuinely excluded. Ran the pre-change `bin/game` and the new
 `./bin/ecs-db run` back to back — identical startup output and tick progression,
 so the rename is behaviour-preserving.
 
+## Playwright steps
+
+None. This story has no browser surface — it is a build-tag split and a Cobra
+tree. Its verification is `make build` and `make build-headless`, both of which
+the e2e suite depends on and therefore exercises transitively: `make e2e` cannot
+start without a headless binary.
+
 ## Notes
 
 - The `ebitengine` build tag is the project's own, not Ebitengine's — `internal/renderer/{game,image_cache,tilemap_renderer}.go` carry it too and are untouched by this story. `internal/renderer/{anim_loader,anim_state,tick}.go` are already untagged and stay importable from the headless binary.

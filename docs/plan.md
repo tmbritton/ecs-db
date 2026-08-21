@@ -346,7 +346,10 @@ This epic is the floor everything else stands on: a `forge` subcommand that buil
 
 - [x] **Templ primitives** — Panel, SectionHeading, ListRow, Chip, SegmentedControl, Dropdown, Checkbox, IconButton, ContextMenu, ModalShell, SaveFooter.
 
-- [ ] **App shell** — Menu bar, 62px mode rail with the six modes + settings cog, routed mode content.
+- [x] **App shell** — Menu bar, 62px mode rail with the six modes + settings cog, routed mode content.
+  - `internal/forge/mode` — one table drives the rail, the routes and the tests
+  - `/forge/{mode}` is a full page load; rail buttons are anchors, so history and deep links work unaided
+  - One SSE subscription per page (`data-init="@get('/forge/{mode}/events')"`), stubbed for Story 6
 
 - [ ] **Engine-status readout** — Connected vs watcher-offline, pushed over SSE.
 
