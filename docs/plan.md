@@ -328,7 +328,7 @@ Forge is the content-authoring front-end for the engine — a single-window, six
 
 This epic is the floor everything else stands on: a `forge` subcommand that builds and runs without X11 or CGO, the Go + Templ + Datastar toolchain, and the token/primitive layer every later mode renders through. The "technical instrument" look — dark, dense, mono-labelled, 2px hard borders, no rounded corners, no gradients — is load-bearing for the product's identity and is specified exactly in the handoff.
 
-- [ ] **CLI restructure** — Split the Cobra tree out of the `ebitengine` build tag so Forge can build headless.
+- [x] **CLI restructure** — Split the Cobra tree out of the `ebitengine` build tag so Forge can build headless.
   - `cmd/game/` → `cmd/ecs-db/`; root command `Use: "ecs-db"` with `run`, `schema validate`, `forge`
   - Tag-free root; `run` behind `//go:build ebitengine` with a `!ebitengine` stub that errors clearly
   - `make build-headless` proves `CGO_ENABLED=0 go build ./cmd/ecs-db` works with no tags

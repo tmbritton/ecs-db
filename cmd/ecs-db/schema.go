@@ -1,5 +1,3 @@
-//go:build ebitengine
-
 package main
 
 import (
@@ -31,7 +29,7 @@ func runSchemaValidate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("schema invalid: %w", err)
 	}
-	fmt.Printf("schema.json OK (version %d, %d components, %d entity types)\n",
+	fmt.Fprintf(cmd.OutOrStdout(), "schema.json OK (version %d, %d components, %d entity types)\n",
 		s.SchemaVersion, len(s.Components), len(s.EntityTypes))
 	return nil
 }

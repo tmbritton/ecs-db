@@ -28,27 +28,13 @@ import (
 
 const tickDurationMs = int64(1000 / renderer.TicksPerSecond)
 
-var cfgPath string
-
-var rootCmd = &cobra.Command{
-	Use:   "game",
-	Short: "ECS-in-SQLite game",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		return config.Init(cfgPath)
-	},
-	RunE: runGame,
+var runCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Run the game",
+	RunE:  runGame,
 }
 
-func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "./game.toml", "path to TOML config file")
-	rootCmd.AddCommand(schemaCmd)
-}
-
-func main() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
-}
+func init() { rootCmd.AddCommand(runCmd) }
 
 func runGame(cmd *cobra.Command, args []string) error {
 	cfg := config.Get()
