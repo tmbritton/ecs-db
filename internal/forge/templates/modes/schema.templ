@@ -1,0 +1,215 @@
+package modes
+
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
+// SchemaMode edits the components half of schema.json.
+templ SchemaMode(data Data) {
+	if !data.HasSession {
+		@stub("SCHEMA", "No project is open — see the log for why.", "")
+	} else {
+		{{ selected := selectComponent(data.Schema, data.Selected) }}
+		<div class="schema" data-testid="schema-mode">
+			@componentList(data, selected)
+			if selected == "" {
+				<div class="schema__empty" data-testid="schema-empty">
+					<p>This schema declares no components yet.</p>
+				</div>
+			} else {
+				@componentEditor(data, selected)
+			}
+		</div>
+	}
+}
+
+templ componentList(data Data, selected string) {
+	<nav class="schema__list" aria-label="Components" data-testid="component-list">
+		<div class="section-heading">
+			<span>Components</span>
+			<button
+				type="button"
+				class="schema__version"
+				title="Bump schemaVersion — a migration marker the engine checks at startup, not a label"
+				data-testid="schema-version"
+				data-on:click={ action("/forge/schema/version") }
+			>v{ itoa(data.Schema.SchemaVersion) }</button>
+		</div>
+		<p class="schema__hint mono">one comp_* SQL table each</p>
+		for _, name := range componentNames(data.Schema) {
+			<a
+				href={ URL(componentHref(name)) }
+				class={ "list-row", kv("list-row--active", name == selected) }
+				data-testid={ "component-" + name }
+				data-active={ boolAttr(name == selected) }
+				if name == selected {
+					aria-current="true"
+				}
+			>
+				<span class="list-row__glyph" aria-hidden="true">⛃</span>
+				<span class="list-row__label">{ name }</span>
+				if data.Schema.Components[name].Behavior != "" {
+					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
+				}
+			</a>
+		}
+		<button
+			type="button"
+			class="btn--dashed schema__add"
+			data-testid="add-component"
+			data-on:click={ action("/forge/schema/component", "add", "NewComponent") }
+		>+ NEW COMPONENT</button>
+		<p class="schema__foot">
+			Entity types live in the ENTS tab — both halves of
+			<span class="mono">schema.json</span>
+		</p>
+	</nav>
+}
+
+templ componentEditor(data Data, name string) {
+	{{ comp := data.Schema.Components[name] }}
+	<div class="schema__editor" data-testid="component-editor" data-component={ name }>
+		if data.Problem != "" {
+			<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+		}
+		<div class="schema__title">
+			<span class="schema__name" data-testid="component-name">{ name }</span>
+			<span class="schema__source mono">schema.json · components.{ name }</span>
+		</div>
+
+		<div class="schema__fields">
+			<label class="schema__row">
+				<span class="schema__label">Name</span>
+				<input
+					class="schema__input mono"
+					type="text"
+					value={ name }
+					data-testid="component-rename"
+					data-on:change={ valueAction("/forge/schema/component", "to", "rename", name) }
+				/>
+			</label>
+			<p class="schema__note">
+				<span class="schema__reserved mono">"Behavior"</span> is reserved and cannot name a component.
+			</p>
+
+			@components.Dropdown(components.DropdownProps{
+				Label:    "Shape",
+				Signal:   "",
+				Selected: comp.Type,
+				Options:  shapeOptions(),
+				Action:   valueAction("/forge/schema/shape", "shape", "component", name),
+			})
+
+			@components.Dropdown(components.DropdownProps{
+				Label:    "Behavior",
+				Signal:   "",
+				Selected: comp.Behavior,
+				Options:  machineOptions(data.Machines),
+				Action:   valueAction("/forge/schema/behavior", "behavior", "component", name),
+			})
+			<p class="schema__note">
+				Binding a machine makes attach and detach drive its lifecycle — a final state detaches the component.
+			</p>
+
+			if isObject(comp) {
+				@fieldsTable(comp, name)
+			} else {
+				<p class="schema__note" data-testid="no-fields">
+					A { comp.Type } component has no fields — it becomes a single <span class="mono">value</span> column.
+				</p>
+			}
+		</div>
+
+		@usedByPanel(data, name)
+
+		<button
+			type="button"
+			class="btn--danger schema__delete"
+			data-testid="delete-component"
+			data-on:click={ confirmAction("Delete component "+name+"? Its comp_ table and everything in it goes on the next migration.", action("/forge/schema/component", "delete", name)) }
+		>Delete component</button>
+	</div>
+}
+
+templ fieldsTable(comp Component, component string) {
+	<div class="section-heading">Fields → typed SQL columns</div>
+	<table class="fields" data-testid="fields-table">
+		<thead>
+			<tr>
+				<th scope="col">Name</th>
+				<th scope="col">Type</th>
+				<th scope="col">Not null</th>
+				<th scope="col"><span class="sr-only">Delete</span></th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, field := range propertyNames(comp) {
+				<tr data-testid={ "field-" + field }>
+					<td>
+						<input
+							class="schema__input mono"
+							type="text"
+							value={ field }
+							aria-label={ "Name of field " + field }
+							data-on:change={ valueAction("/forge/schema/field", "to", "component", component, "rename", field) }
+						/>
+					</td>
+					<td>
+						@components.Dropdown(components.DropdownProps{
+							Label:    "Type of field " + field,
+							// No signal, and that is the point. A fields table
+							// has one dropdown per row; Datastar's bind plugin
+							// seeds a signal from the first bound element and
+							// then drives every element bound to that path, so
+							// a shared name makes every row display row one's
+							// type. valueAction carries the value from the
+							// control that changed, so the signal is dead
+							// weight as well as wrong.
+							Signal:   "",
+							Selected: comp.Properties[field].Type,
+							Options:  typeOptions(),
+							Action:   valueAction("/forge/schema/field", "type", "component", component, "retype", field),
+						})
+					</td>
+					<td class="fields__notnull">
+						<span title="Every generated column is NOT NULL — the engine's generator decides, not the editor">always</span>
+					</td>
+					<td>
+						<button
+							type="button"
+							class="fields__delete"
+							title={ "Delete field " + field }
+							aria-label={ "Delete field " + field }
+							data-testid={ "delete-field-" + field }
+							data-on:click={ confirmAction("Delete field "+field+"? Dropping a column is a destructive migration.", action("/forge/schema/field", "component", component, "delete", field)) }
+						><span aria-hidden="true">✕</span></button>
+					</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+	<button
+		type="button"
+		class="btn--dashed"
+		data-testid="add-field"
+		data-on:click={ action("/forge/schema/field", "component", component, "add", "newField") }
+	>+ add field</button>
+}
+
+templ usedByPanel(data Data, name string) {
+	<div class="schema__usedby" data-testid="used-by">
+		<div class="section-heading">Used by entity types</div>
+		{{ types := usedBy(data.Schema, name) }}
+		if len(types) == 0 {
+			<p class="schema__note" data-testid="used-by-none">
+				Not required or optional on any entity type yet.
+			</p>
+		} else {
+			<div class="schema__chips">
+				for _, t := range types {
+					<span class="chip" data-testid={ "used-by-" + t }>
+						<span class="chip__name">{ t }</span>
+					</span>
+				}
+			</div>
+		}
+	</div>
+}

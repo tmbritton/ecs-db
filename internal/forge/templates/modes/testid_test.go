@@ -18,7 +18,7 @@ func TestStubs_ExposeTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	for _, m := range mode.All {
 		t.Run(m.Slug, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := Registry[m.Slug]().Render(context.Background(), &buf); err != nil {
+			if err := Registry[m.Slug](Data{}).Render(context.Background(), &buf); err != nil {
 				t.Fatalf("render: %v", err)
 			}
 			seen := map[string]int{}

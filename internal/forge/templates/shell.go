@@ -2,6 +2,7 @@ package templates
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 )
@@ -23,8 +24,15 @@ const accentedMenu = "Engine"
 // naming a plugin that is not registered is skipped in silence — see
 // components/datastar_test.go, which checks every attribute this package
 // emits against the plugins the vendored bundle actually registers.
-func eventStream(m mode.Mode) string {
-	return fmt.Sprintf("@get('%s/events')", m.Path())
+func eventStream(m mode.Mode, selection string) string {
+	if selection == "" {
+		return fmt.Sprintf("@get('%s/events')", m.Path())
+	}
+	// The selection travels with the subscription so the stream can re-render
+	// the mode's content for the component the page is actually showing. The
+	// events request is a separate HTTP request and knows nothing about the
+	// page's URL otherwise.
+	return fmt.Sprintf("@get('%s/events?component=%s')", m.Path(), url.QueryEscape(selection))
 }
 
 // boolAttr renders a tri-state-safe attribute value. `data-active` is written

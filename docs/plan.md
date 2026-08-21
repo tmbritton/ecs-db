@@ -416,7 +416,9 @@ Two places the design outruns the engine, both carried forward from the original
   - Actions answer 204; the footer, the save report and the engine status all arrive on the one page stream
   - Config paths now resolve against the config file, once, in `config.Load` — the engine and Forge had disagreed about which file a `game.toml` meant
 
-- [ ] **SCHEMA mode** — Component list, `v<N>` schemaVersion badge, shape cycling, fields table, behavior binding, reserved-`Behavior`-name enforcement.
+- [x] **SCHEMA mode** — Component list, `v<N>` schemaVersion badge, shape cycling, fields table, behavior binding, reserved-`Behavior`-name enforcement.
+  - Renders in authored order throughout; selection is a URL so it survives a reload
+  - Mode content joined the page stream — an edit was previously invisible until a reload
 
 - [ ] **Generated-SQL panel** — Live `CREATE TABLE comp_*` via `storage.MigrateComponent`.
   - Fix first: `componentTableBuilder.go` iterates the properties map unsorted, so column order is non-deterministic and a live preview visibly reshuffles

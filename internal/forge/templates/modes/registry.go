@@ -6,14 +6,17 @@ package modes
 
 import "github.com/a-h/templ"
 
+// Registry maps a mode slug to its content. Every mode takes the same Data,
+// and the ones still stubbed simply ignore it.
+//
 // Registry maps a mode slug to its content. Keeping it a lookup rather than a
 // switch means the handler does not grow a branch per mode, and
 // registry_test.go can check it against the mode table in both directions.
-var Registry = map[string]func() templ.Component{
-	"map":     Map,
-	"tiles":   Tiles,
-	"ents":    Ents,
-	"schema":  Schema,
-	"agents":  Agents,
-	"sprites": Sprites,
+var Registry = map[string]func(Data) templ.Component{
+	"map":     func(Data) templ.Component { return Map() },
+	"tiles":   func(Data) templ.Component { return Tiles() },
+	"ents":    func(Data) templ.Component { return Ents() },
+	"schema":  SchemaMode,
+	"agents":  func(Data) templ.Component { return Agents() },
+	"sprites": func(Data) templ.Component { return Sprites() },
 }

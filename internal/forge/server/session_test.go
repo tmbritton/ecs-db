@@ -244,7 +244,8 @@ func TestSchemaActions_RefuseCrossOriginWrites(t *testing.T) {
 	for _, target := range []string{
 		"/forge/schema/save", "/forge/schema/discard",
 		"/forge/schema/reload", "/forge/schema/overwrite",
-		"/dev/schema/bump",
+		"/forge/schema/version", "/forge/schema/component",
+		"/forge/schema/shape", "/forge/schema/behavior", "/forge/schema/field",
 	} {
 		t.Run(target, func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodPost, srv.URL+target, strings.NewReader("{}"))
@@ -388,12 +389,11 @@ func TestRenderFooter_ReflectsTheSession(t *testing.T) {
 	}
 }
 
-// The dev trigger must make a real edit, or the browser test that leans on it
-// is testing nothing.
-func TestDevSchemaBump_MakesARealEdit(t *testing.T) {
+// The version badge is a real control, so bumping must actually edit.
+func TestSchemaVersion_MakesARealEdit(t *testing.T) {
 	srv, _, sess, _ := sessionServer(t)
 
-	if code := post(t, srv, "/dev/schema/bump"); code != http.StatusNoContent {
+	if code := post(t, srv, "/forge/schema/version"); code != http.StatusNoContent {
 		t.Fatalf("bump = %d", code)
 	}
 	var version int

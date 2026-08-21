@@ -42,11 +42,14 @@ const footer = (page) => byTestId(page, "save-footer");
 const saveButton = (page) => page.locator('[data-testid="save-footer"] button', { hasText: /save/i });
 const discardButton = (page) => page.locator('[data-testid="save-footer"] button', { hasText: /discard/i });
 
-// Drives a real edit through the same action the UI will use once Story 2 puts
-// controls on the page. Until then this is how the session is exercised end to
-// end without inventing a fake trigger.
+// The version badge in SCHEMA mode, which is a real control now that Story 2
+// has landed — the dev-only trigger this used to call has been deleted.
 async function bumpVersion(page) {
-  return page.evaluate(() => fetch("/dev/schema/bump", { method: "POST" }).then((r) => r.status));
+  const before = await byTestId(page, "save-footer").getAttribute("class");
+  await byTestId(page, "schema-version").click();
+  // Wait for the footer to notice, so callers can assume the edit landed.
+  await expect(byTestId(page, "save-footer")).not.toHaveClass(before ?? "", { timeout: 10_000 });
+  return 204;
 }
 
 test("the footer is clean on load and names the file", async ({ page }) => {

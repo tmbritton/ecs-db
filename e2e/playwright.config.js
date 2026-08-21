@@ -41,18 +41,23 @@ module.exports = defineConfig({
     {
       name: "app",
       // Everything that only reads. Runs fully parallel.
-      testIgnore: /06-engine-status/,
+      testIgnore: /06-engine-status|12-/,
       use: { ...chrome },
     },
     {
-      // The engine-status specs rename the fixture database away and rewrite
-      // its schema_version to provoke the offline and mismatch states. There
-      // is one server and one database, so they cannot share it with specs
-      // reading through the same process — `dependencies` makes them run only
-      // after everything else has finished, rather than racing it.
-      name: "engine-status",
-      testMatch: /06-engine-status/,
+      // Everything that changes shared state: the fixture database, the fixture
+      // schema.json, or the server's editing session. There is one server and
+      // one project, so these cannot run beside specs reading through the same
+      // process — `dependencies` makes them wait for the read-only ones, and
+      // one worker keeps them from racing each other.
+      //
+      // Per-file `test.describe.configure({ mode: "serial" })` is not enough:
+      // it serialises within a file, and two files editing the same session in
+      // parallel workers interfere exactly as two tests in one file would.
+      name: "stateful",
+      testMatch: /06-engine-status|12-/,
       dependencies: ["app"],
+      workers: 1,
       use: { ...chrome },
     },
   ],

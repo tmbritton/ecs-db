@@ -854,6 +854,223 @@ button.list-row:not(.list-row--active):hover {
   display: none;
 }
 
+/* --- SCHEMA mode -----------------------------------------------------------
+   A component list on the left and the selected component's editor filling the
+   rest, both scrolling independently so a long field list never pushes the
+   list off screen. */
+
+.schema {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.schema__list {
+  width: 212px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 0;
+  background: var(--panel);
+  border-right: var(--border-w) solid var(--border);
+  overflow-y: auto;
+}
+
+.schema__list > .section-heading,
+.schema__hint,
+.schema__foot {
+  padding: 0 12px;
+}
+
+.schema__version {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--cyan);
+  background: none;
+  border: 1px solid var(--border);
+  padding: 0 5px;
+  cursor: pointer;
+}
+
+.schema__version:hover {
+  border-color: var(--cyan);
+}
+
+.schema__hint {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.schema__foot {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-top: var(--border-w) solid var(--border);
+}
+
+.schema__add {
+  margin: 6px 12px;
+  padding: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.schema__editor,
+.schema__empty {
+  flex: 1;
+  min-width: 0;
+  padding: 22px 26px;
+  overflow-y: auto;
+}
+
+.schema__title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.schema__name {
+  font-size: 19px;
+  color: var(--text-hi);
+}
+
+.schema__source {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.schema__fields {
+  max-width: 620px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.schema__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.schema__label {
+  width: 110px;
+  flex: none;
+  color: var(--text-dim);
+}
+
+.schema__input {
+  flex: 1;
+  min-width: 0;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--text-hi);
+}
+
+.schema__input:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.schema__note {
+  margin: -4px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.schema__reserved {
+  color: var(--red);
+}
+
+.schema__problem {
+  margin: 12px 0 0;
+  padding: 6px 10px;
+  border: var(--border-w) solid var(--red);
+  background: var(--panel);
+  color: var(--red);
+  font-size: 12px;
+}
+
+/* Fields become typed SQL columns, so the table is mono and reads like one. */
+.fields {
+  width: 100%;
+  border-collapse: collapse;
+  border: var(--border-w) solid var(--border);
+  background: var(--panel);
+}
+
+.fields th {
+  padding: 5px 10px;
+  background: var(--raised);
+  border-bottom: var(--border-w) solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  font-weight: 400;
+  text-align: left;
+  color: var(--text-dim);
+}
+
+.fields td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fields__notnull {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.fields__delete {
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.fields__delete:hover {
+  color: var(--red);
+}
+
+.schema__usedby {
+  max-width: 620px;
+  margin-top: 20px;
+}
+
+.schema__chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.schema__delete {
+  margin-top: 20px;
+  padding: 5px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Visible to assistive tech, not to the eye — for a column header whose
+   meaning is carried by the icon in its cells. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* --- save reports -----------------------------------------------------------
    What became of the last save of each file. Fixed to the bottom-right rather
    than in the flow: it appears in response to an action, and must not shift the

@@ -34,16 +34,31 @@ test.describe("app shell", () => {
           m.slug === active.slug ? "true" : "false"
         );
       }
-      await expect(page.locator('[data-active="true"]')).toHaveCount(1);
+      // Scoped to the rail. data-active is a generic marker and other things
+      // use it too — the SCHEMA component list, for one — so an unscoped count
+      // asserts something broader than "one rail button is active".
+      await expect(byTestId(page, "mode-rail").locator('[data-active="true"]')).toHaveCount(1);
     }
   });
 
-  test("each mode renders a stub naming itself and the epic that fills it", async ({ page }) => {
-    for (const m of MODES) {
+  // Modes that are still stubbed say what they are and which epic fills them,
+  // so an unfinished build reads as unfinished rather than broken. Implemented
+  // modes are listed here so this test shrinks as they land rather than being
+  // quietly weakened.
+  const IMPLEMENTED = new Set(["schema"]);
+
+  test("each unimplemented mode names itself and the epic that fills it", async ({ page }) => {
+    for (const m of MODES.filter((m) => !IMPLEMENTED.has(m.slug))) {
       await page.goto(`/forge/${m.slug}`);
       await expect(byTestId(page, "mode-stub-caption")).toHaveText(m.caption);
       await expect(byTestId(page, "mode-stub-epic")).toContainText("Epic");
     }
+  });
+
+  test("an implemented mode renders its own content, not a stub", async ({ page }) => {
+    await page.goto("/forge/schema");
+    await expect(byTestId(page, "schema-mode")).toBeVisible();
+    await expect(page.locator('[data-testid="mode-stub"]')).toHaveCount(0);
   });
 });
 

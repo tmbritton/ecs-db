@@ -28,7 +28,7 @@ func renderShellWith(t *testing.T, active mode.Mode, engine status.Status) strin
 		_, err := io.WriteString(w, "<p>STUB-CONTENT</p>")
 		return err
 	})
-	if err := Shell(active, engine, nil, NoFooter(), body).Render(context.Background(), &buf); err != nil {
+	if err := Shell(active, "", engine, nil, NoFooter(), body).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
 	}
 	return buf.String()
@@ -142,7 +142,7 @@ func TestShell_RendersTheReportsItIsGiven(t *testing.T) {
 		Outcome:  savereport.OutcomeRejected,
 		Problems: []string{"unknown action alpha"},
 	}}
-	if err := Shell(mode.Default, status.Status{}, reports, NoFooter(), body).Render(context.Background(), &buf); err != nil {
+	if err := Shell(mode.Default, "", status.Status{}, reports, NoFooter(), body).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	for _, want := range []string{"goblin.json", "unknown action alpha"} {

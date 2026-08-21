@@ -22,7 +22,7 @@ func TestRegistry_CoversEveryMode(t *testing.T) {
 			if build == nil {
 				t.Fatalf("stub for %q is nil", m.Slug)
 			}
-			c := build()
+			c := build(Data{})
 			if c == nil {
 				t.Fatalf("stub for %q built a nil component", m.Slug)
 			}

@@ -289,6 +289,8 @@ func TestModeEvents_DoesNotRepeatAnUnchangedStatus(t *testing.T) {
 					perElement["save-reports"]++
 				case strings.Contains(f, `id="save-footer"`):
 					perElement["save-footer"]++
+				case strings.Contains(f, `id="mode-content"`):
+					perElement["mode-content"]++
 				default:
 					perElement["unknown"]++
 				}
@@ -311,6 +313,10 @@ func TestModeEvents_DoesNotRepeatAnUnchangedStatus(t *testing.T) {
 	if perElement["save-footer"] != 1 {
 		t.Errorf("save footer patched %d times over ~20 intervals with nothing changing, want 1",
 			perElement["save-footer"])
+	}
+	if perElement["mode-content"] != 1 {
+		t.Errorf("mode content patched %d times over ~20 intervals with nothing changing, want 1",
+			perElement["mode-content"])
 	}
 	if perElement["unknown"] != 0 {
 		t.Errorf("%d frames patched something unrecognised", perElement["unknown"])

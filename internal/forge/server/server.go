@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -43,6 +44,9 @@ type Config struct {
 	// PollInterval is how often the engine status is re-checked. Zero falls
 	// back rather than panicking time.NewTicker.
 	PollInterval time.Duration
+	// Machines are the behaviour machine IDs the project resolved, for the
+	// binding dropdowns. Empty is a legitimate state — a project may have none.
+	Machines []string
 }
 
 type Server struct {
@@ -67,6 +71,20 @@ type Server struct {
 	mu      sync.Mutex
 	ln      net.Listener
 	streams int
+	// Why the last edit was refused. Cleared by the next one that succeeds, and
+	// by a full page load, so a stale explanation never outlives the state it
+	// described or leaks into a tab that did nothing wrong.
+	editProblem string
+	// renamedTo follows components through renames.
+	//
+	// A page subscribes to its stream with the component it is showing, and
+	// that URL cannot change afterwards. Renaming the component therefore left
+	// the stream asking for a name that no longer exists, selectComponent fell
+	// back to the first component, and the editor silently swapped to a
+	// different one — while the address bar still named the old. The next edit
+	// then hit whatever the editor had swapped to. Following the rename keeps
+	// the page pointed at what the user is actually editing.
+	renamedTo map[string]string
 
 	// The latest save outcome per file, pushed down the page stream alongside
 	// the engine status. Its own type carries the locking.
@@ -108,11 +126,11 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
-	mux.HandleFunc("POST /dev/schema/bump", s.handleDevSchemaBump)
-	mux.HandleFunc("POST /forge/schema/save", s.handleSchemaSave)
-	mux.HandleFunc("POST /forge/schema/discard", s.handleSchemaDiscard)
-	mux.HandleFunc("POST /forge/schema/reload", s.handleSchemaReload)
-	mux.HandleFunc("POST /forge/schema/overwrite", s.handleSchemaOverwrite)
+	mux.HandleFunc("POST /forge/schema/save", sameOriginOnly(s.handleSchemaSave))
+	mux.HandleFunc("POST /forge/schema/discard", sameOriginOnly(s.handleSchemaDiscard))
+	mux.HandleFunc("POST /forge/schema/reload", sameOriginOnly(s.handleSchemaReload))
+	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
+	s.registerSchemaEditRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -140,9 +158,32 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "mode not available", http.StatusInternalServerError)
 		return
 	}
-	// Rendered server-side on load so the menu bar is never blank before the
-	// first patch arrives; the stream takes over from there.
-	s.render(w, r, templates.Shell(m, status.Check(s.cfg.Engine), s.saves.All(), s.footer(), content()))
+	// Rendered server-side on load so the page is never blank before the first
+	// patch arrives; the stream takes over from there.
+	// A full page load starts clean: an edit refused in another tab is not this
+	// page's problem to report.
+	s.setEditProblem("")
+	data := s.modeData(r)
+	s.render(w, r, templates.Shell(
+		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(), content(data)))
+}
+
+// modeData gathers what a mode needs to render. The schema is a deep copy from
+// the session, so a template cannot reach the session through it.
+func (s *Server) modeData(r *http.Request) modes.Data {
+	selected := r.URL.Query().Get("component")
+	if selected == "" {
+		selected = r.URL.Query().Get("type")
+	}
+	data := modes.Data{Selected: s.followRenames(selected)}
+	if s.cfg.Session == nil {
+		return data
+	}
+	data.HasSession = true
+	s.cfg.Session.Read(func(d schema.DatabaseSchema) { data.Schema = d })
+	data.Machines = s.cfg.Machines
+	data.Problem = s.lastEditProblem()
+	return data
 }
 
 // handleModeEvents is the single SSE subscription a mode page opens.
@@ -153,7 +194,8 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 // It holds the connection open and sends nothing yet. Story 6 pushes the
 // engine-status readout through it; later epics add each mode's live data.
 func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
-	if _, ok := mode.Lookup(r.PathValue("mode")); !ok {
+	m, ok := mode.Lookup(r.PathValue("mode"))
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -177,7 +219,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 
-	var lastStatus, lastSaves, lastFooter string
+	var lastStatus, lastSaves, lastFooter, lastContent string
 	for {
 		// Everything that changes on the page goes down this one connection.
 		// Engine status shows on every mode, so it is pushed whatever m is;
@@ -196,6 +238,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 			{"engine status", s.renderEngineStatus, &lastStatus},
 			{"save reports", s.renderSaveReports, &lastSaves},
 			{"save footer", s.renderFooter, &lastFooter},
+			{"mode content", func() (string, error) { return s.renderModeContent(m, r) }, &lastContent},
 		} {
 			cur, err := part.render()
 			if err != nil {
@@ -258,6 +301,51 @@ func (s *Server) renderFooter() (string, error) {
 	return buf.String(), nil
 }
 
+// renderModeContent re-renders the open mode so an edit appears without a
+// reload. The selection comes from the events request's own query string, which
+// the page put there when it subscribed.
+// followRenames resolves a name through any renames since the page subscribed.
+// Chained renames follow all the way, with a bound so a cycle cannot spin.
+func (s *Server) followRenames(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for range len(s.renamedTo) + 1 {
+		next, ok := s.renamedTo[name]
+		if !ok || next == name {
+			return name
+		}
+		name = next
+	}
+	return name
+}
+
+// recordRename notes that a component moved, so pages still naming the old one
+// follow it rather than silently landing on someone else's component.
+func (s *Server) recordRename(from, to string) {
+	if from == to {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.renamedTo == nil {
+		s.renamedTo = map[string]string{}
+	}
+	s.renamedTo[from] = to
+}
+
+func (s *Server) renderModeContent(m mode.Mode, r *http.Request) (string, error) {
+	build, ok := modes.Registry[m.Slug]
+	if !ok {
+		return "", fmt.Errorf("no content registered for mode %q", m.Slug)
+	}
+	var buf bytes.Buffer
+	c := templates.ModeContentRegion(build(s.modeData(r)))
+	if err := c.Render(context.Background(), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 func (s *Server) renderSaveReports() (string, error) {
 	var buf bytes.Buffer
 	c := components.SaveReports(components.SaveReportsProps{Reports: s.saves.All()})
@@ -307,33 +395,6 @@ func sameOrigin(r *http.Request) bool {
 	}
 }
 
-// handleDevSchemaBump makes one real edit to the session — bumping
-// schemaVersion — so the editing path can be driven end to end before Story 2
-// puts controls on the page.
-//
-// It exercises production code rather than standing in for it: the same
-// Session.Edit every real control will use. It disappears when SCHEMA mode has
-// a version badge to click, and until then a browser test of the session would
-// otherwise have to mock the thing under test.
-func (s *Server) handleDevSchemaBump(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		http.Error(w, "cross-origin write refused", http.StatusForbidden)
-		return
-	}
-	if s.cfg.Session == nil {
-		http.Error(w, "no project is open", http.StatusConflict)
-		return
-	}
-	if err := s.cfg.Session.Edit(func(d *schema.DatabaseSchema) error {
-		d.SchemaVersion++
-		return nil
-	}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // The schema actions. Each mutates the session and answers 204: the changed
 // footer and the save report reach the page on the SSE stream it already holds,
 // rather than as a body here. One push path, not two — the stream is already
@@ -372,10 +433,7 @@ func (s *Server) runSchemaAction(
 	do func(*session.Session) error,
 	reports bool,
 ) {
-	if !sameOrigin(r) {
-		http.Error(w, "cross-origin write refused", http.StatusForbidden)
-		return
-	}
+	// The origin check is middleware — see sameOriginOnly.
 	sess := s.cfg.Session
 	if sess == nil {
 		http.Error(w, "no project is open", http.StatusConflict)

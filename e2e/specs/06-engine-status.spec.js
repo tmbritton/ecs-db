@@ -153,6 +153,7 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
       status: (text.match(/ id="engine-status"/g) || []).length,
       saves: (text.match(/ id="save-reports"/g) || []).length,
       footer: (text.match(/ id="save-footer"/g) || []).length,
+      content: (text.match(/ id="mode-content"/g) || []).length,
       total: (text.match(/event: datastar-patch-elements/g) || []).length,
     };
   });
@@ -160,9 +161,10 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
   expect(frames.status, `engine status sent ${frames.status} times in ~6s`).toBe(1);
   expect(frames.saves, `save reports sent ${frames.saves} times in ~6s`).toBe(1);
   expect(frames.footer, `save footer sent ${frames.footer} times in ~6s`).toBe(1);
-  // Three live regions, each sent once. The total is checked as well so a
-  // region added later without a counter here fails loudly.
-  expect(frames.total, `${frames.total} patches in total`).toBe(3);
+  expect(frames.content, `mode content sent ${frames.content} times in ~6s`).toBe(1);
+  // Four live regions, each sent once. The total is checked as well so a region
+  // added later without a counter here fails loudly.
+  expect(frames.total, `${frames.total} patches in total`).toBe(4);
 });
 
 test("the readout is announced to assistive tech when it changes", async ({ page }) => {
