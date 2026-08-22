@@ -3,6 +3,7 @@ package modes
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
@@ -145,6 +146,9 @@ func seedValue(v any) string {
 	}
 	return string(b)
 }
+
+// lower is the engine's table-naming rule, for the note that names the table.
+func lower(s string) string { return strings.ToLower(s) }
 
 func validationOptions() []components.Option {
 	out := make([]components.Option, 0, len(ValidationLevels))

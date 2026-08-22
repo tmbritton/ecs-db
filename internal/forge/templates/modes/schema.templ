@@ -199,13 +199,20 @@ templ fieldsTable(comp Component, component string) {
 	>+ add field</button>
 }
 
+// usedByPanel answers "is this safe to change".
+//
+// Two kinds of fact, kept apart. Which types declare the component comes from
+// the file and is true until someone edits it; how many entities carry it comes
+// from a world another process is writing and will be different in a second.
+// The live half is cyan, the colour the design reserves for live data, so the
+// difference is visible without reading the labels.
 templ usedByPanel(data Data, name string) {
 	<div class="schema__usedby" data-testid="used-by">
 		<div class="section-heading">Used by entity types</div>
 		{{ types := usedBy(data.Schema, name) }}
 		if len(types) == 0 {
 			<p class="schema__note" data-testid="used-by-none">
-				Not required or optional on any entity type yet.
+				Not required or optional on any entity type yet — nothing in the schema refers to it.
 			</p>
 		} else {
 			<div class="schema__chips">
@@ -216,9 +223,73 @@ templ usedByPanel(data Data, name string) {
 				}
 			</div>
 		}
+		@componentRows(data, name)
 	</div>
 }
 
+// componentRows is how many entities actually carry this component.
+//
+// Its own table, not the population of the types that declare it: a component
+// that is optional on a type is carried by some of that type's entities, not
+// all of them, so counting the types would overstate it — in the direction that
+// makes a destructive migration look worse than it is, and, after a schema
+// edit, sometimes better.
+templ componentRows(data Data, name string) {
+	<div class="live" data-testid="live-counts">
+		<div class="section-heading live__heading">Live rows</div>
+		if !data.Counts.Available {
+			<p class="schema__note" data-testid="live-unavailable">
+				{ data.Counts.Reason }. This is not a count of zero.
+			</p>
+		} else {
+			{{ n, built := data.Counts.OfComponent(name) }}
+			if !built {
+				<p class="schema__note" data-testid="live-not-built">
+					No <span class="mono">comp_{ lower(name) }</span> table in the database yet —
+					the engine creates it on its next migration. Nothing is stored for this
+					component, as opposed to nothing being counted.
+				</p>
+			} else {
+				<p class="live__single" data-testid={ "live-rows-" + name }>
+					<span class="live__count mono">{ itoa(n) }</span>
+					<span class="live__label">
+						if n == 1 {
+							entity carries this component right now
+						} else {
+							entities carry this component right now
+						}
+					</span>
+				</p>
+			}
+			@staleNote(data)
+		}
+		@spawnNote()
+	</div>
+}
+
+// staleNote qualifies a count taken against a database built to a different
+// schemaVersion. The rows are real; what they describe is an older world.
+templ staleNote(data Data) {
+	if data.Counts.Stale {
+		<p class="schema__note" role="alert" data-testid="live-stale">
+			Counted against a database built to
+			<span class="mono">v{ itoa(data.Counts.DBVersion) }</span>, not the
+			<span class="mono">v{ itoa(data.Schema.SchemaVersion) }</span> being edited — names and
+			shapes may have moved since, so a zero here can mean "filed under a different name".
+		</p>
+	}
+}
+
+// spawnNote says what is not here.
+//
+// Not a zero and not a dash: a zero is indistinguishable from a real answer,
+// and someone deciding whether a deletion is safe would act on it.
+templ spawnNote() {
+	<p class="schema__note" data-testid="spawn-note">
+		Spawn counts are not shown: spawns arrive with map object layers in Epic 14, and
+		a count of zero before then would be indistinguishable from a real answer.
+	</p>
+}
 
 // generatedSQLPanel shows the CREATE TABLE the interpreter runs at startup.
 //

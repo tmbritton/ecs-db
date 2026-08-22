@@ -935,6 +935,46 @@ button.list-row:not(.list-row--active):hover {
   padding: 22px 26px;
 }
 
+/* --- live readings: cyan, the source lens colour for live data ----------- */
+
+.live {
+  margin-top: 16px;
+  padding: 8px 12px;
+  background: var(--inset);
+  border-left: var(--border-w) solid var(--cyan);
+}
+
+.live__heading {
+  color: var(--cyan);
+}
+
+.live__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.live__list li,
+.live__single {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.live__count {
+  color: var(--cyan);
+  font-size: 13px;
+}
+
+.live__label {
+  color: var(--text-secondary);
+}
+
 /* --- entity types ------------------------------------------------------- */
 
 .chips-block {

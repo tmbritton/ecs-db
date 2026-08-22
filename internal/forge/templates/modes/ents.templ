@@ -124,6 +124,8 @@ templ entityTypeEditor(data Data, name string) {
 
 		@componentChips(data, name, et)
 
+		@typeUsagePanel(data, name)
+
 		@contextSeedsPanel(data, et)
 
 		<button
@@ -268,5 +270,35 @@ templ contextSeedsPanel(data Data, et EntityType) {
 					</table>
 				}
 		}
+	</div>
+}
+
+// typeUsagePanel is the ENTS half of "is this safe to change": how many
+// entities of this type exist right now.
+//
+// Cyan, like every other live reading in the tool, so it is not mistaken for a
+// statement about the schema.
+templ typeUsagePanel(data Data, name string) {
+	<div class="live" data-testid="type-usage">
+		<div class="section-heading live__heading">Live entities</div>
+		if !data.Counts.Available {
+			<p class="schema__note" data-testid="live-unavailable">
+				{ data.Counts.Reason }. This is not a count of zero.
+			</p>
+		} else {
+			{{ n, _ := data.Counts.OfType(name) }}
+			<p class="live__single" data-testid={ "live-" + name }>
+				<span class="live__count mono">{ itoa(n) }</span>
+				<span class="live__label">
+					if n == 1 {
+						entity of this type exists right now
+					} else {
+						entities of this type exist right now
+					}
+				</span>
+			</p>
+			@staleNote(data)
+		}
+		@spawnNote()
 	</div>
 }

@@ -254,7 +254,7 @@ func streamContent(t *testing.T, s *Server) string {
 	if !ok {
 		t.Fatal("no schema mode")
 	}
-	out, err := s.renderModeContent(m, schemaRequest())
+	out, err := s.renderModeContent(m, s.modeData(schemaRequest()))
 	if err != nil {
 		t.Fatalf("rendering mode content: %v", err)
 	}
@@ -266,7 +266,8 @@ func streamContent(t *testing.T, s *Server) string {
 // six, so the answer to it has to render on all six.
 func streamConfirm(t *testing.T, s *Server, path string) string {
 	t.Helper()
-	out, err := s.renderConfirmRegion(httptest.NewRequest("GET", path, nil))
+	r := httptest.NewRequest("GET", path, nil)
+	out, err := s.renderConfirmRegion(s.modeData(r))
 	if err != nil {
 		t.Fatalf("rendering the confirmation: %v", err)
 	}

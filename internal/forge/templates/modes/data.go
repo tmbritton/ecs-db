@@ -3,6 +3,7 @@ package modes
 import (
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
+	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -35,6 +36,10 @@ type Data struct {
 	// process is writing, and a stale migration warning is worse than a slow
 	// one.
 	Migration migration.Preview
+	// Counts is how many entities of each type exist right now. Read from the
+	// database and refreshed on the page stream, so it is never a design fact
+	// even when it looks like one.
+	Counts usage.Counts
 	// Confirming is true when a save was held back because it would destroy
 	// data, and the confirmation is on screen. The statements it lists come
 	// from Migration, not from a copy taken when the save was attempted.

@@ -19,6 +19,11 @@ func TestModes_DatastarAttributesResolve(t *testing.T) {
 	plugins := dstest.Plugins(t)
 
 	data := modeFixture()
+	data.Selected = "Position"
+	// With counts available, so the scan reaches the panels' live branch. Left
+	// at the zero value it only ever saw the "no database" path, and any
+	// attribute added inside the other one would go unchecked.
+	data.Counts = available()
 	data.Migration = migration.Preview{
 		Available:   true,
 		DBVersion:   3,
@@ -62,5 +67,6 @@ func TestModes_UseTheColonForm(t *testing.T) {
 func entsWithSelection() Data {
 	data := entsFixture()
 	data.Selected = "Goblin"
+	data.Counts = available()
 	return data
 }

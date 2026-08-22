@@ -10,6 +10,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
+	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
@@ -49,6 +50,12 @@ func componentNames(s schema.DatabaseSchema) []string {
 	return jsonorder.Apply(s.ComponentOrder, s.Components)
 }
 
+// ComponentNames is componentNames for callers outside this package. The
+// server needs it to resolve which component a panel is showing, and resolving
+// it a second way is how the count and the panel come to disagree about which
+// component they are about.
+func ComponentNames(s schema.DatabaseSchema) []string { return componentNames(s) }
+
 // propertyNames returns one component's fields in authored order.
 func propertyNames(c schema.Component) []string {
 	return jsonorder.Apply(c.PropertyOrder, c.Properties)
@@ -75,21 +82,12 @@ func selectComponent(s schema.DatabaseSchema, want string) string {
 func isObject(c schema.Component) bool { return c.Type == schema.ComponentTypeObject }
 
 // usedBy lists the entity types that declare a component, required or optional.
-// Derived from the schema alone, so it is available with no database — which
-// matters, because it is the fact you want when deciding whether deleting a
-// component is safe.
+//
+// Delegated rather than reimplemented: the panel that answers "is this safe to
+// delete" must give the same answer in both modes, and two implementations of
+// one question is how they come to differ.
 func usedBy(s schema.DatabaseSchema, component string) []string {
-	var out []string
-	for _, name := range jsonorder.Apply(s.EntityTypeOrder, s.EntityTypes) {
-		et := s.EntityTypes[name]
-		for _, c := range append(append([]string{}, et.RequiredComponents...), et.OptionalComponents...) {
-			if c == component {
-				out = append(out, name)
-				break
-			}
-		}
-	}
-	return out
+	return usage.UsedBy(s, component)
 }
 
 // action builds a Datastar expression posting to an editing endpoint with the

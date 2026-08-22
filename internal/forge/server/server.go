@@ -30,6 +30,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -224,10 +225,37 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	// The preview costs a database open and a full introspection, so it is
 	// computed only where it is read: the panel is SCHEMA's, and the
 	// confirmation can be up on any mode.
-	if modeSlug(r) == "schema" || data.Confirming {
+	// Both cost a read-only open of the game's database, so they are computed
+	// only where they are read: the migration panel is SCHEMA's, the
+	// confirmation can be up on any mode, and the usage counts belong to the
+	// two modes that edit schema.json.
+	slug := modeSlug(r)
+	if slug == "schema" || data.Confirming {
 		data.Migration = s.migrationPreview()
 	}
+	if slug == "schema" || slug == "ents" {
+		// The component the panel is showing, so its table is counted in the
+		// same visit rather than in a second one.
+		component := ""
+		if slug == "schema" {
+			component = selectedComponent(data)
+		}
+		data.Counts = usage.Read(s.cfg.Engine.DBPath, component).
+			AgainstVersion(data.Schema.SchemaVersion)
+	}
 	return data
+}
+
+// selectedComponent resolves which component the SCHEMA panel is showing, so
+// the count is taken for the same one the page renders.
+func selectedComponent(data modes.Data) string {
+	if _, ok := data.Schema.Components[data.Selected]; ok {
+		return data.Selected
+	}
+	if names := modes.ComponentNames(data.Schema); len(names) > 0 {
+		return names[0]
+	}
+	return ""
 }
 
 // modeSlug names the mode a request is for.
@@ -352,6 +380,19 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		// Suppressing identical patches is not just economy: a stream that
 		// emits every tick forever makes the browser's EventStream log useless
 		// for debugging the busier traffic that lands on it later.
+		// Gathered once per tick and shared by the two regions that read it.
+		// It costs a read-only open of the game's database — two, on SCHEMA —
+		// and both regions asking separately doubled that on every tick of
+		// every open stream.
+		var gathered *modes.Data
+		data := func() modes.Data {
+			if gathered == nil {
+				d := s.modeData(r)
+				gathered = &d
+			}
+			return *gathered
+		}
+
 		for _, part := range []struct {
 			name   string
 			render func() (string, error)
@@ -360,8 +401,8 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 			{"engine status", s.renderEngineStatus, &lastStatus},
 			{"save reports", s.renderSaveReports, &lastSaves},
 			{"save footer", s.renderFooter, &lastFooter},
-			{"mode content", func() (string, error) { return s.renderModeContent(m, r) }, &lastContent},
-			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(r) }, &lastConfirm},
+			{"mode content", func() (string, error) { return s.renderModeContent(m, data()) }, &lastContent},
+			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }, &lastConfirm},
 		} {
 			cur, err := part.render()
 			if err != nil {
@@ -432,9 +473,9 @@ func (s *Server) confirmation(data modes.Data) templates.Component {
 }
 
 // renderConfirmRegion renders the dialog's region for the SSE stream.
-func (s *Server) renderConfirmRegion(r *http.Request) (string, error) {
+func (s *Server) renderConfirmRegion(data modes.Data) (string, error) {
 	var buf bytes.Buffer
-	c := templates.SaveConfirmRegion(s.confirmation(s.modeData(r)))
+	c := templates.SaveConfirmRegion(s.confirmation(data))
 	if err := c.Render(context.Background(), &buf); err != nil {
 		return "", err
 	}
@@ -522,13 +563,13 @@ func (s *Server) forgetRenames() {
 	s.renamedTypeTo = nil
 }
 
-func (s *Server) renderModeContent(m mode.Mode, r *http.Request) (string, error) {
+func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error) {
 	build, ok := modes.Registry[m.Slug]
 	if !ok {
 		return "", fmt.Errorf("no content registered for mode %q", m.Slug)
 	}
 	var buf bytes.Buffer
-	c := templates.ModeContentRegion(build(s.modeData(r)))
+	c := templates.ModeContentRegion(build(data))
 	if err := c.Render(context.Background(), &buf); err != nil {
 		return "", err
 	}
