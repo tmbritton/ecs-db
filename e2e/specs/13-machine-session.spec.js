@@ -11,6 +11,9 @@ const path = require("path");
 const { test, expect, byTestId } = require("../fixtures");
 
 const BEHAVIORS = path.resolve(__dirname, "../fixtures/project/behaviors");
+// The fixture's second mod. Nothing here edits it, but a machine created
+// through the mod-choice control could land in it, so it is restored too.
+const OVERLAY = path.resolve(__dirname, "../fixtures/project/overlay/behaviors");
 // Machines resolve sorted by id, so e2e-guard is what an unqualified
 // /forge/agents selects. Every test that means e2e-wander says so.
 const WANDER = "e2e-wander";
@@ -25,18 +28,23 @@ let original;
 let originalSchema;
 test.beforeAll(() => {
   original = {};
-  for (const name of fs.readdirSync(BEHAVIORS)) {
-    original[name] = fs.readFileSync(path.join(BEHAVIORS, name), "utf8");
+  for (const dir of [BEHAVIORS, OVERLAY]) {
+    original[dir] = {};
+    for (const name of fs.readdirSync(dir)) {
+      original[dir][name] = fs.readFileSync(path.join(dir, name), "utf8");
+    }
   }
   originalSchema = fs.readFileSync(SCHEMA, "utf8");
 });
 
 function restoreFiles() {
-  for (const name of fs.readdirSync(BEHAVIORS)) {
-    if (!(name in original)) fs.unlinkSync(path.join(BEHAVIORS, name));
-  }
-  for (const [name, body] of Object.entries(original)) {
-    fs.writeFileSync(path.join(BEHAVIORS, name), body);
+  for (const dir of [BEHAVIORS, OVERLAY]) {
+    for (const name of fs.readdirSync(dir)) {
+      if (!(name in original[dir])) fs.unlinkSync(path.join(dir, name));
+    }
+    for (const [name, body] of Object.entries(original[dir])) {
+      fs.writeFileSync(path.join(dir, name), body);
+    }
   }
   fs.writeFileSync(SCHEMA, originalSchema);
 }
@@ -64,6 +72,13 @@ const saveButton = (page) =>
 // reconstructing it here is both fragile and not what a user does — the first
 // version of this silently selected the wrong machine and the assertions were
 // about a file nobody had edited.
+// Creating names the mod: the fixture has two that can hold a machine, so the
+// control asks rather than picking — which mod owns a machine decides which one
+// can override it later.
+async function createMachine(page, mod = "e2e-core") {
+  await byTestId(page, "add-machine-mod").locator("select").selectOption(mod);
+}
+
 async function openAgents(page, id) {
   await page.goto("/forge/agents");
   await expect(byTestId(page, "agents-mode")).toBeVisible();
@@ -134,7 +149,7 @@ test("discard restores the working value without touching disk", async ({ page }
 
 test("creating a machine writes a file and lists it", async ({ page }) => {
   await openAgents(page);
-  await byTestId(page, "add-machine").click();
+  await createMachine(page);
 
   await expect(byTestId(page, "machine-NewMachine")).toBeVisible({ timeout: 10_000 });
   expect(fs.existsSync(path.join(BEHAVIORS, "NewMachine.json"))).toBe(true);
@@ -145,7 +160,7 @@ test("creating a machine writes a file and lists it", async ({ page }) => {
 
 test("a machine created in AGENTS is bindable in ENTS at once", async ({ page }) => {
   await openAgents(page);
-  await byTestId(page, "add-machine").click();
+  await createMachine(page);
   await expect(byTestId(page, "machine-NewMachine")).toBeVisible({ timeout: 10_000 });
 
   await page.goto("/forge/ents?type=TestGoblin");
@@ -218,7 +233,7 @@ test("deleting asks first, and cancelling leaves the file", async ({ page }) => 
 // internal/forge/machines covers it directly.
 test("a save over several machines reports each of them", async ({ page }) => {
   await openAgents(page);
-  await byTestId(page, "add-machine").click();
+  await createMachine(page);
   await expect(byTestId(page, "machine-NewMachine")).toBeVisible({ timeout: 10_000 });
 
   for (const id of ["e2e-wander", "NewMachine"]) {

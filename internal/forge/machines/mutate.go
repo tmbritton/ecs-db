@@ -147,31 +147,50 @@ func (s *Session) Create(id, modName string) (string, error) {
 // reads the files too.
 func (s *Session) fileDeclaring(id string) string {
 	for _, mod := range s.modsThatCanHold() {
-		entries, err := os.ReadDir(mod.Behaviors)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-				continue
-			}
-			path := filepath.Join(mod.Behaviors, e.Name())
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			var declared struct {
-				ID string `json:"id"`
-			}
-			if err := json.Unmarshal(raw, &declared); err != nil {
-				continue
-			}
-			if declared.ID == id {
-				return path
-			}
+		if path, ok := declaredIn(mod.Behaviors)[id]; ok {
+			return path
 		}
 	}
 	return ""
+}
+
+// declaredIn maps every id a behaviours directory declares to the file that
+// declares it.
+//
+// One implementation, because two callers ask the same question: "is this name
+// taken" (fileDeclaring) and "what names are taken" (claimedIDs). A second walk
+// written for the second question would be a second answer to the first, and
+// the create control would eventually propose a name Create then refuses.
+//
+// A file that fails to parse contributes nothing and is not an error here: it
+// is already reported as a project problem, and re-reporting it from a
+// name-availability check would say it twice.
+func declaredIn(dir string) map[string]string {
+	out := map[string]string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var declared struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &declared); err != nil || declared.ID == "" {
+			continue
+		}
+		if _, seen := out[declared.ID]; !seen {
+			out[declared.ID] = path
+		}
+	}
+	return out
 }
 
 // pickMod resolves the caller's choice, refusing to guess when there is one to

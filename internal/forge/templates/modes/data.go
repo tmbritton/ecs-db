@@ -2,6 +2,7 @@ package modes
 
 import (
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
@@ -46,6 +47,21 @@ type Data struct {
 	MachineMods []project.Mod
 	// Machine is the selected machine's working value, already a copy.
 	Machine *agent.MachineDefinition
+	// Inspection is what the engine says about that working value right now:
+	// every reason it would be refused, and the context manifest when it could
+	// be worked out at all.
+	//
+	// It cannot be read off Machine, which is parse-derived and carries no
+	// manifest, nor off the resolved Machines, which describe the files as last
+	// read rather than what is being edited.
+	Inspection machines.Inspection
+	// StrandedMachines are held with unsaved work but no longer resolve, so
+	// they are in no list and nothing can reach them except the problem panel.
+	StrandedMachines map[string]bool
+	// NewMachineID is an id nothing has claimed, for the create control. The
+	// server proposes it rather than the template guessing: what counts as
+	// claimed includes files that do not load, which only the session can see.
+	NewMachineID string
 	// HasMachines is false when no project could be opened, on the same terms
 	// as HasSession.
 	HasMachines bool

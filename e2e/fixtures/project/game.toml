@@ -27,6 +27,19 @@ actions   = "./actions/"
 guards    = "./guards/"
 assets    = "./assets/"
 
+# A second mod, later in load order, declaring a machine e2e-core also declares.
+# It is here so the override rule and the "which mod holds this?" create flow
+# are exercised by a browser rather than only by Go: both are decisions about
+# which file the *game* will run, and both were unreachable from the UI while
+# the fixture had a single mod.
+#
+# It shadows e2e-shadowed and nothing else, deliberately. Overriding a machine
+# the Story 2 spec edits by name would move that file's resolved path, and the
+# two specs would disagree about which file they meant.
+[[mods]]
+name      = "e2e-overlay"
+behaviors = "./overlay/behaviors/"
+
 [window]
 title    = "ECS e2e"
 width    = 640

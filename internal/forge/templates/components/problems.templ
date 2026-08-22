@@ -11,8 +11,9 @@ type ProblemsProps struct {
 	// ID is what a control's aria-describedby points at. Build it with
 	// ProblemsID so the two ends cannot drift.
 	ID string
-	// Problems are rendered in the order given, which is the order the
-	// validator produced — authored order, not severity.
+	// Problems are rendered in the order given, and the caller owns that
+	// order. The schema report arrives in authored order; machine problems
+	// arrive sorted, because the engine produces them by ranging maps.
 	Problems []Problem
 	Testid   string
 }

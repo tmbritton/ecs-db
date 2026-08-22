@@ -1,12 +1,14 @@
 package modes
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
+	"github.com/tmbritton/ecs-db/internal/forge/validation"
 )
 
 // MachineDefinition is aliased for the same reason Component and EntityType
@@ -22,10 +24,7 @@ func machineHref(path string) string { return "/forge/agents?machine=" + urlValu
 // machineBase is the filename without its extension, which is what the rename
 // control edits.
 func machineBase(path string) string {
-	if i := strings.LastIndexByte(path, '/'); i >= 0 {
-		path = path[i+1:]
-	}
-	return strings.TrimSuffix(path, ".json")
+	return strings.TrimSuffix(fileName(path), ".json")
 }
 
 func machineID(def *MachineDefinition) string {
@@ -71,9 +70,9 @@ func modOptions(mods []project.Mod) []components.Option {
 	return out
 }
 
-// newMachineAction posts the chosen mod along with a starter id.
-func newMachineAction() string {
-	return "@post('/forge/agents/machine?add=NewMachine&mod=' + encodeURIComponent(evt.target.value))"
+// newMachineAction posts the chosen mod along with the proposed id.
+func newMachineAction(id string) string {
+	return "@post('/forge/agents/machine?add=" + urlValue(id) + "&mod=' + encodeURIComponent(evt.target.value))"
 }
 
 // bindingWarning says what renaming this id would break, before it breaks.
@@ -121,4 +120,170 @@ func boundBy(data Data, id string) []string {
 		}
 	}
 	return out
+}
+
+// ManifestState is what the CONTEXT MANIFEST panel can be showing.
+//
+// Three states, and the first two are the reason the type exists. The engine
+// works a manifest out only when a machine validates completely, so an empty
+// manifest means either "this machine seeds nothing" or "nobody knows what this
+// machine seeds" — and the panel that answers "what does this attach on spawn"
+// must never give the first answer when the truth is the second.
+type ManifestState int
+
+const (
+	// ManifestUnavailable is a machine that does not validate, so the engine
+	// never got as far as mapping its context.
+	ManifestUnavailable ManifestState = iota
+	// ManifestEmpty is a machine that validates and declares no context.
+	ManifestEmpty
+	// ManifestMapped is the ordinary case.
+	ManifestMapped
+)
+
+func manifestState(data Data) ManifestState {
+	if !data.Inspection.Computed {
+		return ManifestUnavailable
+	}
+	if len(machineSeeds(data)) == 0 {
+		return ManifestEmpty
+	}
+	return ManifestMapped
+}
+
+// machineSeeds reads the selected machine's context in authored order.
+//
+// Seed is ENTS's type, deliberately: the two panels answer the same question
+// about the same data, and a second view type would be a second place for
+// "which component declares this" to be decided.
+//
+// There is no unresolved-component state here, and there is one in ENTS. The
+// difference is real rather than an omission: ENTS renders a manifest computed
+// against schema.json as it was at startup, which goes stale as the schema is
+// edited, while this one is recomputed against the schema being edited on every
+// render. A key naming no component is not a stale entry here — it is a
+// validation error, so the machine does not validate and the panel is already
+// in its unavailable state, with that key named in the problem list beside it.
+func machineSeeds(data Data) []Seed {
+	def := data.Machine
+	if def == nil {
+		return nil
+	}
+	keys := def.ContextOrder
+	if len(keys) == 0 {
+		for k := range def.Context {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+	}
+	out := make([]Seed, 0, len(keys))
+	for _, k := range keys {
+		if _, ok := def.Context[k]; !ok {
+			continue
+		}
+		out = append(out, Seed{Key: k, Value: def.Context[k], Component: data.Inspection.Manifest[k]})
+	}
+	return out
+}
+
+// validityLine is the readout the prototype puts at the top right of the
+// canvas: what saving this machine would do.
+func validityLine(data Data) string {
+	if data.Inspection.Computed {
+		return "✓ valid · saves & hot-swaps into the running game"
+	}
+	n := len(data.Inspection.Errors)
+	if n == 0 {
+		// The zero value: not computed and no reason given. No render reaches
+		// it — the header is inside the editor, which needs a selected machine,
+		// and the server fills an inspection for every one of those, reporting
+		// its own failure as a problem if Inspect refused. It is here so the
+		// function is total rather than answering "0 problems", and the test
+		// says so.
+		return "not checked"
+	}
+	if n == 1 {
+		return "✕ 1 problem — the engine will not load this machine"
+	}
+	return fmt.Sprintf("✕ %d problems — the engine will not load this machine", n)
+}
+
+// machineProblems is every reason the engine gives, as the shared problem list
+// renders them.
+//
+// Blocking, all of them: Session.Save refuses a machine that does not validate
+// and writes the rest, so the save of this one is genuinely refused — which is
+// what validation.Problem.Blocking means and the only thing it means.
+//
+// Sorted, which is not cosmetic. ValidateMachine collects context-key errors by
+// ranging def.Context and state errors by ranging def.States, both maps, so the
+// same broken machine produces a different order on every call. The page stream
+// patches an element only when its markup changed, so an unsorted list makes
+// the whole mode content — the id and filename inputs included — get replaced
+// on every tick for as long as a machine is invalid.
+//
+// Story 8 places each of these against the node that caused it. Until it does,
+// a count with no way to see what is wrong would be a worse answer than a list.
+func machineProblems(data Data) []components.Problem {
+	out := make([]components.Problem, 0, len(data.Inspection.Errors))
+	for _, e := range data.Inspection.Errors {
+		message := e.Message
+		if e.StateID != "" {
+			message = "state " + e.StateID + ": " + message
+		}
+		out = append(out, components.Problem{
+			Owner:    validation.Owner{Kind: validation.OwnerMachine, Name: e.MachineID},
+			Field:    e.Field,
+			Message:  message,
+			Blocking: true,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Message < out[j].Message })
+	return out
+}
+
+// machineSource is the mod and file the selected machine came from.
+//
+// Not the absolute path, which is what the skeleton showed: it is the
+// developer's filesystem, it is long enough to push the rest of the header off
+// the line, and the half of it that answers a question — which mod owns this —
+// is the half a path buries in the middle.
+func machineSource(data Data) string {
+	name := fileName(data.SelectedMachine)
+	if mod := machineMod(data, data.SelectedMachine); mod != "" {
+		return mod + "/" + name
+	}
+	return name
+}
+
+// machineMod is the mod a path resolved from, or "" for a path the resolved set
+// does not know — a machine stranded by a re-resolve, which still has to render
+// as something.
+func machineMod(data Data, path string) string {
+	for _, m := range data.Machines {
+		if m.Path == path {
+			return m.Mod
+		}
+	}
+	return ""
+}
+
+func fileName(path string) string {
+	if i := strings.LastIndexByte(path, '/'); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// overrideTitle says which mod won, in the tag itself. "override" alone tells
+// you something happened and not what: the winning mod is on the row, and the
+// tag names it again so the two cannot be read apart.
+func overrideTitle(m project.Machine) string {
+	return "shadows an earlier mod's machine of the same id — " + m.Mod + " wins"
+}
+
+// strandedProblem reports whether a problem is about work the session is still
+// holding, which is the only kind that has anything left to do about it.
+func strandedProblem(data Data, p project.Problem) bool {
+	return data.StrandedMachines[p.Path]
 }

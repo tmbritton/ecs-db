@@ -1,0 +1,7 @@
+{
+  "id": "e2e-shadowed",
+  "initial": "overlay-version",
+  "states": {
+    "overlay-version": {}
+  }
+}

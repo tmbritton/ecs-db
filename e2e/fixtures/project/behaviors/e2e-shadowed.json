@@ -1,0 +1,7 @@
+{
+  "id": "e2e-shadowed",
+  "initial": "core-version",
+  "states": {
+    "core-version": {}
+  }
+}

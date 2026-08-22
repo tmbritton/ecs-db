@@ -289,10 +289,25 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 		Problems:     data.MachineProblems,
 	})
 	data.SelectedMachine, data.DirtyMachines, data.ReformatMachines = s.machineData(r)
+	slug := modeSlug(r)
 	if s.cfg.MachineSession != nil {
 		data.HasMachines = true
 		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
-		data.Machine = s.machineDefinition(data.SelectedMachine)
+		// Only where they are read, like the migration preview and the usage
+		// counts below. Validating a machine and proposing a free id both cost
+		// a walk of the behaviours directories, and no mode but AGENTS renders
+		// either.
+		if slug == "agents" {
+			// One call, and the definition comes out of it. Reading the
+			// machine separately would take the session lock twice, and the
+			// panel maps context keys from one read to components from the
+			// other — so a key added in between would render with no component
+			// beside it.
+			data.Inspection = s.machineInspection(data.SelectedMachine)
+			data.Machine = data.Inspection.Definition
+			data.StrandedMachines = strandedSet(s.cfg.MachineSession)
+			data.NewMachineID = s.cfg.MachineSession.FreeID("NewMachine")
+		}
 	}
 	data.Problem = s.lastEditProblem()
 	data.Confirming = s.isConfirming()
@@ -303,7 +318,6 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	// only where they are read: the migration panel is SCHEMA's, the
 	// confirmation can be up on any mode, and the usage counts belong to the
 	// two modes that edit schema.json.
-	slug := modeSlug(r)
 	if slug == "schema" || data.Confirming {
 		data.Migration = s.migrationPreview()
 	}

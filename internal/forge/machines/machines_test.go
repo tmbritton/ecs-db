@@ -61,6 +61,21 @@ func testSchema() schema.DatabaseSchema {
 // open builds a project with one mod holding the two machines above.
 func open(t *testing.T, files map[string]string, extraMods ...string) (*machines.Session, string) {
 	t.Helper()
+	s, core, _ := openProject(t, files, extraMods...)
+	return s, core
+}
+
+// openWithSchema is open, handing back the schema the session validates
+// against so a test can change it underneath — which is exactly what editing
+// in SCHEMA mode does while AGENTS is open.
+func openWithSchema(t *testing.T, files map[string]string, extraMods ...string) (*machines.Session, *schema.DatabaseSchema) {
+	t.Helper()
+	s, _, current := openProject(t, files, extraMods...)
+	return s, current
+}
+
+func openProject(t *testing.T, files map[string]string, extraMods ...string) (*machines.Session, string, *schema.DatabaseSchema) {
+	t.Helper()
 	root := t.TempDir()
 	core := filepath.Join(root, "core", "behaviors")
 	if err := os.MkdirAll(core, 0o750); err != nil {
@@ -88,7 +103,7 @@ func open(t *testing.T, files map[string]string, extraMods ...string) (*machines
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	return s, core
+	return s, core, &current
 }
 
 func pathOf(t *testing.T, s *machines.Session, id string) string {

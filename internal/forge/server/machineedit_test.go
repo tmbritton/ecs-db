@@ -590,3 +590,141 @@ func TestAgentsFooter_RendersTheSameForAnUnchangedState(t *testing.T) {
 			"stream would re-patch it on a random fraction of every tick", len(seen))
 	}
 }
+
+// The manifest and the validity readout are computed per render from the
+// *working* value. Neither can come off the resolved machine, which describes
+// the file as last read, nor off the working definition, which is parse-derived
+// and carries no manifest at all — so this is the only test that can show the
+// page is showing what is being edited.
+func TestAgentsPage_ShowsTheManifestForTheWorkingValue(t *testing.T) {
+	srv, s, dir := machineServer(t)
+	path := filepath.Join(dir, "wander.json")
+
+	// hp is a field of Health in the fixture schema, so it maps.
+	if err := s.cfg.MachineSession.Edit(path, func(d *agent.MachineDefinition) error {
+		d.Context = map[string]any{"hp": float64(3)}
+		d.ContextOrder = []string{"hp"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, body := get(t, srv, "/forge/agents")
+	if !strings.Contains(body, `data-testid="manifest-hp"`) {
+		t.Fatalf("the manifest does not show a key added in this session:\n%s", body)
+	}
+	if !strings.Contains(body, "Health") {
+		t.Error("the manifest does not name the component the key comes from")
+	}
+	if !strings.Contains(body, `data-valid="true"`) {
+		t.Error("a machine the engine accepts is not reported as valid")
+	}
+}
+
+func TestAgentsPage_ReportsAMachineEditedIntoInvalidity(t *testing.T) {
+	srv, s, dir := machineServer(t)
+	path := filepath.Join(dir, "wander.json")
+
+	if err := s.cfg.MachineSession.Edit(path, func(d *agent.MachineDefinition) error {
+		d.States["idle"].On["GO"][0].Target = "nowhere"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, body := get(t, srv, "/forge/agents")
+	if !strings.Contains(body, `data-testid="manifest-unavailable"`) {
+		t.Errorf("a machine that does not validate still shows a manifest:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="machine-problems"`) {
+		t.Error("nothing says why")
+	}
+	if !strings.Contains(body, "nowhere") {
+		t.Error("the problem does not name the broken target")
+	}
+}
+
+// A machine stranded by a re-resolve is in no list, so the only way to reach it
+// is the problem panel — and the only handler that must accept it is discard.
+func TestMachineDiscard_ReachesStrandedWork(t *testing.T) {
+	srv, s, dir := machineServer(t, "overlay")
+	path := filepath.Join(dir, "wander.json")
+	sess := s.cfg.MachineSession
+
+	if err := sess.Edit(path, func(d *agent.MachineDefinition) error {
+		d.Initial = "moving"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A later mod supplies its own wander, so the core file stops resolving.
+	overlay := filepath.Join(filepath.Dir(filepath.Dir(dir)), "overlay", "behaviors")
+	if err := os.WriteFile(filepath.Join(overlay, "wander.json"), []byte(wanderMachine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The page says so, and offers the one thing there is to do.
+	_, body := get(t, srv, "/forge/agents")
+	if !strings.Contains(body, `data-testid="machine-project-problems"`) {
+		t.Fatalf("stranded work is not reported on the page:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="discard-stranded-wander.json"`) {
+		t.Error("stranded work is reported with no way to give it up")
+	}
+
+	post(t, srv, "/forge/agents/discard?machine="+url.QueryEscape(path))
+	for _, held := range sess.Held() {
+		if held == path {
+			t.Fatal("the stranded machine is still held after discarding it")
+		}
+	}
+}
+
+// Rename and delete stay on the resolved set. A machine in no list has no
+// visible subject to rename, and the wider set exists for discard alone.
+func TestMachineEdit_DoesNotReachStrandedWork(t *testing.T) {
+	srv, s, dir := machineServer(t, "overlay")
+	path := filepath.Join(dir, "wander.json")
+	sess := s.cfg.MachineSession
+
+	if err := sess.Edit(path, func(d *agent.MachineDefinition) error {
+		d.Initial = "moving"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	overlay := filepath.Join(filepath.Dir(filepath.Dir(dir)), "overlay", "behaviors")
+	if err := os.WriteFile(filepath.Join(overlay, "wander.json"), []byte(wanderMachine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	post(t, srv, "/forge/agents/machine?renameID=roam&machine="+url.QueryEscape(path))
+	if got := s.lastEditProblem(); !strings.Contains(got, "not a machine this project has open") {
+		t.Errorf("renaming a stranded machine was not refused: %q", got)
+	}
+}
+
+// The create control proposes rather than repeats: the skeleton posted a fixed
+// id, so the second press was refused until the first machine was renamed.
+func TestAgentsPage_ProposesAFreeIDForEachNewMachine(t *testing.T) {
+	srv, s, _ := machineServer(t)
+
+	_, body := get(t, srv, "/forge/agents")
+	if !strings.Contains(body, "add=NewMachine") {
+		t.Fatalf("the create control proposes nothing:\n%s", body)
+	}
+
+	if _, err := s.cfg.MachineSession.Create("NewMachine", "core"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, second := get(t, srv, "/forge/agents")
+	if !strings.Contains(second, "add=NewMachine2") {
+		t.Errorf("the create control still proposes a taken id:\n%s", second)
+	}
+}

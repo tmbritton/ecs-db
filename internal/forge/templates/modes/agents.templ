@@ -4,10 +4,8 @@ import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 
 // AgentsMode edits the project's behaviour machines.
 //
-// The skeleton Story 3 fills in: it lists what resolved and offers the
-// structural operations, so the editing session underneath has something
-// driving it. The mod and override tags, the context manifest and the validity
-// readout are Story 3's; the canvas is Stories 4 and 5.
+// The left rail is what this project resolved and what the selected machine
+// seeds; the right is the editor Stories 4 and 5 replace with the canvas.
 templ AgentsMode(data Data) {
 	if !data.HasMachines {
 		@stub("AGENTS", "No project is open — see the log for why.", "")
@@ -15,10 +13,12 @@ templ AgentsMode(data Data) {
 		<div class="schema" data-testid="agents-mode">
 			@machineList(data)
 			<div class="schema__main">
+				if data.Problem != "" {
+					<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+				}
+				@projectProblems(data)
 				if data.SelectedMachine == "" {
-					<div class="schema__empty" data-testid="agents-empty">
-						<p>This project declares no behaviour machines yet.</p>
-					</div>
+					@noMachines(data)
 				} else {
 					@machineEditor(data)
 				}
@@ -29,8 +29,8 @@ templ AgentsMode(data Data) {
 
 templ machineList(data Data) {
 	<nav class="schema__list" aria-label="Machines" data-testid="machine-list">
-		<div class="section-heading"><span>Machines</span></div>
-		<p class="schema__hint mono">behaviors/ · one XState file each</p>
+		<div class="section-heading"><span>Machines ◂ behaviors/</span></div>
+		<p class="schema__hint mono">one XState file each</p>
 		for _, m := range data.Machines {
 			<a
 				href={ URL(machineHref(m.Path)) }
@@ -47,9 +47,20 @@ templ machineList(data Data) {
 				if data.DirtyMachines[m.Path] {
 					<span class="badge-problem" title="unsaved changes" data-testid={ "machine-dirty-" + m.ID }>●</span>
 				}
+				<span class="list-row__mod mono" data-testid={ "machine-mod-" + m.ID }>{ m.Mod }</span>
+				if m.Overrides {
+					<span
+						class="badge-override mono"
+						title={ overrideTitle(m) }
+						data-testid={ "machine-override-" + m.ID }
+					>override</span>
+				}
 			</a>
 		}
-		@newMachineControl(data)
+		if len(data.Machines) > 0 {
+			@newMachineControl(data)
+		}
+		@contextManifest(data)
 		<p class="schema__foot">
 			A machine's identity is the <span class="mono">id</span> inside the file, not
 			its filename — an entity type's behaviour binding resolves through the id.
@@ -60,6 +71,10 @@ templ machineList(data Data) {
 // newMachineControl asks which mod when there is a choice, rather than picking.
 // Which mod a machine belongs to decides which one can override it later, and
 // choosing silently makes that decision somewhere nobody will look.
+//
+// The id it proposes comes from the session, which knows what is claimed —
+// including by files that do not load. The skeleton posted a fixed one, so the
+// control worked once and was refused every time after.
 templ newMachineControl(data Data) {
 	if len(data.MachineMods) > 1 {
 		<div data-testid="add-machine-mod">
@@ -68,7 +83,7 @@ templ newMachineControl(data Data) {
 				Signal:   "",
 				Selected: "",
 				Options:  modOptions(data.MachineMods),
-				Action:   newMachineAction(),
+				Action:   newMachineAction(data.NewMachineID),
 			})
 		</div>
 	} else {
@@ -76,20 +91,86 @@ templ newMachineControl(data Data) {
 			type="button"
 			class="btn--dashed schema__add"
 			data-testid="add-machine"
-			data-on:click={ action("/forge/agents/machine", "add", "NewMachine") }
+			data-on:click={ action("/forge/agents/machine", "add", data.NewMachineID) }
 		>+ NEW MACHINE</button>
+	}
+}
+
+// noMachines is the empty state, and it offers the thing there is to do rather
+// than reporting that there is nothing.
+templ noMachines(data Data) {
+	<div class="schema__empty" data-testid="agents-empty">
+		if len(data.StrandedMachines) > 0 {
+			<p data-testid="agents-empty-stranded">
+				Nothing in this project resolves as a machine right now, and there are unsaved
+				changes above that cannot be listed until it does.
+			</p>
+		} else {
+			<p>This project declares no behaviour machines yet.</p>
+		}
+		<p class="schema__note">
+			A machine is one XState file in a mod's <span class="mono">behaviors/</span>
+			directory. An entity type binds one by id, and the engine starts it when the
+			entity spawns.
+		</p>
+		@newMachineControl(data)
+	</div>
+}
+
+// contextManifest is what the selected machine attaches and seeds on spawn.
+//
+// Read-only, and it says so: these values live in the machine's context block.
+// A field that looks editable and silently is not is worse than one that
+// plainly is not — the rule ENTS's seeds panel already follows.
+templ contextManifest(data Data) {
+	if data.SelectedMachine != "" {
+		<div class="manifest" data-testid="context-manifest">
+			<div class="section-heading"><span>Context manifest</span></div>
+			<p class="schema__hint mono" data-testid="manifest-source">from the machine's context block · read-only</p>
+			switch manifestState(data) {
+				case ManifestUnavailable:
+					<p class="manifest__unavailable" data-testid="manifest-unavailable">
+						Not computed — this machine does not validate, so the engine has not
+						worked out where its context comes from.
+					</p>
+				case ManifestEmpty:
+					<p class="manifest__note" data-testid="manifest-empty">
+						This machine seeds no context.
+					</p>
+				default:
+					<div class="manifest__rows">
+						for _, seed := range machineSeeds(data) {
+							<div class="manifest__row" data-testid={ "manifest-" + seed.Key }>
+								<span class="manifest__key">{ seed.Key }</span>
+								<span class="manifest__value mono">{ seedValue(seed.Value) }</span>
+								<span class="manifest__comp mono">from { seed.Component }</span>
+							</div>
+						}
+					</div>
+					<p class="manifest__note">
+						= the components this machine attaches &amp; seeds on spawn
+					</p>
+			}
+		</div>
 	}
 }
 
 templ machineEditor(data Data) {
 	{{ def := data.Machine }}
 	<div class="schema__editor" data-testid="machine-editor" data-machine={ machineBase(data.SelectedMachine) }>
-		if data.Problem != "" {
-			<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
-		}
+		<div class="machine-header">
+			<span class="machine-header__file" data-testid="machine-source">{ machineSource(data) }</span>
+			<span class="machine-header__format mono" data-testid="machine-format">XState v4 · round-trips with Stately</span>
+			<span
+				class={ "machine-header__validity", "mono", kv("machine-header__validity--bad", !data.Inspection.Computed) }
+				data-testid="machine-validity"
+				data-valid={ boolAttr(data.Inspection.Computed) }
+			>{ validityLine(data) }</span>
+		</div>
+		@components.Problems(components.ProblemsProps{Problems: machineProblems(data), Testid: "machine-problems"})
+
 		<div class="schema__title">
 			<span class="schema__name" data-testid="machine-name">{ machineID(def) }</span>
-			<span class="schema__source mono">{ data.SelectedMachine }</span>
 		</div>
 
 		<div class="schema__fields">
@@ -132,6 +213,38 @@ templ machineEditor(data Data) {
 			data-on:click={ confirmAction(deleteWarning(data, machineID(def)), action("/forge/agents/machine", "delete", data.SelectedMachine)) }
 		>Delete machine</button>
 	</div>
+}
+
+// projectProblems is every behaviour file that did not become a machine.
+//
+// It lives in the editor rather than the list because a file that did not
+// resolve has no row to hang from — which is exactly why it needs somewhere to
+// be said. A machine stranded by a re-resolve is the same shape of problem with
+// one thing left to do about it, so that one carries the control to do it.
+templ projectProblems(data Data) {
+	if len(data.MachineProblems) > 0 {
+		<div class="problems-block" data-testid="machine-project-problems">
+			<div class="section-heading">Files that did not load</div>
+			<ul class="problems" role="alert">
+				for _, p := range data.MachineProblems {
+					<li class="problem problem--warning">
+						<span class="problem__badge mono">{ fileName(p.Path) }</span>
+						<span class="problem__text">{ p.Err.Error() }</span>
+						if strandedProblem(data, p) {
+							<button
+								type="button"
+								class="btn--danger problem__action"
+								data-testid={ "discard-stranded-" + fileName(p.Path) }
+								data-on:click={ confirmAction(
+									"Discard the unsaved changes to "+fileName(p.Path)+"? They cannot be recovered.",
+									action("/forge/agents/discard", "machine", p.Path)) }
+							>Discard</button>
+						}
+					</li>
+				}
+			</ul>
+		</div>
+	}
 }
 
 // machineStates is a plain readout until Stories 4 and 5 draw the chart.

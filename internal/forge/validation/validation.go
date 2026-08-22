@@ -28,14 +28,27 @@ import (
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
-// OwnerKind names which half of schema.json a problem belongs to.
+// OwnerKind names what a problem is about.
 type OwnerKind int
 
 const (
-	// OwnerSchema is the file as a whole: nothing smaller could be blamed.
+	// OwnerSchema is schema.json as a whole: nothing smaller could be blamed.
 	OwnerSchema OwnerKind = iota
 	OwnerComponent
 	OwnerEntityType
+	// OwnerMachine is one behaviour machine, named by its id.
+	//
+	// Check never produces one: the machine checks are agent.ValidateMachine's,
+	// run per machine by the editing session against the value being edited,
+	// and this package looks at schema.json. AGENTS sets it on the problems it
+	// renders through the shared list.
+	//
+	// Nothing reads it yet — the list renders severity from Blocking alone, so
+	// removing it would change no output. It is set because a problem is about
+	// something, and the zero value would record a machine the engine refuses
+	// as a fault in schema.json. Story 8 attributes each problem to the node
+	// that caused it, and that is the reader.
+	OwnerMachine
 )
 
 // Owner is the thing a problem is about.

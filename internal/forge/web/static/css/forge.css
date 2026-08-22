@@ -1674,3 +1674,133 @@ button.list-row:not(.list-row--active):hover {
 .save-footer__elsewhere {
   color: var(--amber);
 }
+
+/* --- AGENTS: the machine list and its context manifest ------------------- */
+
+/* Which mod contributed the file. Dim and mono: it answers "where did this come
+   from", which matters when two mods declare the same id, and is noise the rest
+   of the time. */
+.list-row__mod {
+  flex: none;
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+/* Red, and outlined rather than filled: an override is not an error, but it is
+   the reason a machine you are editing is not the one the game runs. */
+.badge-override {
+  flex: none;
+  font-size: 8.5px;
+  color: var(--red);
+  border: 1px solid var(--red);
+  padding: 0 3px;
+}
+
+.manifest {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: var(--border-w) solid var(--border);
+}
+
+.manifest > .section-heading,
+.manifest__rows,
+.manifest__note,
+.manifest__unavailable {
+  padding: 0 12px;
+}
+
+.manifest__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+/* Key and value on one line, component beneath: the panel is 212px wide, and
+   three columns in it would truncate the component names that are the whole
+   point of the mapping. */
+.manifest__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
+.manifest__key {
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manifest__value {
+  color: var(--text);
+}
+
+.manifest__comp {
+  flex-basis: 100%;
+  text-align: right;
+  font-size: 9.5px;
+  color: var(--violet);
+}
+
+.manifest__note {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+/* Amber, not red: the manifest being unavailable is a consequence of the
+   machine being invalid, and the machine's own problems are what is wrong. Two
+   red blocks saying the same thing twice reads as two faults. */
+.manifest__unavailable {
+  margin: 6px 0 0;
+  padding: 6px 12px;
+  border-left: var(--border-w) solid var(--amber);
+  background: var(--ink);
+  font-size: 11px;
+  color: var(--text);
+}
+
+/* The header the prototype puts above the canvas: what file this is, what
+   format it is in, and what saving it would do. */
+.machine-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: var(--raised);
+  border-bottom: var(--border-w) solid var(--border);
+  font-size: 12px;
+}
+
+.machine-header__file {
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.machine-header__format {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.machine-header__validity {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--green);
+}
+
+.machine-header__validity--bad {
+  color: var(--red);
+}
+
+/* The discard on a stranded machine sits inside its problem row, because the
+   row is the only place that machine appears at all. */
+.problem__action {
+  margin-left: auto;
+  flex: none;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}

@@ -460,7 +460,9 @@ Two checks against the code changed the shape (see the epic README for the probe
   - Saving is per machine: an invalid schema stops the engine, an invalid machine stops one entity, so the refusal is one file
   - The shell's SSE subscription carried `?component=` alone, so AGENTS re-rendered with no machine named and swapped under the user every tick
 
-- [ ] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`, which is populated only when validation fully succeeds.
+- [x] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`, which is populated only when validation fully succeeds.
+  - The manifest's two absences are different sentences: a machine that seeds nothing and one whose seeds are unknown are the same empty map, and the panel must not give the first answer when the truth is the second
+  - Stranded work — held with unsaved changes but no longer resolving — could be reached by nothing, because every route validated its path against the resolved set
 
 - [ ] **Statechart canvas: rendering** — Nodes, edges, nesting and selection, server-rendered and patched down the page stream. No JS.
 

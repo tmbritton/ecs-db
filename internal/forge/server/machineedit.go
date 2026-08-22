@@ -29,16 +29,32 @@ func (s *Server) machineSession(w http.ResponseWriter) (*machines.Session, bool)
 	return s.cfg.MachineSession, true
 }
 
-// machinePath resolves the ?machine= parameter to a path the session holds.
+// machinePath resolves the ?machine= parameter to a machine in the resolved set.
 //
 // Checked against the open set rather than trusted: the parameter arrives from
 // the page and names a file, and a handler that passed it through would let a
 // crafted request address any path on disk.
 func (s *Server) machinePath(sess *machines.Session, want string) (string, error) {
+	return matchMachine(sess.Paths(), want)
+}
+
+// machineHeld is the same against the wider set: everything the session holds a
+// file for, including a machine kept back because it had unsaved work and
+// stopped resolving.
+//
+// Only discard uses it, and deliberately only discard. Renaming or deleting a
+// machine that is in no list is an operation with no visible subject; giving up
+// its work is the one thing there is left to do with it, and without this the
+// work is kept and unreachable.
+func (s *Server) machineHeld(sess *machines.Session, want string) (string, error) {
+	return matchMachine(sess.Held(), want)
+}
+
+func matchMachine(paths []string, want string) (string, error) {
 	if want == "" {
 		return "", fmt.Errorf("no machine named")
 	}
-	for _, path := range sess.Paths() {
+	for _, path := range paths {
 		if path == want {
 			return path, nil
 		}
@@ -147,7 +163,7 @@ func (s *Server) handleMachineDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if machine := r.URL.Query().Get("machine"); machine != "" {
-		path, err := s.machinePath(sess, machine)
+		path, err := s.machineHeld(sess, machine)
 		if err != nil {
 			s.refuseMachineEdit(w, r, err)
 			return
@@ -211,15 +227,33 @@ func selectMachine(sess *machines.Session, want string) string {
 	return ""
 }
 
-// machineDefinition reads one machine's working value for rendering.
-func (s *Server) machineDefinition(path string) *agent.MachineDefinition {
+// machineInspection is what the engine says about the selected machine.
+//
+// A machine that cannot be inspected is reported as one problem rather than as
+// an empty inspection: the zero value reads as "not validated", and a panel
+// that showed "not computed" with no reason beside it would be describing the
+// machine when the trouble is with Forge.
+func (s *Server) machineInspection(path string) machines.Inspection {
 	if s.cfg.MachineSession == nil || path == "" {
+		return machines.Inspection{}
+	}
+	got, err := s.cfg.MachineSession.Inspect(path)
+	if err != nil {
+		slog.Error("inspecting a machine", "path", path, "err", err)
+		return machines.Inspection{Errors: []agent.ValidationError{{Message: err.Error()}}}
+	}
+	return got
+}
+
+// strandedSet is which held machines are in no list, for the problem panel.
+func strandedSet(sess *machines.Session) map[string]bool {
+	stranded := sess.Stranded()
+	if len(stranded) == 0 {
 		return nil
 	}
-	var out *agent.MachineDefinition
-	if err := s.cfg.MachineSession.Read(path, func(d *agent.MachineDefinition) { out = d }); err != nil {
-		slog.Error("reading a machine", "path", path, "err", err)
-		return nil
+	out := make(map[string]bool, len(stranded))
+	for _, path := range stranded {
+		out[path] = true
 	}
 	return out
 }

@@ -424,6 +424,12 @@ func (s *Session) SaveOne(path string) SaveResult {
 }
 
 // Discard restores one machine from the last saved state.
+//
+// It re-resolves afterwards, which matters for exactly one case: a machine held
+// only because reload() found unsaved work on a file that had stopped
+// resolving. Giving that work up is the whole of what keeps it held, so
+// without the re-resolve the session would carry the file — and report it as a
+// problem — for the life of the process.
 func (s *Session) Discard(path string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -431,7 +437,10 @@ func (s *Session) Discard(path string) error {
 	if !ok {
 		return fmt.Errorf("machines: no open machine at %s", path)
 	}
-	return f.Discard()
+	if err := f.Discard(); err != nil {
+		return err
+	}
+	return s.reload()
 }
 
 // DiscardAll restores every machine.
