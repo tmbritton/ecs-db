@@ -10,6 +10,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
+	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -40,11 +41,19 @@ func sessionServer(t *testing.T) (*httptest.Server, *Server, *session.Session, s
 	if err := os.WriteFile(path, []byte(sessionSchema), 0o600); err != nil {
 		t.Fatalf("seeding: %v", err)
 	}
+	srv, s, sess, path := sessionServerAt(t, path, status.Config{})
+	return srv, s, sess, path
+}
+
+// sessionServerAt is sessionServer over an existing file, so a test that needs
+// a database alongside it can build both.
+func sessionServerAt(t *testing.T, path string, engine status.Config) (*httptest.Server, *Server, *session.Session, string) {
+	t.Helper()
 	sess, err := session.Open(path)
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
-	s := New(Config{Addr: "127.0.0.1:0", Session: sess}, testFS())
+	s := New(Config{Addr: "127.0.0.1:0", Session: sess, Engine: engine}, testFS())
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
 	return srv, s, sess, path

@@ -13,7 +13,7 @@ import (
 // top, mode rail down the left, and the active mode's content filling the
 // rest. It knows nothing about what any mode contains — it renders the
 // component it is handed.
-templ Shell(active mode.Mode, selection string, engine status.Status, saves []savereport.Report, footer Component, content Component) {
+templ Shell(active mode.Mode, selection string, engine status.Status, saves []savereport.Report, footer Component, content Component, confirm Component) {
 	@Layout("Forge — " + active.Title) {
 		<div class="shell" data-testid="shell" data-init={ eventStream(active, selection) }>
 			@menuBar(engine)
@@ -23,6 +23,7 @@ templ Shell(active mode.Mode, selection string, engine status.Status, saves []sa
 				@SaveFooterRegion(footer)
 				@components.SaveReports(components.SaveReportsProps{Reports: saves})
 			</div>
+			@SaveConfirmRegion(confirm)
 		</div>
 	}
 }
@@ -80,6 +81,32 @@ templ SaveFooterRegion(footer Component) {
 	</div>
 }
 
+
+// SaveConfirmRegion is the element the stream patches when a save is held for
+// confirmation.
+//
+// It sits in the shell rather than in a mode because the save footer does: the
+// button can be pressed from any of the six modes, and a confirmation that
+// only one mode knows how to draw makes the other five answer a save with
+// silence. The region is always present so there is something to patch — a
+// Datastar patch replaces an element, and an element that is absent until the
+// first time it is needed has nothing to replace.
+//
+// What this region does NOT do is make the rest of the shell inert. `inert`
+// would have to sit on .shell__body, which no region patches, so it could only
+// ever hold the value it had at page load — and the dialog always arrives
+// afterwards, on the stream. Making it work needs the native <dialog> element
+// and showModal(), which brings a real focus trap and background inertness
+// with it; that is a change to the shared primitive and belongs with Epic 17,
+// which builds the rest of the dialog set. Until then the dialog traps clicks
+// through its scrim but not the tab order.
+templ SaveConfirmRegion(confirm Component) {
+	<div id="save-confirm" data-testid="save-confirm-slot">
+		if confirm != nil {
+			@confirm
+		}
+	</div>
+}
 
 // ModeContentRegion is the element the stream patches when a mode's content
 // changes. Without it an edit only appears on the next full page load.

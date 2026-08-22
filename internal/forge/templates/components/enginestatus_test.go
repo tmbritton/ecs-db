@@ -30,13 +30,13 @@ func TestEngineStatus(t *testing.T) {
 		},
 		{
 			// A stale database means something quite different from an absent
-			// one — the engine itself would refuse to start against it — so it
-			// must be distinguishable, and must show both numbers.
+			// one — the engine migrates it on its next start — so it must be
+			// distinguishable, and must show both numbers.
 			name: "mismatch shows both versions",
 			status: status.Status{
 				State: status.StateMismatch, SchemaVersion: 4, DBVersion: 3, ModName: "core",
 			},
-			want:    []string{"engine-status__dot--bad", "schema v4", "db v3", "refuse"},
+			want:    []string{"engine-status__dot--bad", "schema v4", "db v3", "migrates on next start"},
 			notWant: []string{"engine-status__dot--ok", "hot-reload live", "watcher offline"},
 		},
 		{

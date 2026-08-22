@@ -1,0 +1,66 @@
+package modes
+
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
+// migrationPanel says what the engine will do to the database on its next
+// start.
+//
+// Forge never migrates anything — the engine owns that, at its own startup.
+// The wording throughout is "the engine will", not "this will be applied",
+// because a tool that implies it ran the migration is a tool you go looking in
+// the wrong place when something is missing.
+templ migrationPanel(data Data) {
+	<div class="migration" data-testid="migration-panel">
+		<div class="section-heading">Pending migration</div>
+		if !data.Migration.Available {
+			<p class="migration__unknown" data-testid="migration-unavailable">
+				{ data.Migration.Reason }
+			</p>
+			<p class="schema__note">
+				Until there is a database to compare against, there is no way to say what a
+				save would change — which is not the same as saying it would change nothing.
+			</p>
+		} else {
+			if data.Migration.SnapshotUnknown {
+				<p class="migration__stale" role="alert" data-testid="migration-snapshot-unknown">
+					<span class="mono">schema.json</span> on disk cannot be parsed, so there is no
+					way to tell whether the database had fallen behind it before this edit. The
+					comparison against the database below is unaffected.
+				</p>
+			} else if data.Migration.Stale() {
+				<p class="migration__stale" data-testid="migration-stale">
+					The database was built at
+					<span class="mono">v{ itoa(data.Migration.DBVersion) }</span>, and
+					<span class="mono">schema.json</span> on disk is
+					<span class="mono">v{ itoa(data.Migration.SnapshotVersion) }</span> —
+					they already disagreed before this edit.
+				</p>
+			}
+			if len(data.Migration.Statements) == 0 {
+				<p class="schema__note" data-testid="migration-none">
+					Nothing pending — the database already has this shape.
+				</p>
+			} else {
+				if !data.Migration.WillMigrate() {
+					<p class="migration__inert" role="alert" data-testid="migration-inert">
+						The engine will not run any of this. It migrates only when
+						<span class="mono">schemaVersion</span> differs from the
+						<span class="mono">v{ itoa(data.Migration.DBVersion) }</span> the database
+						records, and this edit leaves it at
+						<span class="mono">v{ itoa(data.Migration.FileVersion) }</span>. Bump it to
+						apply these changes.
+					</p>
+				}
+				@components.StatementList(data.Migration.Statements, "migration-statement")
+			}
+			if len(data.Migration.Problems) > 0 {
+				<div class="migration__problems" role="alert" data-testid="migration-problems">
+					<div class="section-heading">Cannot be generated</div>
+					for _, problem := range data.Migration.Problems {
+						<p class="migration__problem mono">{ problem }</p>
+					}
+				</div>
+			}
+		}
+	</div>
+}

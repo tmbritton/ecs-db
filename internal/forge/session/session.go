@@ -77,6 +77,21 @@ func (s *Session) Read(fn func(schema.DatabaseSchema)) {
 	fn(clone(s.file.Current))
 }
 
+// Snapshot hands back the schema as last saved, deep-copied like Read.
+//
+// The migration preview needs it: the database was built against the saved
+// file, so "has the database fallen behind the file" and "does this unsaved
+// edit change the database" are different questions with different answers.
+func (s *Session) Snapshot() (schema.DatabaseSchema, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap, err := s.file.Snapshot()
+	if err != nil {
+		return schema.DatabaseSchema{}, err
+	}
+	return clone(snap), nil
+}
+
 // Dirty reports whether the working value differs from the file on disk.
 func (s *Session) Dirty() (bool, error) {
 	s.mu.Lock()

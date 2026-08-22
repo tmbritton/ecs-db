@@ -11,6 +11,13 @@ type ModalShellProps struct {
 
 // ModalShell renders the dialog and its scrim.
 //
+// Escape is bound on the backdrop rather than the window: events bubble out of
+// the dialog to it, so the handler fires for Escape pressed anywhere inside
+// and nowhere else. A window listener would fire for every Escape on the page,
+// including ones meant for a dialog that is no longer open. The card takes
+// focus when it opens, so the keyboard is already inside it — both for Escape
+// and to reach the buttons by tab.
+//
 // Dismiss is `evt.target === el && <action>` on the backdrop. Two wrong
 // answers were tried first. A bare handler on the backdrop fires for every
 // click that bubbles out of the dialog, closing it whenever a user touches a
@@ -24,6 +31,7 @@ templ ModalShell(props ModalShellProps) {
 		class="modal-backdrop"
 		if props.CloseAction != "" {
 			data-on:click={ scrimDismiss(props.CloseAction) }
+			data-on:keydown={ escapeDismiss(props.CloseAction) }
 		}
 	>
 		<div
@@ -31,6 +39,8 @@ templ ModalShell(props ModalShellProps) {
 			role="dialog"
 			aria-modal="true"
 			aria-label={ props.Title }
+			tabindex="-1"
+			data-init="el.focus()"
 			if props.Width > 0 {
 				style={ pxWidth(props.Width) }
 			}

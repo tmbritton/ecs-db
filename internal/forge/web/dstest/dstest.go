@@ -47,6 +47,11 @@ var dataAttrRE = regexp.MustCompile(`\sdata-([a-zA-Z0-9:._-]+)=`)
 var nonDatastarAttrs = map[string]bool{
 	"testid": true, // e2e selector of record; see e2e/README.md
 	"active": true, // mirrors an --active class so a test can assert both states
+	// Mirrors the destructive styling on a migration statement, so a test can
+	// assert which statements are marked without parsing class lists.
+	"destructive": true,
+	// The component an editor panel is showing, for the same reason.
+	"component": true,
 }
 
 // Plugins reads the plugin names the vendored bundle registers.

@@ -31,7 +31,12 @@ func engineStatusText(s status.Status) string {
 		// and compatible, which is all Forge can honestly claim.
 		return fmt.Sprintf("schema.json v%d · mods/%s · hot-reload live", s.SchemaVersion, s.ModName)
 	case status.StateMismatch:
-		return fmt.Sprintf("schema v%d ≠ db v%d · engine would refuse this database",
+		// "would refuse" was wrong, and this readout sat on the same screen as
+		// a migration panel saying the opposite. storage.checkAndMigrate backs
+		// the database up and runs the migration when the versions differ; it
+		// is a refusal only when a statement fails. See
+		// TestEngine_MigratesWhenTheVersionIsBumped in internal/forge/migration.
+		return fmt.Sprintf("schema v%d ≠ db v%d · engine migrates on next start",
 			s.SchemaVersion, s.DBVersion)
 	case status.StateSchemaUnreadable:
 		// Names the file that is actually wrong. Reporting this as a mismatch

@@ -1,6 +1,9 @@
 package modes
 
-import "github.com/tmbritton/ecs-db/internal/schema"
+import (
+	"github.com/tmbritton/ecs-db/internal/forge/migration"
+	"github.com/tmbritton/ecs-db/internal/schema"
+)
 
 // Data is everything a mode needs to render.
 //
@@ -26,4 +29,13 @@ type Data struct {
 	// editor rather than only returned as a status code: an edit that vanishes
 	// with no explanation teaches you that the control is broken.
 	Problem string
+	// Migration is what the engine would do to the database on its next start.
+	// Recomputed per render and never cached: it depends on a database another
+	// process is writing, and a stale migration warning is worse than a slow
+	// one.
+	Migration migration.Preview
+	// Confirming is true when a save was held back because it would destroy
+	// data, and the confirmation is on screen. The statements it lists come
+	// from Migration, not from a copy taken when the save was attempted.
+	Confirming bool
 }

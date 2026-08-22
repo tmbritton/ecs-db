@@ -96,6 +96,23 @@ func (f *File[T]) Dirty() (bool, error) {
 	return !bytes.Equal(current, f.snapshot), nil
 }
 
+// Snapshot parses the bytes on disk as they were when last read or written.
+//
+// The working value is what is being edited; this is what it is being edited
+// *from*, which is a different question and the one the migration preview asks
+// — the database was built against the saved file, not the draft.
+//
+// Parsed on demand rather than kept beside the bytes: the snapshot is the
+// bytes, and a parallel parsed copy is a second thing that can disagree.
+func (f *File[T]) Snapshot() (T, error) {
+	value, err := f.codec.Unmarshal(f.snapshot)
+	if err != nil {
+		var zero T
+		return zero, fmt.Errorf("editable: parsing the last saved %s: %w", f.Path, err)
+	}
+	return value, nil
+}
+
 // Save validates, writes atomically, and advances the snapshot to what was
 // written — so a saved file is immediately clean.
 //

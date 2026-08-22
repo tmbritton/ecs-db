@@ -161,6 +161,10 @@ func componentHref(name string) string {
 // as templates/component.go does for the shell.
 type Component = schema.Component
 
+// Statement is the engine's own DDL statement type; the migration panel
+// renders these rather than re-deriving what a change means.
+type Statement = storage.Statement
+
 func URL(s string) templ.SafeURL { return templ.URL(s) }
 
 func kv(class string, on bool) templ.KeyValue[string, bool] { return templ.KV(class, on) }

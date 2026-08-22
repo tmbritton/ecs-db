@@ -140,7 +140,7 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
     }
     await reader.cancel();
 
-    // Counted per element, not in total. The page has two live regions, so the
+    // Counted per element, not in total. The page has several live regions, so the
     // opening burst is legitimately two frames — but "two frames" is also what
     // you get if one region is sent twice and the other never, which is the
     // regression this is meant to catch.
@@ -154,6 +154,7 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
       saves: (text.match(/ id="save-reports"/g) || []).length,
       footer: (text.match(/ id="save-footer"/g) || []).length,
       content: (text.match(/ id="mode-content"/g) || []).length,
+      confirm: (text.match(/ id="save-confirm"/g) || []).length,
       total: (text.match(/event: datastar-patch-elements/g) || []).length,
     };
   });
@@ -162,9 +163,11 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
   expect(frames.saves, `save reports sent ${frames.saves} times in ~6s`).toBe(1);
   expect(frames.footer, `save footer sent ${frames.footer} times in ~6s`).toBe(1);
   expect(frames.content, `mode content sent ${frames.content} times in ~6s`).toBe(1);
-  // Four live regions, each sent once. The total is checked as well so a region
-  // added later without a counter here fails loudly.
-  expect(frames.total, `${frames.total} patches in total`).toBe(4);
+  expect(frames.confirm, `save confirmation sent ${frames.confirm} times in ~6s`).toBe(1);
+  // Five live regions, each sent once. The total is checked as well so a region
+  // added later without a counter here fails loudly — which is exactly how the
+  // save-confirmation region announced itself.
+  expect(frames.total, `${frames.total} patches in total`).toBe(5);
 });
 
 test("the readout is announced to assistive tech when it changes", async ({ page }) => {

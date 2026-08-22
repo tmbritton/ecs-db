@@ -132,7 +132,7 @@ func TestCheck(t *testing.T) {
 			wantDBVersion: 3,
 		},
 		{
-			// The engine would refuse to start against this, which is a quite
+			// The engine migrates the database to start against this, which is a quite
 			// different situation from "no game has run yet".
 			name: "mismatch when the database is behind the schema",
 			fixture: func(t *testing.T, dir string) string {

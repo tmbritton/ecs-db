@@ -21,6 +21,7 @@ import (
 	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
@@ -86,6 +87,18 @@ type Server struct {
 	// the page pointed at what the user is actually editing.
 	renamedTo map[string]string
 
+	// held is the save that was stopped to ask first, or saveNone. It records
+	// which save was asked for, not the plan it would run: the modal re-reads
+	// the database on every render, because the plan depends on a database
+	// another process is writing and a confirmation showing a stale list is
+	// the one thing worse than no confirmation at all.
+	//
+	// Storing the intent rather than a bare "confirming" flag is what lets the
+	// confirmed save be the one that was actually requested — Save and
+	// SaveOverwriting differ in whether they check for a conflicting write,
+	// and answering "yes" to one must not perform the other.
+	held saveKind
+
 	// The latest save outcome per file, pushed down the page stream alongside
 	// the engine status. Its own type carries the locking.
 	saves *savereport.Set
@@ -127,6 +140,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
 	mux.HandleFunc("POST /forge/schema/save", sameOriginOnly(s.handleSchemaSave))
+	mux.HandleFunc("POST /forge/schema/save/confirm", sameOriginOnly(s.handleSchemaSaveConfirm))
+	mux.HandleFunc("POST /forge/schema/save/cancel", sameOriginOnly(s.handleSchemaSaveCancel))
 	mux.HandleFunc("POST /forge/schema/discard", sameOriginOnly(s.handleSchemaDiscard))
 	mux.HandleFunc("POST /forge/schema/reload", sameOriginOnly(s.handleSchemaReload))
 	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
@@ -161,11 +176,13 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	// Rendered server-side on load so the page is never blank before the first
 	// patch arrives; the stream takes over from there.
 	// A full page load starts clean: an edit refused in another tab is not this
-	// page's problem to report.
+	// page's problem to report, and neither is a confirmation it never saw.
 	s.setEditProblem("")
+	s.hold(saveNone)
 	data := s.modeData(r)
 	s.render(w, r, templates.Shell(
-		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(), content(data)))
+		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(),
+		content(data), s.confirmation(data)))
 }
 
 // modeData gathers what a mode needs to render. The schema is a deep copy from
@@ -183,7 +200,92 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	s.cfg.Session.Read(func(d schema.DatabaseSchema) { data.Schema = d })
 	data.Machines = s.cfg.Machines
 	data.Problem = s.lastEditProblem()
+	data.Confirming = s.isConfirming()
+	// The preview costs a database open and a full introspection, so it is
+	// computed only where it is read: the panel is SCHEMA's, and the
+	// confirmation can be up on any mode.
+	if modeSlug(r) == "schema" || data.Confirming {
+		data.Migration = s.migrationPreview()
+	}
 	return data
+}
+
+// modeSlug names the mode a request is for.
+//
+// PathValue is empty unless the request went through the route pattern that
+// declared {mode}, which is true of every request in production and of none
+// rendered directly — so the URL is the fallback, and the two agree.
+func modeSlug(r *http.Request) string {
+	if m := r.PathValue("mode"); m != "" {
+		return m
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/forge/")
+	slug, _, _ := strings.Cut(rest, "/")
+	return slug
+}
+
+// migrationPreview asks what the engine would do to the database on its next
+// start. Recomputed on every render and never cached — the database belongs to
+// another process, and a warning that is out of date is a warning that is
+// wrong.
+func (s *Server) migrationPreview() migration.Preview {
+	sess := s.cfg.Session
+	if sess == nil {
+		return migration.Preview{Reason: "no project is open"}
+	}
+	snapshot, err := sess.Snapshot()
+	if err != nil {
+		// The saved file no longer parses. Only the comparison against it is
+		// lost — the diff against the database still holds — but the missing
+		// half has to be reported as missing rather than as a version of zero,
+		// which Stale() would read as "not stale" and quietly say nothing.
+		//
+		// Debug rather than Error: this runs on every render of every open
+		// stream, and a broken schema.json would otherwise fill the log at the
+		// poll interval.
+		slog.Debug("parsing the last saved schema", "path", sess.Path(), "err", err)
+	}
+	var current schema.DatabaseSchema
+	sess.Read(func(d schema.DatabaseSchema) { current = d })
+	p := migration.Check(s.cfg.Engine.DBPath, current, snapshot)
+	p.SnapshotUnknown = err != nil
+	return p
+}
+
+// saveKind names which save is waiting on an answer.
+type saveKind int
+
+const (
+	saveNone saveKind = iota
+	saveNormal
+	saveOverwrite
+)
+
+// hold records that a save is waiting to be confirmed.
+func (s *Server) hold(k saveKind) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.held = k
+}
+
+// takeHeld returns the waiting save and clears it in one step.
+//
+// One step, deliberately: a check followed by a separate clear lets two clicks
+// on "Save anyway" both see the hold and both save, and lets a POST that
+// arrives with nothing held save anyway. This is the gate the whole story
+// rests on, so it cannot be a read and a write with a gap in between.
+func (s *Server) takeHeld() saveKind {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.held
+	s.held = saveNone
+	return k
+}
+
+func (s *Server) isConfirming() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.held != saveNone
 }
 
 // handleModeEvents is the single SSE subscription a mode page opens.
@@ -219,7 +321,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(s.cfg.PollInterval)
 	defer ticker.Stop()
 
-	var lastStatus, lastSaves, lastFooter, lastContent string
+	var lastStatus, lastSaves, lastFooter, lastContent, lastConfirm string
 	for {
 		// Everything that changes on the page goes down this one connection.
 		// Engine status shows on every mode, so it is pushed whatever m is;
@@ -239,6 +341,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 			{"save reports", s.renderSaveReports, &lastSaves},
 			{"save footer", s.renderFooter, &lastFooter},
 			{"mode content", func() (string, error) { return s.renderModeContent(m, r) }, &lastContent},
+			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(r) }, &lastConfirm},
 		} {
 			cur, err := part.render()
 			if err != nil {
@@ -290,6 +393,32 @@ func (s *Server) footer() templates.Component {
 		dirty = true
 	}
 	return templates.SchemaFooter(filepath.Base(s.cfg.Session.Path()), dirty)
+}
+
+// confirmation renders the held-save dialog, or nil when nothing is held.
+//
+// nil rather than an empty component: the shell renders the region either way,
+// and "is there a dialog" is what decides whether the rest of the shell is
+// inert.
+func (s *Server) confirmation(data modes.Data) templates.Component {
+	if !data.Confirming || !data.Migration.Holds() {
+		return nil
+	}
+	return components.MigrationConfirm(components.MigrationConfirmProps{
+		Preview:      data.Migration,
+		CancelAction: "@post('/forge/schema/save/cancel')",
+		SaveAction:   "@post('/forge/schema/save/confirm')",
+	})
+}
+
+// renderConfirmRegion renders the dialog's region for the SSE stream.
+func (s *Server) renderConfirmRegion(r *http.Request) (string, error) {
+	var buf bytes.Buffer
+	c := templates.SaveConfirmRegion(s.confirmation(s.modeData(r)))
+	if err := c.Render(context.Background(), &buf); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func (s *Server) renderFooter() (string, error) {
@@ -399,11 +528,69 @@ func sameOrigin(r *http.Request) bool {
 // footer and the save report reach the page on the SSE stream it already holds,
 // rather than as a body here. One push path, not two — the stream is already
 // where every other live change arrives.
+// handleSchemaSave writes unless the engine would destroy data doing so, in
+// which case it writes nothing and puts the decision on screen.
+//
+// The check is here rather than in the button because a confirmation the
+// client can skip is not a confirmation. Nothing has been written when this
+// returns; the modal's own action is what saves.
 func (s *Server) handleSchemaSave(w http.ResponseWriter, r *http.Request) {
+	if s.holdForConfirmation(w, saveNormal) {
+		return
+	}
 	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Save() }, true)
 }
 
+// holdForConfirmation stops a save that has to be asked about first, and
+// reports whether it did.
+//
+// Every route that writes goes through this. "Keep mine" resolving a conflict
+// drops just as many columns as an ordinary save, and a check on one of three
+// save routes is not a check.
+func (s *Server) holdForConfirmation(w http.ResponseWriter, k saveKind) bool {
+	if s.cfg.Session == nil || !s.migrationPreview().Holds() {
+		s.hold(saveNone)
+		return false
+	}
+	s.hold(k)
+	// 204 with nothing patched: the page's stream re-renders the shell and the
+	// dialog arrives there, the same way every other change does.
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
+// handleSchemaSaveConfirm is the answer to the confirmation, and the only way
+// a destructive save happens. There is deliberately no "don't ask again":
+// dropping a column is not a routine confirmation to train someone out of.
+func (s *Server) handleSchemaSaveConfirm(w http.ResponseWriter, r *http.Request) {
+	// The answer to a question nobody asked is not consent. Without this, a
+	// POST straight to this route saves destructively having shown no dialog
+	// at all — and, more likely in practice, the still-visible "Save anyway"
+	// button saves after Cancel, in the window before the next poll removes
+	// the dialog from the page.
+	switch s.takeHeld() {
+	case saveNormal:
+		s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Save() }, true)
+	case saveOverwrite:
+		s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.SaveOverwriting() }, true)
+	default:
+		// Nothing was waiting. Not an error the user needs to see: the likely
+		// cause is a second click on a dialog that has already been answered.
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// handleSchemaSaveCancel writes nothing. Not "undoes the save" — the save
+// never happened, and the working value is untouched.
+func (s *Server) handleSchemaSaveCancel(w http.ResponseWriter, _ *http.Request) {
+	s.takeHeld()
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleSchemaOverwrite(w http.ResponseWriter, r *http.Request) {
+	if s.holdForConfirmation(w, saveOverwrite) {
+		return
+	}
 	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.SaveOverwriting() }, true)
 }
 

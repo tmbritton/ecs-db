@@ -1,0 +1,101 @@
+package components
+
+import "github.com/tmbritton/ecs-db/internal/forge/migration"
+
+// MigrationConfirmProps is the decision a destructive save has to pass through.
+//
+// The actions are passed in rather than built here: this package renders the
+// design system and knows no routes.
+type MigrationConfirmProps struct {
+	Preview      migration.Preview
+	CancelAction string
+	SaveAction   string
+}
+
+// MigrationConfirm lists the statements rather than counting them — "3
+// destructive changes" tells you nothing about whether to proceed. There is
+// deliberately no "don't ask again": dropping a column is not a routine
+// confirmation to train someone out of reading.
+//
+// It lives in the shell rather than in SCHEMA mode because the save footer
+// does. A save can be pressed from any mode, and a held save that renders
+// nowhere is a button that silently does nothing.
+templ MigrationConfirm(props MigrationConfirmProps) {
+	@ModalShell(ModalShellProps{
+		Title:       confirmTitle(props.Preview),
+		CloseAction: props.CancelAction,
+		Width:       620,
+		Footer:      confirmFooter(props),
+	}) {
+		<div data-testid="migration-confirm">
+			if props.Preview.Failed {
+				<p class="migration__warn" data-testid="confirm-unchecked">
+					{ props.Preview.Reason }
+				</p>
+				<p class="schema__note">
+					Saving writes <span class="mono">schema.json</span> either way. What the engine
+					would then do to the database is exactly what could not be determined — so this
+					is a decision to make without the list, not one the list says is safe.
+				</p>
+			} else {
+				<p class="migration__warn">
+					Saving writes <span class="mono">schema.json</span>.
+					if props.Preview.WillMigrate() {
+						The next time the engine starts it will run the statements below against the
+						database, and what they remove is not recoverable from the schema.
+					} else {
+						The statements below are what the database would need. The engine will not
+						run them while <span class="mono">schemaVersion</span> stays at
+						<span class="mono">v{ itoa(props.Preview.FileVersion) }</span>, the version
+						the database already records — so this save destroys nothing today, and
+						destroys all of it on the first save that bumps the version.
+					}
+				</p>
+				@StatementList(props.Preview.DestructiveStatements(), "confirm-statement")
+				<p class="schema__note">
+					The engine backs the database up before migrating when
+					<span class="mono">backupRetention</span> is set. Forge does not — it never
+					writes to the database at all.
+				</p>
+			}
+		</div>
+	}
+}
+
+templ confirmFooter(props MigrationConfirmProps) {
+	<button
+		type="button"
+		class="btn"
+		data-testid="confirm-cancel"
+		data-on:click={ props.CancelAction }
+	>Cancel</button>
+	<button
+		type="button"
+		class="btn--danger"
+		data-testid="confirm-save"
+		data-on:click={ props.SaveAction }
+	>Save anyway</button>
+}
+
+// StatementList renders a migration plan in the order the generator produced
+// it. That order is the plan — drops before rebuilds — not a display
+// preference, so it is never sorted.
+templ StatementList(statements []Statement, testid string) {
+	<ol class="migration__list">
+		for _, st := range statements {
+			<li
+				class={ classes("migration__stmt", when(st.Destructive, "migration__stmt--destructive")) }
+				data-testid={ testid }
+				data-destructive={ boolAttr(st.Destructive) }
+			>
+				<div class="migration__desc">
+					if st.Destructive {
+						<span class="migration__badge" data-testid="destructive-badge">destroys data</span>
+					}
+					<span>{ st.Description }</span>
+				</div>
+				<pre class="migration__sql mono">{ st.SQL }</pre>
+			</li>
+		}
+	</ol>
+}

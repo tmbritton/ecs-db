@@ -19,6 +19,9 @@ import (
 	"strings"
 
 	"github.com/a-h/templ"
+
+	"github.com/tmbritton/ecs-db/internal/forge/migration"
+	"github.com/tmbritton/ecs-db/internal/storage"
 )
 
 // Component aliases templ.Component so .templ files in this package can name a
@@ -189,6 +192,22 @@ func pxWidth(px int) templ.SafeCSS {
 // boolAttr renders a Go bool as the string an ARIA attribute expects.
 // aria-pressed is tri-state in the spec, so "false" has to be written out —
 // omitting it is not the same as saying no.
+// Statement is the engine's own DDL statement type. The migration panel and
+// the confirmation render these rather than re-deriving what a change means.
+type Statement = storage.Statement
+
+// confirmTitle names the decision. A check that could not run is a different
+// question from one that found something, and the title is the first thing
+// read.
+func confirmTitle(p migration.Preview) string {
+	if p.Failed {
+		return "This save could not be checked"
+	}
+	return "This save destroys data"
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
 func boolAttr(b bool) string {
 	if b {
 		return "true"
@@ -207,12 +226,19 @@ func listRowClass(props ListRowProps) string {
 	)
 }
 
+// escapeDismiss closes on Escape and leaves every other key alone, so typing
+// inside the dialog does not dismiss it.
+func escapeDismiss(action string) string {
+	return "evt.key === 'Escape' && (" + action + ")"
+}
+
 // scrimDismiss guards a dismiss action so it fires only for a click that
 // landed on the scrim itself, not one that bubbled up from inside the dialog.
 //
 // `el` and `evt` are both in scope in every Datastar expression — the runtime
-// compiles them as Function("el", "$", "__action", "evt", …) — so the test can
-// be written inline rather than reached for with an event modifier.
+// compiles them as Function("el", "$", "__action", "evt", …) — so both this
+// test and escapeDismiss's can be written inline rather than reached for with
+// an event modifier.
 func scrimDismiss(action string) string {
 	return "evt.target === el && (" + action + ")"
 }

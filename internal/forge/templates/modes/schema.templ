@@ -10,13 +10,16 @@ templ SchemaMode(data Data) {
 		{{ selected := selectComponent(data.Schema, data.Selected) }}
 		<div class="schema" data-testid="schema-mode">
 			@componentList(data, selected)
-			if selected == "" {
-				<div class="schema__empty" data-testid="schema-empty">
-					<p>This schema declares no components yet.</p>
-				</div>
-			} else {
-				@componentEditor(data, selected)
-			}
+			<div class="schema__main">
+				if selected == "" {
+					<div class="schema__empty" data-testid="schema-empty">
+						<p>This schema declares no components yet.</p>
+					</div>
+				} else {
+					@componentEditor(data, selected)
+				}
+				@migrationPanel(data)
+			</div>
 		</div>
 	}
 }
@@ -241,7 +244,8 @@ templ generatedSQLPanel(comp Component, name string) {
 		}
 		<p class="schema__note">
 			Renaming or removing a field is a migration. The database records the
-			<span class="mono">schemaVersion</span> it was built with and refuses a mismatch at startup.
+			<span class="mono">schemaVersion</span> it was built with, and the engine migrates it
+			on the next start when that version changes — see the pending migration below.
 		</p>
 	</div>
 }

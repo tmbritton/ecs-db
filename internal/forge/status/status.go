@@ -35,8 +35,8 @@ const (
 	StateSchemaUnreadable
 	// StateMismatch means a database exists but records a different
 	// schema_version than the loaded schema.json. Reported separately because
-	// it means something quite different: the engine itself would refuse to
-	// start against it.
+	// it means something quite different: the engine migrates the database on
+	// its next start rather than running against it as it is.
 	StateMismatch
 	// StateConnected means the database opened read-only and the versions
 	// agree. Note what it does NOT mean — see Status.
@@ -84,6 +84,13 @@ type Status struct {
 	DBVersion     int    // from meta.schema_version; 0 when offline
 	ModName       string // first configured mod
 }
+
+// ReadOnlyDSN is the connection string every read of the game database uses.
+//
+// Exported because the migration preview opens the same database for the same
+// reason, and a second DSN written elsewhere is a second chance to forget
+// mode=ro — which is the one thing that must never be wrong here.
+func ReadOnlyDSN(path string) string { return dsn(path) }
 
 // dsn is the connection string Check opens with. Read-only is a correctness
 // requirement, not a nicety: the architecture makes the interpreter the sole

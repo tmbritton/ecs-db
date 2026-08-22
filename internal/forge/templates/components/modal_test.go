@@ -74,3 +74,39 @@ func TestModalShell(t *testing.T) {
 		}
 	})
 }
+
+// A dialog that can only be dismissed with a mouse is a dialog some people
+// cannot dismiss. Escape closes it; every other key is left alone, so typing
+// in a field inside the dialog does not close it.
+func TestModalShell_DismissesOnEscapeOnly(t *testing.T) {
+	out := renderChildren(t, ModalShell(ModalShellProps{
+		Title:       "ABOUT",
+		CloseAction: "@post('/close')",
+	}), "body")
+
+	if !strings.Contains(out, "data-on:keydown=") {
+		t.Fatalf("the dialog has no key handler:\n%s", out)
+	}
+	if !strings.Contains(out, "Escape") {
+		t.Errorf("the key handler does not name Escape:\n%s", out)
+	}
+	// Guarded, not unconditional: without the key check every keystroke inside
+	// the dialog would close it.
+	if strings.Contains(out, `data-on:keydown="@post(&#39;/close&#39;)"`) {
+		t.Errorf("every key closes the dialog:\n%s", out)
+	}
+	// Focus has to move into the dialog, or Escape lands wherever the focus
+	// was before it opened and the handler never fires.
+	if !strings.Contains(out, `tabindex="-1"`) || !strings.Contains(out, `data-init="el.focus()"`) {
+		t.Errorf("the dialog does not take focus when it opens:\n%s", out)
+	}
+}
+
+// A dialog with no close action has nothing to bind, and a keydown handler
+// calling an empty expression is a syntax error in the browser.
+func TestModalShell_WithNoCloseActionBindsNoKeyHandler(t *testing.T) {
+	out := renderChildren(t, ModalShell(ModalShellProps{Title: "ABOUT"}), "body")
+	if strings.Contains(out, "data-on:keydown") {
+		t.Errorf("a dialog with no close action bound a key handler:\n%s", out)
+	}
+}
