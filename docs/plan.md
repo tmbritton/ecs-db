@@ -444,21 +444,29 @@ Two places the design outruns the engine, both carried forward from the original
 
 ## Epic 13: Forge — AGENTS mode
 
+**Refined into stories:** See [`docs/stories/epic-13/`](stories/epic-13/).
+
 Visual authoring of behavior machines that round-trips with Stately Studio and hot-swaps into a running game. The statechart canvas is one of only two hand-written client-JS surfaces in Forge; everything else is Datastar-driven hypermedia.
 
-The action/guard dropdowns are fed from `agent.Registry.Actions()`/`Guards()`, which already expose `ParamSchema` metadata and a written description per built-in. Those methods were written for exactly this and have never had a caller.
+The action/guard dropdowns are fed from `agent.Registry.Actions()`/`Guards()`, which already expose `ParamSchema` metadata and a written description per built-in. Those methods were written for exactly this and still have no caller.
 
-- [ ] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`.
+Two checks against the code changed the shape (see the epic README for the probes). The round trip is **lossy today** — `ParseMachine` ignores unknown fields and `EmitMachine` writes only what it knows, so a save silently deletes a Stately export's `description`, `tags` and `meta` — which makes fidelity the first story rather than the last. And the proposed `behaviors/<id>.layout.json` sidecar would be loaded by `ScanDir` as a machine with an empty id, successfully and without an error.
 
-- [ ] **Statechart canvas** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu, click to select. Layout persists in a sidecar so the machine JSON stays valid Stately input.
+- [ ] **Round-trip fidelity** — Unknown fields survive parse → emit, so a Forge save stops deleting what it does not model. Decides where canvas layout lives.
 
-- [ ] **Transition inspector** — Event dropdown, `cond` dropdown, and a param form generated from the guard's registered schema. Registered names only, never free-typed.
+- [ ] **Machine editing session** — Many files rather than one: open, create, rename, delete, save, hot-swap. A machine's identity is the `id` inside the file, not its filename.
 
-- [ ] **State inspector** — Name, entry actions, set-initial.
+- [ ] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`, which is populated only when validation fully succeeds.
 
-- [ ] **Validation** — `agent.ValidateMachine` returns every error at once; render them as a list.
+- [ ] **Statechart canvas: rendering** — Nodes, edges, nesting and selection, server-rendered and patched down the page stream. No JS.
 
-- [ ] **XState v4 round-trip** — Import an exported Stately machine, edit, save, re-import.
+- [ ] **Statechart canvas: direct manipulation** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu. The JS owns pointer state and nothing else.
+
+- [ ] **State inspector** — Name, entry/exit actions from `Registry.Actions()`, set-initial. Action names are chosen, never typed.
+
+- [ ] **Transition inspector** — Event, target, `cond` from `Registry.Guards()`, and a param form generated from the registered schema.
+
+- [ ] **Inline validation** — `agent.ValidateMachine` returns every error at once, each already carrying the state and field it is about; render them against the node or edge that caused them.
 
 ---
 
