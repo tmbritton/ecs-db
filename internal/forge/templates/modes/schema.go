@@ -8,6 +8,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -161,6 +162,10 @@ func componentHref(name string) string {
 // as templates/component.go does for the shell.
 type Component = schema.Component
 
+// EntityType is aliased for the same reason Component is: a .templ file in
+// this package cannot import schema without colliding with templ's codegen.
+type EntityType = schema.EntityType
+
 // Statement is the engine's own DDL statement type; the migration panel
 // renders these rather than re-deriving what a change means.
 type Statement = storage.Statement
@@ -213,12 +218,42 @@ func typeOptions() []components.Option {
 
 // machineOptions offers the project's machines plus an explicit "none", so
 // unbinding is a choice rather than the absence of one.
-func machineOptions(machines []string) []components.Option {
+//
+// A machine that shadows an earlier mod's is labelled with the mod that won,
+// because the ID alone cannot tell you which file you are binding to.
+//
+// bound is the value currently on the field. When it names a machine that no
+// longer exists it is offered anyway, at the end: resetting the dropdown to
+// "none" would be an edit the user did not make, to a field they did not
+// touch, discovered whenever they next looked. Story 7 reports it as the error
+// it is.
+func machineOptions(machines []project.Machine, bound string) []components.Option {
 	out := []components.Option{{Value: "", Label: "none"}}
-	for _, id := range machines {
-		out = append(out, components.Option{Value: id, Label: id})
+	found := false
+	for _, m := range machines {
+		label := m.ID
+		if m.Overrides {
+			label = m.ID + " (" + m.Mod + ")"
+		}
+		out = append(out, components.Option{Value: m.ID, Label: label})
+		if m.ID == bound {
+			found = true
+		}
+	}
+	if bound != "" && !found {
+		out = append(out, components.Option{Value: bound, Label: bound + " — missing"})
 	}
 	return out
+}
+
+// machineByID finds a resolved machine by the ID an entity type names.
+func machineByID(machines []project.Machine, id string) (project.Machine, bool) {
+	for _, m := range machines {
+		if m.ID == id {
+			return m, true
+		}
+	}
+	return project.Machine{}, false
 }
 
 // generatedSQL returns the DDL the interpreter will run for a component.

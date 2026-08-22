@@ -23,6 +23,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
@@ -45,9 +46,14 @@ type Config struct {
 	// PollInterval is how often the engine status is re-checked. Zero falls
 	// back rather than panicking time.NewTicker.
 	PollInterval time.Duration
-	// Machines are the behaviour machine IDs the project resolved, for the
-	// binding dropdowns. Empty is a legitimate state — a project may have none.
-	Machines []string
+	// Machines are the behaviour machines the project resolved, for the binding
+	// dropdowns and the context-seeds panel. Empty is a legitimate state — a
+	// project may have none.
+	//
+	// The whole Machine, not just its ID: ENTS shows the bound machine's
+	// context seeds, which live in its definition, and the mod each came from,
+	// which is how two mods defining one ID are told apart.
+	Machines []project.Machine
 }
 
 type Server struct {
@@ -85,7 +91,13 @@ type Server struct {
 	// different one — while the address bar still named the old. The next edit
 	// then hit whatever the editor had swapped to. Following the rename keeps
 	// the page pointed at what the user is actually editing.
-	renamedTo map[string]string
+	// One map per namespace. A component and an entity type may share a name —
+	// a tag component "Player" beside an entity type "Player" is an ordinary
+	// ECS idiom — and a single map cannot tell them apart, so renaming the
+	// component silently retargeted the ENTS editor onto whatever entity type
+	// sorted first, delete button included.
+	renamedTo     map[string]string
+	renamedTypeTo map[string]string
 
 	// held is the save that was stopped to ask first, or saveNone. It records
 	// which save was asked for, not the plan it would run: the modal re-reads
@@ -146,6 +158,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /forge/schema/reload", sameOriginOnly(s.handleSchemaReload))
 	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
 	s.registerSchemaEditRoutes(mux)
+	s.registerEntsEditRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -188,11 +201,18 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 // modeData gathers what a mode needs to render. The schema is a deep copy from
 // the session, so a template cannot reach the session through it.
 func (s *Server) modeData(r *http.Request) modes.Data {
-	selected := r.URL.Query().Get("component")
+	// Which namespace the name is in, taken from the parameter it arrived
+	// under rather than guessed from the mode: the ENTS page subscribes its
+	// stream with ?component= (shell.go builds one selection parameter for
+	// every mode), so the mode is not a reliable indicator and the parameter
+	// is.
+	selected, kind := r.URL.Query().Get("component"), renameComponentKind
 	if selected == "" {
-		selected = r.URL.Query().Get("type")
+		if t := r.URL.Query().Get("type"); t != "" {
+			selected, kind = t, renameTypeKind
+		}
 	}
-	data := modes.Data{Selected: s.followRenames(selected)}
+	data := modes.Data{Selected: s.followRenames(selected, kind)}
 	if s.cfg.Session == nil {
 		return data
 	}
@@ -433,13 +453,30 @@ func (s *Server) renderFooter() (string, error) {
 // renderModeContent re-renders the open mode so an edit appears without a
 // reload. The selection comes from the events request's own query string, which
 // the page put there when it subscribed.
+// renameKind names which of the two namespaces a rename belongs to.
+type renameKind int
+
+const (
+	renameComponentKind renameKind = iota
+	renameTypeKind
+)
+
+// renames returns the map for one namespace. Caller holds s.mu.
+func (s *Server) renames(kind renameKind) map[string]string {
+	if kind == renameTypeKind {
+		return s.renamedTypeTo
+	}
+	return s.renamedTo
+}
+
 // followRenames resolves a name through any renames since the page subscribed.
 // Chained renames follow all the way, with a bound so a cycle cannot spin.
-func (s *Server) followRenames(name string) string {
+func (s *Server) followRenames(name string, kind renameKind) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for range len(s.renamedTo) + 1 {
-		next, ok := s.renamedTo[name]
+	renamed := s.renames(kind)
+	for range len(renamed) + 1 {
+		next, ok := renamed[name]
 		if !ok || next == name {
 			return name
 		}
@@ -448,18 +485,41 @@ func (s *Server) followRenames(name string) string {
 	return name
 }
 
-// recordRename notes that a component moved, so pages still naming the old one
-// follow it rather than silently landing on someone else's component.
-func (s *Server) recordRename(from, to string) {
+// recordRename notes that a name moved, so pages still naming the old one
+// follow it rather than silently landing on someone else's.
+//
+// Per namespace: components and entity types are separate name spaces in
+// schema.json and may collide, so one shared map made a component rename
+// retarget the entity-type editor.
+func (s *Server) recordRename(kind renameKind, from, to string) {
 	if from == to {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if kind == renameTypeKind {
+		if s.renamedTypeTo == nil {
+			s.renamedTypeTo = map[string]string{}
+		}
+		s.renamedTypeTo[from] = to
+		return
+	}
 	if s.renamedTo == nil {
 		s.renamedTo = map[string]string{}
 	}
 	s.renamedTo[from] = to
+}
+
+// forgetRenames drops the rename trail.
+//
+// Taking what is on disk — discard or reload — undoes the renames themselves,
+// so a trail still pointing at the new names would send every page to a name
+// that no longer exists and from there to whatever sorts first.
+func (s *Server) forgetRenames() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.renamedTo = nil
+	s.renamedTypeTo = nil
 }
 
 func (s *Server) renderModeContent(m mode.Mode, r *http.Request) (string, error) {
@@ -595,7 +655,15 @@ func (s *Server) handleSchemaOverwrite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSchemaDiscard(w http.ResponseWriter, r *http.Request) {
-	s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Discard() }, false)
+	s.runSchemaAction(w, r, func(sess *session.Session) error {
+		if err := sess.Discard(); err != nil {
+			return err
+		}
+		// The renames are undone, so the trail through them points at names
+		// that no longer exist — and from there to whatever sorts first.
+		s.forgetRenames()
+		return nil
+	}, false)
 }
 
 func (s *Server) handleSchemaReload(w http.ResponseWriter, r *http.Request) {
@@ -608,6 +676,7 @@ func (s *Server) handleSchemaReload(w http.ResponseWriter, r *http.Request) {
 		// no longer the one being edited. Leaving it up would be reporting on
 		// something that no longer exists.
 		s.ClearSaveReport(sess.Path())
+		s.forgetRenames()
 		return nil
 	}, false)
 }

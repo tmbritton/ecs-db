@@ -52,6 +52,8 @@ var nonDatastarAttrs = map[string]bool{
 	"destructive": true,
 	// The component an editor panel is showing, for the same reason.
 	"component": true,
+	// The entity type an editor panel is showing.
+	"type": true,
 }
 
 // Plugins reads the plugin names the vendored bundle registers.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/storage"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -27,7 +28,10 @@ func renderMode(t *testing.T, data Data) string {
 func modeFixture() Data {
 	return Data{
 		HasSession: true,
-		Machines:   []string{"wander", "chase"},
+		Machines: []project.Machine{
+			{ID: "wander", Mod: "core"},
+			{ID: "chase", Mod: "core"},
+		},
 		Schema: schema.DatabaseSchema{
 			SchemaVersion: 3,
 			Components: map[string]schema.Component{
@@ -153,8 +157,8 @@ func TestSchemaMode_BehaviorBinding(t *testing.T) {
 		t.Error("a component binding a machine is not marked in the list")
 	}
 	for _, machine := range data.Machines {
-		if !strings.Contains(got, `value="`+machine+`"`) {
-			t.Errorf("machine %q is not offered", machine)
+		if !strings.Contains(got, `value="`+machine.ID+`"`) {
+			t.Errorf("machine %q is not offered", machine.ID)
 		}
 	}
 	if !strings.Contains(got, ">none<") {
@@ -345,5 +349,52 @@ func TestSchemaMode_GeneratedSQLShowsAnError(t *testing.T) {
 	if !strings.Contains(got, `data-testid="generated-sql-error"`) &&
 		!strings.Contains(got, `data-testid="generated-sql-text"`) {
 		t.Errorf("neither DDL nor an error was shown:\n%s", got)
+	}
+}
+
+// A machine that shadows an earlier mod's is labelled with the mod that won.
+// The ID alone cannot say which of two files you are binding to.
+func TestMachineOptions_NamesTheModWhenOneShadowsAnother(t *testing.T) {
+	opts := machineOptions([]project.Machine{
+		{ID: "wander", Mod: "core"},
+		{ID: "chase", Mod: "mymod", Overrides: true},
+	}, "")
+
+	var labels []string
+	for _, o := range opts {
+		labels = append(labels, o.Label)
+	}
+	joined := strings.Join(labels, "|")
+	if !strings.Contains(joined, "chase (mymod)") {
+		t.Errorf("an overriding machine is not attributed to its mod: %v", labels)
+	}
+	if strings.Contains(joined, "wander (") {
+		t.Errorf("a machine nothing shadows was labelled with its mod: %v", labels)
+	}
+}
+
+// A type may name a machine that no longer exists. Dropping it from the options
+// makes the dropdown display some other machine, which is an edit nobody made
+// to a field nobody touched — discovered whenever they next looked.
+func TestMachineOptions_KeepsADanglingBinding(t *testing.T) {
+	opts := machineOptions([]project.Machine{{ID: "wander", Mod: "core"}}, "deleted-machine")
+
+	var found bool
+	for _, o := range opts {
+		if o.Value == "deleted-machine" {
+			found = true
+			if !strings.Contains(o.Label, "missing") {
+				t.Errorf("a dangling binding is offered without saying it is broken: %q", o.Label)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("a dangling binding was silently dropped from the options: %+v", opts)
+	}
+
+	// A binding that does resolve is not duplicated or marked missing.
+	ok := machineOptions([]project.Machine{{ID: "wander", Mod: "core"}}, "wander")
+	if len(ok) != 2 {
+		t.Errorf("a resolving binding changed the option count: %+v", ok)
 	}
 }

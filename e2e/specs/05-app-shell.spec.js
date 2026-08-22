@@ -45,7 +45,7 @@ test.describe("app shell", () => {
   // so an unfinished build reads as unfinished rather than broken. Implemented
   // modes are listed here so this test shrinks as they land rather than being
   // quietly weakened.
-  const IMPLEMENTED = new Set(["schema"]);
+  const IMPLEMENTED = new Set(["schema", "ents"]);
 
   test("each unimplemented mode names itself and the epic that fills it", async ({ page }) => {
     for (const m of MODES.filter((m) => !IMPLEMENTED.has(m.slug))) {
@@ -56,9 +56,14 @@ test.describe("app shell", () => {
   });
 
   test("an implemented mode renders its own content, not a stub", async ({ page }) => {
-    await page.goto("/forge/schema");
-    await expect(byTestId(page, "schema-mode")).toBeVisible();
-    await expect(page.locator('[data-testid="mode-stub"]')).toHaveCount(0);
+    for (const [slug, testid] of [
+      ["schema", "schema-mode"],
+      ["ents", "ents-mode"],
+    ]) {
+      await page.goto(`/forge/${slug}`);
+      await expect(byTestId(page, testid)).toBeVisible();
+      await expect(page.locator('[data-testid="mode-stub"]')).toHaveCount(0);
+    }
   });
 });
 

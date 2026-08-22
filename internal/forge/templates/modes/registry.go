@@ -15,7 +15,7 @@ import "github.com/a-h/templ"
 var Registry = map[string]func(Data) templ.Component{
 	"map":     func(Data) templ.Component { return Map() },
 	"tiles":   func(Data) templ.Component { return Tiles() },
-	"ents":    func(Data) templ.Component { return Ents() },
+	"ents":    EntsMode,
 	"schema":  SchemaMode,
 	"agents":  func(Data) templ.Component { return Agents() },
 	"sprites": func(Data) templ.Component { return Sprites() },

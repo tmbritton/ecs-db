@@ -1,0 +1,272 @@
+package modes
+
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
+// EntsMode edits the entity-types half of schema.json.
+//
+// Deliberately the same shape as SCHEMA — list in authored order, selection in
+// the URL, edits through the shared session — because they are two halves of
+// one file and two idioms for editing it would be one too many.
+templ EntsMode(data Data) {
+	if !data.HasSession {
+		@stub("ENTS", "No project is open — see the log for why.", "")
+	} else {
+		{{ selected := selectEntityType(data.Schema, data.Selected) }}
+		<div class="schema" data-testid="ents-mode">
+			@entityTypeList(data, selected)
+			<div class="schema__main">
+				if selected == "" {
+					<div class="schema__empty" data-testid="ents-empty">
+						<p>This schema declares no entity types yet.</p>
+					</div>
+				} else {
+					@entityTypeEditor(data, selected)
+				}
+			</div>
+		</div>
+	}
+}
+
+templ entityTypeList(data Data, selected string) {
+	<nav class="schema__list" aria-label="Entity types" data-testid="type-list">
+		<div class="section-heading"><span>Entity types</span></div>
+		<p class="schema__hint mono">a contract, not a table</p>
+		for _, name := range entityTypeNames(data.Schema) {
+			<a
+				href={ URL(entityTypeHref(name)) }
+				class={ "list-row", kv("list-row--active", name == selected) }
+				data-testid={ "type-" + name }
+				data-active={ boolAttr(name == selected) }
+				if name == selected {
+					aria-current="true"
+				}
+			>
+				<span class="list-row__glyph" aria-hidden="true">♟</span>
+				<span class="list-row__label">{ name }</span>
+				if data.Schema.EntityTypes[name].Behavior != "" {
+					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
+				}
+			</a>
+		}
+		<button
+			type="button"
+			class="btn--dashed schema__add"
+			data-testid="add-type"
+			data-on:click={ action("/forge/ents/type", "add", "NewType") }
+		>+ NEW ENTITY TYPE</button>
+		<p class="schema__foot">
+			Components live in the SCHEMA tab — both halves of
+			<span class="mono">schema.json</span>
+		</p>
+	</nav>
+}
+
+templ entityTypeEditor(data Data, name string) {
+	{{ et := data.Schema.EntityTypes[name] }}
+	<div class="schema__editor" data-testid="type-editor" data-type={ name }>
+		if data.Problem != "" {
+			<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+		}
+		<div class="schema__title">
+			<span class="schema__name" data-testid="type-name">{ name }</span>
+			<span class="schema__source mono">schema.json · entityTypes.{ name }</span>
+		</div>
+
+		<div class="schema__fields">
+			<label class="schema__row">
+				<span class="schema__label">Name</span>
+				<input
+					class="schema__input mono"
+					type="text"
+					value={ name }
+					data-testid="type-rename"
+					data-on:change={ valueAction("/forge/ents/type", "to", "rename", name) }
+				/>
+			</label>
+
+			@components.Dropdown(components.DropdownProps{
+				Label:    "Behavior",
+				Signal:   "",
+				Selected: et.Behavior,
+				Options:  machineOptions(data.Machines, et.Behavior),
+				Action:   valueAction("/forge/ents/behavior", "behavior", "type", name),
+			})
+			<p class="schema__note">
+				The machine runs on every entity of this type from the moment it spawns. This is
+				the type's binding — a component's own <span class="mono">behavior</span> field is a
+				different thing, set in SCHEMA.
+			</p>
+
+			@components.Dropdown(components.DropdownProps{
+				Label:    "Validation level",
+				Signal:   "",
+				Selected: string(et.ValidationLevel),
+				Options:  validationOptions(),
+				Action:   valueAction("/forge/ents/validation", "level", "type", name),
+			})
+			<p class="schema__note" data-testid="validation-consequence">
+				if et.ValidationLevel == "warning" {
+					<span class="mono">warning</span>: an entity breaking this contract is created anyway
+					and the problem is logged.
+				} else {
+					<span class="mono">strict</span>: an entity breaking this contract is refused, and
+					creating it fails.
+				}
+			</p>
+
+			@components.Checkbox(components.CheckboxProps{
+				Label:   "Allow extra components",
+				Signal:  "",
+				Checked: et.AllowExtraComponents,
+				Action:  action("/forge/ents/extras", "type", name, "toggle", "1"),
+			})
+		</div>
+
+		@componentChips(data, name, et)
+
+		@contextSeedsPanel(data, et)
+
+		<button
+			type="button"
+			class="btn--danger schema__delete"
+			data-testid="delete-type"
+			data-on:click={ confirmAction("Delete entity type "+name+"? Entities already created keep their components; nothing new can be spawned as this type.", action("/forge/ents/type", "delete", name)) }
+		>Delete entity type</button>
+	</div>
+}
+
+templ componentChips(data Data, name string, et EntityType) {
+	<div class="chips-block" data-testid="required-block">
+		<div class="section-heading">Required components</div>
+		<p class="schema__hint mono">must be present at creation</p>
+		if len(et.RequiredComponents) == 0 {
+			<p class="schema__note" data-testid="no-required">This type requires nothing.</p>
+		} else {
+			<div class="schema__chips">
+				for _, c := range et.RequiredComponents {
+					<span class="chip-row" data-testid={ "required-" + c }>
+						@components.Chip(components.ChipProps{Name: c, Kind: components.ChipRequired})
+						<button
+							type="button"
+							class="chip-row__move"
+							title={ "Make " + c + " optional on " + name }
+							aria-label={ "Make " + c + " optional on " + name }
+							data-testid={ "demote-" + c }
+							data-on:click={ action("/forge/ents/component", "type", name, "demote", c) }
+						><span aria-hidden="true">↓</span></button>
+					</span>
+				}
+			</div>
+		}
+		@attachControl(data, name, et, "require", "+ require a component", "add-required")
+	</div>
+
+	<div class="chips-block" data-testid="optional-block">
+		<div class="section-heading">Optional components</div>
+		<p class="schema__hint mono">may be present</p>
+		if len(et.OptionalComponents) == 0 {
+			<p class="schema__note" data-testid="no-optional">No optional components.</p>
+		} else {
+			<div class="schema__chips">
+				for _, c := range et.OptionalComponents {
+					<span class="chip-row" data-testid={ "optional-" + c }>
+						@components.Chip(components.ChipProps{
+							Name:         c,
+							Kind:         components.ChipOptional,
+							RemoveAction: action("/forge/ents/component", "type", name, "detach", c),
+						})
+						<button
+							type="button"
+							class="chip-row__move"
+							title={ "Make " + c + " required on " + name }
+							aria-label={ "Make " + c + " required on " + name }
+							data-testid={ "promote-" + c }
+							data-on:click={ action("/forge/ents/component", "type", name, "promote", c) }
+						><span aria-hidden="true">↑</span></button>
+					</span>
+				}
+			</div>
+		}
+		@attachControl(data, name, et, "optional", "+ allow a component", "add-optional")
+	</div>
+}
+
+// attachControl offers only components the type does not already carry, in
+// either list. A choice the server would refuse is worse than one not offered.
+templ attachControl(data Data, name string, et EntityType, as, label, testid string) {
+	{{ free := attachable(data.Schema, et) }}
+	if len(free) == 0 {
+		<p class="schema__note" data-testid={ testid + "-none" }>
+			Every component in the schema is already on this type.
+		</p>
+	} else {
+		<div data-testid={ testid }>
+			@components.Dropdown(components.DropdownProps{
+				Label:    label,
+				Signal:   "",
+				Selected: "",
+				Options:  attachOptions(free),
+				Action:   valueAction("/forge/ents/component", as, "type", name),
+			})
+		</div>
+	}
+}
+
+// contextSeedsPanel shows the bound machine's context block, read-only.
+//
+// Read-only on purpose, and it says so: these values live in the behaviour
+// file and are edited in AGENTS mode. A field that looks editable and silently
+// is not is worse than one that plainly is not — so there are no inputs here at
+// all, rather than disabled ones.
+templ contextSeedsPanel(data Data, et EntityType) {
+	{{ state, seeds := seedsFor(data, et) }}
+	<div class="seeds" data-testid="context-seeds">
+		<div class="section-heading">Context seeds</div>
+		switch state {
+			case SeedsNone:
+				<p class="schema__note" data-testid="seeds-none">
+					No machine bound — nothing is seeded.
+				</p>
+			case SeedsMissing:
+				<p class="schema__problem" role="alert" data-testid="seeds-missing">
+					This type binds <span class="mono">{ et.Behavior }</span>, which is not among the
+					machines this project resolved — either no behaviour file declares that id, or
+					the file that does was rejected on the way in. The log says which.
+				</p>
+			default:
+				<p class="schema__hint mono" data-testid="seeds-source">
+					from behaviors/{ et.Behavior }.json · edit in AGENTS
+				</p>
+				if len(seeds) == 0 {
+					<p class="schema__note" data-testid="seeds-empty">
+						This machine seeds no context.
+					</p>
+				} else {
+					<table class="seeds__table" data-testid="seeds-table">
+						<thead>
+							<tr>
+								<th scope="col">Key</th>
+								<th scope="col">Value</th>
+								<th scope="col">Component</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, seed := range seeds {
+								<tr data-testid={ "seed-" + seed.Key }>
+									<td class="mono">{ seed.Key }</td>
+									<td class="mono">{ seedValue(seed.Value) }</td>
+									<td class="mono">
+										if seed.Component == "" {
+											<span class="seeds__unknown" data-testid="seed-stale">no longer in the schema</span>
+										} else {
+											{ seed.Component }
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+		}
+	</div>
+}

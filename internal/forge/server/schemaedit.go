@@ -93,7 +93,7 @@ func (s *Server) handleComponentEdit(w http.ResponseWriter, r *http.Request) {
 			}
 			// Recorded inside the edit, so it is only remembered when the
 			// rename actually happened.
-			s.recordRename(from, to)
+			s.recordRename(renameComponentKind, from, to)
 			return nil
 		})
 	case q.Has("delete"):
@@ -481,16 +481,6 @@ func replaceIn(list []string, from, to string) []string {
 		}
 	}
 	return list
-}
-
-func removeFrom(list []string, name string) []string {
-	out := list[:0]
-	for _, v := range list {
-		if v != name {
-			out = append(out, v)
-		}
-	}
-	return out
 }
 
 func (s *Server) setEditProblem(msg string) {

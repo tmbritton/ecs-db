@@ -31,9 +31,12 @@ func TestModes_DatastarAttributesResolve(t *testing.T) {
 	}
 	data.Confirming = true
 
-	seen := dstest.AssertAttrs(t, plugins, renderMode(t, data))
+	// Both modes. Scanning only SCHEMA left every handler in ENTS unchecked —
+	// which is how the exemption for data-type came to be added for an
+	// attribute no scan ever saw.
+	seen := dstest.AssertAttrs(t, plugins, renderMode(t, data), renderEnts(t, entsWithSelection()))
 	// Without this the scan passes on a template that emits no handlers at all.
-	dstest.RequireSeen(t, seen, "on:click", "on:change")
+	dstest.RequireSeen(t, seen, "on:click", "on:change", "testid", "type")
 }
 
 // The dash form parses as a plugin name rather than an event key and is
@@ -46,9 +49,18 @@ func TestModes_UseTheColonForm(t *testing.T) {
 		Available:  true,
 		Statements: []storage.Statement{{Kind: "drop_table", SQL: "DROP TABLE comp_health", Destructive: true}},
 	}
+	rendered := renderMode(t, data) + renderEnts(t, entsWithSelection())
 	for _, bad := range []string{"data-on-click", "data-on-change", "data-on-load"} {
-		if strings.Contains(renderMode(t, data), bad) {
+		if strings.Contains(rendered, bad) {
 			t.Errorf("%s names an unregistered plugin and is silently ignored", bad)
 		}
 	}
+}
+
+// entsWithSelection renders the editor rather than the empty state, so the
+// scan sees every control the mode has.
+func entsWithSelection() Data {
+	data := entsFixture()
+	data.Selected = "Goblin"
+	return data
 }

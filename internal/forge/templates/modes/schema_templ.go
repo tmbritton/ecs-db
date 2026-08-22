@@ -371,7 +371,7 @@ func componentEditor(data Data, name string) templ.Component {
 			Label:    "Behavior",
 			Signal:   "",
 			Selected: comp.Behavior,
-			Options:  machineOptions(data.Machines),
+			Options:  machineOptions(data.Machines, comp.Behavior),
 			Action:   valueAction("/forge/schema/behavior", "behavior", "component", name),
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {

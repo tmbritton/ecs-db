@@ -59,6 +59,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		engine.ModName = cfg.Mods[0].Name
 	}
 	var editing *session.Session
+	var machines []project.Machine
 	if proj, err := project.Open(cfgPath); err != nil {
 		slog.Warn("opening project", "config", cfgPath, "err", err)
 	} else {
@@ -75,6 +76,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		if editing, err = session.Open(proj.SchemaPath); err != nil {
 			slog.Warn("starting an editing session", "schema", proj.SchemaPath, "err", err)
 		}
+		machines = proj.Machines
 	}
 
 	srv := server.New(server.Config{
@@ -82,6 +84,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		Session:      editing,
 		Engine:       engine,
 		PollInterval: cfg.Forge.PollInterval(),
+		Machines:     machines,
 	}, web.Static)
 
 	// Bind before announcing anything: otherwise a bind failure prints

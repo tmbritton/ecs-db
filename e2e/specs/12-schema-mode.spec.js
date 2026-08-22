@@ -166,7 +166,10 @@ test("saving writes only the change", async ({ page }) => {
 
   // Components are still in authored order, not alphabetised by the save.
   const order = [...after.matchAll(/^    "(\w+)": \{$/gm)].map((m) => m[1]);
-  expect(order).toEqual(["Position", "Health", "E2EProbe", "TestDummy", "TestGoblin"]);
+  // The entity types are deliberately not in alphabetical order in the
+  // fixture, so a sort on save shows up here rather than passing by
+  // coincidence.
+  expect(order).toEqual(["Position", "Health", "E2EProbe", "TestGoblin", "TestDummy"]);
 
   // And it still loads.
   expect(() => JSON.parse(after)).not.toThrow();

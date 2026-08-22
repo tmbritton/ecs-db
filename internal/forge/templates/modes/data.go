@@ -2,6 +2,7 @@ package modes
 
 import (
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
+	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -22,9 +23,9 @@ type Data struct {
 	// Selected is the component or entity type the URL names, resolved to
 	// something that exists.
 	Selected string
-	// Machines are the behaviour machine IDs the project resolved, for the
-	// binding dropdowns.
-	Machines []string
+	// Machines are the behaviour machines the project resolved, for the binding
+	// dropdowns and for ENTS's read-only view of a bound machine's context.
+	Machines []project.Machine
 	// Problem is why the last edit was refused, if it was. Rendered in the
 	// editor rather than only returned as a status code: an edit that vanishes
 	// with no explanation teaches you that the control is broken.

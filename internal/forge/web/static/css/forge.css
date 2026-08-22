@@ -935,6 +935,69 @@ button.list-row:not(.list-row--active):hover {
   padding: 22px 26px;
 }
 
+/* --- entity types ------------------------------------------------------- */
+
+.chips-block {
+  margin-top: 18px;
+}
+
+.chip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.chip-row__move {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: 1px solid var(--border);
+  padding: 3px 4px;
+  cursor: pointer;
+}
+
+.chip-row__move:hover {
+  color: var(--amber);
+  border-color: var(--border-hi);
+}
+
+.seeds {
+  margin-top: 18px;
+  padding: 10px 12px;
+  background: var(--inset);
+  border-left: var(--border-w) solid var(--violet);
+}
+
+.seeds__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.seeds__table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 400;
+  padding: var(--row-pad) 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.seeds__table td {
+  padding: var(--row-pad) 6px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.seeds__unknown {
+  color: var(--text-faint);
+}
+
 /* --- pending migration -------------------------------------------------- */
 
 .migration {

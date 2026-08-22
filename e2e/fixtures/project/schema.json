@@ -23,16 +23,16 @@
     }
   },
   "entityTypes": {
-    "TestDummy": {
-      "requiredComponents": ["Position", "E2EProbe"],
-      "optionalComponents": ["Health"],
-      "allowExtraComponents": false,
-      "validationLevel": "strict"
-    },
     "TestGoblin": {
       "behavior": "e2e-wander",
       "requiredComponents": ["Position", "Health"],
       "optionalComponents": [],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    },
+    "TestDummy": {
+      "requiredComponents": ["Position", "E2EProbe"],
+      "optionalComponents": ["Health"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     }
