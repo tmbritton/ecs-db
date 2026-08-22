@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -18,7 +19,16 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 
 	switch comp.Type {
 	case schema.ComponentTypeObject:
-		for propName, prop := range comp.Properties {
+		// Authored order, not map order.
+		//
+		// Ranging over the map directly gave a different column order on every
+		// call. In the engine that was invisible — the DDL runs once at startup
+		// and nobody reads it — but Forge shows this text as a live preview,
+		// where the columns visibly reshuffle as you type. Since Epic 11 the
+		// order the author wrote is recorded, so the DDL can read like the file
+		// it came from; a component built in code has none and sorts instead.
+		for _, propName := range jsonorder.Apply(comp.PropertyOrder, comp.Properties) {
+			prop := comp.Properties[propName]
 			sqlType := propertySQLType(prop)
 			col := fmt.Sprintf("\t%s %s NOT NULL", strings.ToLower(propName), sqlType)
 			cols = append(cols, col)

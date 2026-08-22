@@ -11,6 +11,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
+	"github.com/tmbritton/ecs-db/internal/storage"
 )
 
 // ComponentShapes are the shapes the engine actually supports, in the order
@@ -215,3 +216,16 @@ func machineOptions(machines []string) []components.Option {
 	}
 	return out
 }
+
+// generatedSQL returns the DDL the interpreter will run for a component.
+//
+// storage.MigrateComponent is the exported entry to the generator the engine
+// itself uses, so the preview and the migration cannot disagree by
+// construction. A second implementation here would drift, and a preview that
+// drifts is worse than none because it is believed.
+func generatedSQL(comp schema.Component, name string) (string, error) {
+	return storage.MigrateComponent(name, comp)
+}
+
+// isArray reports whether the DDL note about JSON storage applies.
+func isArray(c schema.Component) bool { return c.Type == schema.ComponentTypeArray }

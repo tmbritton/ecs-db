@@ -420,7 +420,7 @@ Two places the design outruns the engine, both carried forward from the original
   - Renders in authored order throughout; selection is a URL so it survives a reload
   - Mode content joined the page stream — an edit was previously invisible until a reload
 
-- [ ] **Generated-SQL panel** — Live `CREATE TABLE comp_*` via `storage.MigrateComponent`.
+- [x] **Generated-SQL panel** — Live `CREATE TABLE comp_*` via `storage.MigrateComponent`.
   - Fix first: `componentTableBuilder.go` iterates the properties map unsorted, so column order is non-deterministic and a live preview visibly reshuffles
   - Since Epic 11, the fix is authored order via `Component.PropertyOrder`, not sorting — deterministic *and* it reads like the file
 

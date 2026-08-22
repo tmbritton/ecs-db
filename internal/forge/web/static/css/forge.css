@@ -1040,6 +1040,25 @@ button.list-row:not(.list-row--active):hover {
   color: var(--red);
 }
 
+/* The DDL block: an inset well, mono, and horizontally scrollable rather than
+   wrapping — a wrapped SQL statement stops looking like SQL. */
+.schema__sql {
+  max-width: 620px;
+  margin-top: 24px;
+}
+
+.schema__ddl {
+  margin: 0;
+  padding: 10px;
+  background: var(--inset);
+  border: var(--border-w) solid var(--border);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--green);
+  white-space: pre;
+  overflow-x: auto;
+}
+
 .schema__usedby {
   max-width: 620px;
   margin-top: 20px;

@@ -2,9 +2,9 @@ package storage
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
+	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -309,14 +309,11 @@ func buildNewColumns(comp schema.Component) []string {
 
 	switch comp.Type {
 	case schema.ComponentTypeObject:
-		// Collect property names, sort for determinism.
-		names := make([]string, 0, len(comp.Properties))
-		for name := range comp.Properties {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-
-		for _, propName := range names {
+		// The same rule componentTableSQL uses, so a rebuilt table comes out
+		// with its columns in the same order as the original. These two halves
+		// of the generator disagreed: this one sorted and that one used map
+		// order.
+		for _, propName := range jsonorder.Apply(comp.PropertyOrder, comp.Properties) {
 			prop := comp.Properties[propName]
 			sqlType := schema.PropertySQLType(prop)
 			cols = append(cols, fmt.Sprintf("%s %s NOT NULL",

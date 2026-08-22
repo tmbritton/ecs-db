@@ -1,7 +1,7 @@
 # Story 3: Generated-SQL panel
 
 **Epic:** 12 — Forge: SCHEMA & ENTS modes  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete  
 **Priority:** High — it is what makes the schema editor trustworthy
 
 **Depends on:** Story 2
@@ -18,26 +18,26 @@ The plan proposed sorting to match. Since Epic 11 Story 2, there is a better ans
 
 ## Acceptance Criteria
 
-- [ ] The panel renders the output of `storage.MigrateComponent` — no second generator, and a test that asserts the panel's text equals that function's output for every fixture
-- [ ] `componentTableSQL` emits columns in authored property order, falling back to sorted when no order was recorded
-- [ ] Repeated calls produce identical SQL — asserted by generating twice and comparing, not by inspection
-- [ ] `ddlgen.go`'s rebuild path uses the same ordering rule, so the two halves of the generator agree
-- [ ] The preview updates as the component is edited, over the page's SSE stream, without a reload
-- [ ] Every shape renders correctly: object (one column per property), `entity-ref` (`target_entity_id`), the four scalars (`value`), and array
-- [ ] **Arrays are shown honestly** as the single JSON `TEXT` column they are, with a note saying so — the design's junction-table shape does not exist and must not be implied
-- [ ] The panel is `--inset` with mono text, per the design
-- [ ] `go test ./...` passes
+- [x] The panel renders the output of `storage.MigrateComponent` — no second generator, and a test that asserts the panel's text equals that function's output for every fixture
+- [x] `componentTableSQL` emits columns in authored property order, falling back to sorted when no order was recorded
+- [x] Repeated calls produce identical SQL — asserted by generating twice and comparing, not by inspection
+- [x] `ddlgen.go`'s rebuild path uses the same ordering rule, so the two halves of the generator agree
+- [x] The preview updates as the component is edited, over the page's SSE stream, without a reload
+- [x] Every shape renders correctly: object (one column per property), `entity-ref` (`target_entity_id`), the four scalars (`value`), and array
+- [x] **Arrays are shown honestly** as the single JSON `TEXT` column they are, with a note saying so — the design's junction-table shape does not exist and must not be implied
+- [x] The panel is `--inset` with mono text, per the design
+- [x] `go test ./...` passes
 
 ## Playwright steps
 
 `e2e/specs/12-generated-sql.spec.js`.
 
-- [ ] The panel shows `CREATE TABLE IF NOT EXISTS comp_position` for `Position`
-- [ ] Adding a field adds a column to the preview without a page reload
-- [ ] The new column appears **last**, matching where the field was added — not alphabetically inserted
-- [ ] Switching the shape to `string` collapses the preview to a single `value` column
-- [ ] Selecting an array component shows the `value TEXT` column and the note explaining it
-- [ ] Editing the same component twice produces the same SQL both times — type a field name, delete it, and assert the preview returns to exactly its previous text
+- [x] The panel shows `CREATE TABLE IF NOT EXISTS comp_position` for `Position`
+- [x] Adding a field adds a column to the preview without a page reload
+- [x] The new column appears **last**, matching where the field was added — not alphabetically inserted
+- [x] Switching the shape to `string` collapses the preview to a single `value` column
+- [x] Selecting an array component shows the `value TEXT` column and the note explaining it
+- [x] Editing the same component twice produces the same SQL both times — type a field name, delete it, and assert the preview returns to exactly its previous text
 
 ## Notes
 
@@ -45,3 +45,38 @@ The plan proposed sorting to match. Since Epic 11 Story 2, there is a better ans
 - Do not add a `NOT NULL` toggle to the preview by hand. The generator decides; the panel reports.
 - The DDL is engine-owned text, so it is mono and it is not case-mangled — the same rule the engine-status readout's source suffix follows.
 - If `MigrateComponent` returns an error for a shape, show the error. An editor that silently shows nothing for an invalid component teaches you that nothing is wrong.
+
+## As Implemented
+
+The panel calls `storage.MigrateComponent` and renders what comes back. That is the whole data path, and a test asserts the page contains exactly that function's output — so a future hand-tweak to the display breaks a test rather than the trust.
+
+### The determinism fix, and what it turned out to be
+
+`componentTableSQL` ranged over `comp.Properties` directly, so column order changed between calls. Invisible in the engine, where the DDL runs once at startup and nobody reads it; glaring in a live preview, where the columns reshuffle as you type.
+
+The plan said to sort, matching the rebuild path. Since Epic 11 there is a better answer: `Component.PropertyOrder` records what the author wrote, so the DDL now reads like the file it came from. `comp_sprite` comes out `sheet, animation, flip_x` rather than alphabetised.
+
+**The two halves of the generator disagreed with each other**, independently of Forge: `componentTableSQL` used map order while `buildNewColumns` sorted, so a rebuilt table could come out with its columns in a different arrangement than the original. Both use the same rule now, and a test compares them directly.
+
+The determinism test uses **six** properties. With two, map iteration produces the same order often enough that a non-deterministic generator passes a repeated run — verified: with the fix reverted, the six-property test catches it 5 runs out of 5.
+
+### Checked before changing engine code
+
+The plan warned that column order is visible through `PRAGMA table_info` and might be encoded in the introspection tests. It is not — they only assert `columns[0]` is `entity_id`, which is always first. Confirmed afterwards by bootstrapping a fresh database and reading the table back.
+
+### Arrays, honestly
+
+An array component generates one `value TEXT NOT NULL DEFAULT '[]'` column. The design implies a junction table for `array‹entity-ref›`; the engine has no such thing. The panel shows the column that is actually generated and says arrays are stored as JSON in one column, rather than offering an item-type control that would promise a shape nobody can build.
+
+### A component the generator refuses
+
+If `MigrateComponent` returns an error — reachable from a hand-edited file with an unknown shape, if not through the UI — the panel says so. An editor that silently shows nothing for an invalid component teaches you that nothing is wrong.
+
+### Verified by mutation
+
+| Mutation | Caught by |
+|---|---|
+| back to map iteration | the determinism test, 5/5 |
+| sorted instead of authored order | the authored-order and agreement tests |
+| the rebuild path sorts again | the agreement test |
+| a second, hand-written generator in the panel | the real-generator test |

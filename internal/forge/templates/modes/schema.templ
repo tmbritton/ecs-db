@@ -118,6 +118,8 @@ templ componentEditor(data Data, name string) {
 			}
 		</div>
 
+		@generatedSQLPanel(comp, name)
+
 		@usedByPanel(data, name)
 
 		<button
@@ -211,5 +213,35 @@ templ usedByPanel(data Data, name string) {
 				}
 			</div>
 		}
+	</div>
+}
+
+
+// generatedSQLPanel shows the CREATE TABLE the interpreter runs at startup.
+//
+// The DDL is engine-owned text, so it is mono and it is not case-mangled — the
+// same rule the engine-status readout's source suffix follows.
+templ generatedSQLPanel(comp Component, name string) {
+	<div class="schema__sql" data-testid="generated-sql">
+		<div class="section-heading">Generated SQL</div>
+		<p class="schema__hint mono">DDL the interpreter runs at startup</p>
+		{{ ddl, err := generatedSQL(comp, name) }}
+		if err != nil {
+			<p class="schema__problem" data-testid="generated-sql-error">
+				This component cannot be generated: { err.Error() }
+			</p>
+		} else {
+			<pre class="schema__ddl mono" data-testid="generated-sql-text">{ ddl }</pre>
+		}
+		if isArray(comp) {
+			<p class="schema__note" data-testid="array-note">
+				Arrays are stored as JSON in one <span class="mono">TEXT</span> column — there is no
+				junction table.
+			</p>
+		}
+		<p class="schema__note">
+			Renaming or removing a field is a migration. The database records the
+			<span class="mono">schemaVersion</span> it was built with and refuses a mismatch at startup.
+		</p>
 	</div>
 }

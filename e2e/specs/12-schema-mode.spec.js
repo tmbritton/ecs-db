@@ -189,3 +189,59 @@ test("accessibility", async ({ page }) => {
     "Name of field x"
   );
 });
+
+// The generated-SQL panel. Its value is entirely in being the real generator's
+// output, so the assertions are about it tracking the edit rather than about
+// any particular text.
+test("the generated SQL is live and matches the component", async ({ page }) => {
+  await page.goto("/forge/schema?component=Position");
+  const sql = byTestId(page, "generated-sql-text");
+  await expect(sql).toContainText("CREATE TABLE IF NOT EXISTS comp_position");
+  await expect(sql).toContainText("x REAL NOT NULL");
+
+  // Adding a field adds a column, without a reload.
+  await byTestId(page, "add-field").click();
+  await expect(sql).toContainText("newfield", { timeout: 10_000 });
+
+  // And it lands last, matching where the field was added — not sorted in.
+  const text = await sql.innerText();
+  expect(text.indexOf("newfield")).toBeGreaterThan(text.indexOf("y REAL"));
+});
+
+test("changing shape collapses the preview to a single value column", async ({ page }) => {
+  await page.goto("/forge/schema?component=Position");
+  await page.locator('[data-testid="component-editor"] select').first().selectOption("string");
+
+  const sql = byTestId(page, "generated-sql-text");
+  await expect(sql).toContainText("value TEXT NOT NULL", { timeout: 10_000 });
+  await expect(sql).not.toContainText("x REAL");
+});
+
+// An array is one JSON column. The design implies a junction table; the engine
+// has none, and implying otherwise would promise a shape nobody can build.
+test("an array component is shown honestly", async ({ page }) => {
+  await page.goto("/forge/schema?component=Position");
+  await page.locator('[data-testid="component-editor"] select').first().selectOption("array");
+
+  await expect(byTestId(page, "generated-sql-text")).toContainText("value TEXT NOT NULL", {
+    timeout: 10_000,
+  });
+  await expect(byTestId(page, "array-note")).toBeVisible();
+});
+
+// Editing to a state and back must produce exactly the same SQL, or the preview
+// is not deterministic and the columns reshuffle as you type.
+test("the preview is stable across an edit and its reversal", async ({ page }) => {
+  await page.goto("/forge/schema?component=Position");
+  const sql = byTestId(page, "generated-sql-text");
+  const before = await sql.innerText();
+
+  await byTestId(page, "add-field").click();
+  await expect(sql).toContainText("newfield", { timeout: 10_000 });
+
+  page.once("dialog", (d) => d.accept());
+  await byTestId(page, "delete-field-newField").click();
+  await expect(sql).not.toContainText("newfield", { timeout: 10_000 });
+
+  expect(await sql.innerText()).toBe(before);
+});
