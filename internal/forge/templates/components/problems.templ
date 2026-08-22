@@ -1,0 +1,53 @@
+package components
+
+// ProblemsProps is a list of validation problems attached to one control, or
+// to an editor as a whole.
+//
+// It renders nothing at all when there is nothing wrong. An empty container
+// left in place would be tidier to patch, but it also gives assistive tech an
+// element to describe a control with that says nothing, and it makes "no
+// problems" and "problems not yet computed" indistinguishable in the DOM.
+type ProblemsProps struct {
+	// ID is what a control's aria-describedby points at. Build it with
+	// ProblemsID so the two ends cannot drift.
+	ID string
+	// Problems are rendered in the order given, which is the order the
+	// validator produced — authored order, not severity.
+	Problems []Problem
+	Testid   string
+}
+
+templ Problems(props ProblemsProps) {
+	if len(props.Problems) > 0 {
+		<ul
+			class="problems"
+			if props.ID != "" {
+				id={ props.ID }
+			}
+			if props.Testid != "" {
+				data-testid={ props.Testid }
+			}
+			role="alert"
+		>
+			for _, p := range props.Problems {
+				<li class={ classes("problem", problemClass(p)) } data-blocking={ boolAttr(p.Blocking) }>
+					<span class="problem__badge mono">{ problemBadge(p) }</span>
+					<span class="problem__text">{ p.Message }</span>
+				</li>
+			}
+		</ul>
+	}
+}
+
+// PartialNote says that the list above it may not be the whole story.
+//
+// schema.ValidateSchema stops at the first failure it finds, so a clean-looking
+// second problem may be waiting behind the one on screen. Saying so is cheap;
+// implying a completeness the check does not have is how someone fixes one
+// thing, saves, and is refused again for a reason that was there all along.
+templ PartialNote() {
+	<p class="problems__partial mono" data-testid="problems-partial">
+		The engine stops at the first failure it finds, so there may be more problems than
+		are listed.
+	</p>
+}

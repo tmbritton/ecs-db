@@ -31,6 +31,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
+	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -55,6 +56,17 @@ type Config struct {
 	// context seeds, which live in its definition, and the mod each came from,
 	// which is how two mods defining one ID are told apart.
 	Machines []project.Machine
+	// BehaviorDirs are the mods' behaviours directories, in load order. Inline
+	// validation needs them to answer the engine's own question about a
+	// behaviour binding — does a machine file of that name exist — which the
+	// resolved machine list cannot answer, because a file that exists and was
+	// rejected is absent from it for a different reason.
+	BehaviorDirs []string
+	// Problems are the project's loading failures. They are what turns "that
+	// machine did not resolve" into a sentence naming the file and the reason,
+	// instead of sending the user to the log to find out what the tool already
+	// knows.
+	Problems []project.Problem
 }
 
 type Server struct {
@@ -195,7 +207,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	s.hold(saveNone)
 	data := s.modeData(r)
 	s.render(w, r, templates.Shell(
-		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(),
+		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(data),
 		content(data), s.confirmation(data)))
 }
 
@@ -220,6 +232,16 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	data.HasSession = true
 	s.cfg.Session.Read(func(d schema.DatabaseSchema) { data.Schema = d })
 	data.Machines = s.cfg.Machines
+	// Computed for every mode, not just the two that edit the file: the save
+	// footer is in the shell and is on screen everywhere, and a Save button
+	// that only knows it would be refused while SCHEMA happens to be open is
+	// worse than one that never knew.
+	data.Validation = validation.Check(validation.Input{
+		Schema:       data.Schema,
+		BehaviorDirs: s.cfg.BehaviorDirs,
+		Machines:     s.cfg.Machines,
+		Problems:     s.cfg.Problems,
+	})
 	data.Problem = s.lastEditProblem()
 	data.Confirming = s.isConfirming()
 	// The preview costs a database open and a full introspection, so it is
@@ -400,7 +422,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		}{
 			{"engine status", s.renderEngineStatus, &lastStatus},
 			{"save reports", s.renderSaveReports, &lastSaves},
-			{"save footer", s.renderFooter, &lastFooter},
+			{"save footer", func() (string, error) { return s.renderFooter(data()) }, &lastFooter},
 			{"mode content", func() (string, error) { return s.renderModeContent(m, data()) }, &lastContent},
 			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }, &lastConfirm},
 		} {
@@ -442,7 +464,7 @@ func (s *Server) ClearSaveReport(path string) { s.saves.Clear(path) }
 
 // footer renders the save footer from the session's real state. A project that
 // failed to open has no session and therefore nothing to save.
-func (s *Server) footer() templates.Component {
+func (s *Server) footer(data modes.Data) templates.Component {
 	if s.cfg.Session == nil {
 		return templates.NoFooter()
 	}
@@ -453,7 +475,7 @@ func (s *Server) footer() templates.Component {
 		slog.Error("computing dirty state", "path", s.cfg.Session.Path(), "err", err)
 		dirty = true
 	}
-	return templates.SchemaFooter(filepath.Base(s.cfg.Session.Path()), dirty)
+	return templates.SchemaFooter(filepath.Base(s.cfg.Session.Path()), dirty, data.Validation)
 }
 
 // confirmation renders the held-save dialog, or nil when nothing is held.
@@ -482,9 +504,9 @@ func (s *Server) renderConfirmRegion(data modes.Data) (string, error) {
 	return buf.String(), nil
 }
 
-func (s *Server) renderFooter() (string, error) {
+func (s *Server) renderFooter(data modes.Data) (string, error) {
 	var buf bytes.Buffer
-	c := templates.SaveFooterRegion(s.footer())
+	c := templates.SaveFooterRegion(s.footer(data))
 	if err := c.Render(context.Background(), &buf); err != nil {
 		return "", err
 	}

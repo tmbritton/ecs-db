@@ -319,6 +319,13 @@ button.list-row:not(.list-row--active):hover {
   color: var(--red);
 }
 
+/* The label is the flex row; the wrapper exists so a validation message can be
+   a sibling of the label rather than part of the control's accessible name. */
+.dropdown-field {
+  display: flex;
+  flex-direction: column;
+}
+
 .dropdown {
   display: flex;
   align-items: center;
@@ -1575,4 +1582,89 @@ button.list-row:not(.list-row--active):hover {
 
 .dev__modalstage .modal-backdrop {
   position: absolute;
+}
+
+/* ── inline validation ───────────────────────────────────────────────────── */
+
+/* Problems render where they were caused: under the control for a problem the
+ * validator could attach, at the top of an editor for one it could not.
+ *
+ * Two severities, two hues, and the badge says which in words as well — an
+ * error stops the save and a warning does not, and a difference that exists
+ * only as a colour is not available to everyone reading. */
+.problems {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.problem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 9px;
+  border-left: var(--border-w) solid var(--red);
+  background: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.problem--warning {
+  border-left-color: var(--amber);
+}
+
+.problem__badge {
+  flex: none;
+  font-size: 9.5px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--red);
+}
+
+.problem--warning .problem__badge {
+  color: var(--amber);
+}
+
+.problem__text {
+  min-width: 0;
+}
+
+.problems__partial {
+  margin: 6px 0 0;
+  font-size: 9.5px;
+  color: var(--text-faint);
+}
+
+.problems-block {
+  margin-bottom: 12px;
+}
+
+/* The list-row marker. Amber for a warning and red for something that stops the
+   save, because the two mean different things to someone looking at a disabled
+   Save button and wondering which row is responsible. */
+.badge-problem {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--amber);
+}
+
+.badge-problem--error {
+  color: var(--red);
+}
+
+.save-footer__blocked {
+  color: var(--red);
+}
+
+.save-footer--blocked .save-footer__save,
+.save-footer--blocked .save-footer__save:hover {
+  border-color: var(--border);
+  color: var(--text-faint);
 }

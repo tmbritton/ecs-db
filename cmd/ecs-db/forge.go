@@ -60,6 +60,8 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	}
 	var editing *session.Session
 	var machines []project.Machine
+	var behaviorDirs []string
+	var problems []project.Problem
 	if proj, err := project.Open(cfgPath); err != nil {
 		slog.Warn("opening project", "config", cfgPath, "err", err)
 	} else {
@@ -77,6 +79,17 @@ func runForge(cmd *cobra.Command, _ []string) error {
 			slog.Warn("starting an editing session", "schema", proj.SchemaPath, "err", err)
 		}
 		machines = proj.Machines
+		problems = proj.Problems
+		// In load order, and only the mods that contribute one. Inline
+		// validation runs the engine's own behaviour-reference check against
+		// each in turn, because that check takes a single directory — the
+		// interpreter calls it with one — while a project has as many as it has
+		// mods and the loader accepts a machine from any of them.
+		for _, mod := range proj.Mods {
+			if mod.Behaviors != "" {
+				behaviorDirs = append(behaviorDirs, mod.Behaviors)
+			}
+		}
 	}
 
 	srv := server.New(server.Config{
@@ -85,6 +98,8 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		Engine:       engine,
 		PollInterval: cfg.Forge.PollInterval(),
 		Machines:     machines,
+		BehaviorDirs: behaviorDirs,
+		Problems:     problems,
 	}, web.Static)
 
 	// Bind before announcing anything: otherwise a bind failure prints

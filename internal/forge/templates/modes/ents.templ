@@ -15,6 +15,7 @@ templ EntsMode(data Data) {
 		<div class="schema" data-testid="ents-mode">
 			@entityTypeList(data, selected)
 			<div class="schema__main">
+				@fileProblemsPanel(data)
 				if selected == "" {
 					<div class="schema__empty" data-testid="ents-empty">
 						<p>This schema declares no entity types yet.</p>
@@ -37,6 +38,7 @@ templ entityTypeList(data Data, selected string) {
 				class={ "list-row", kv("list-row--active", name == selected) }
 				data-testid={ "type-" + name }
 				data-active={ boolAttr(name == selected) }
+				data-problem={ boolAttr(hasProblems(data, ownerEntityType, name)) }
 				if name == selected {
 					aria-current="true"
 				}
@@ -46,6 +48,7 @@ templ entityTypeList(data Data, selected string) {
 				if data.Schema.EntityTypes[name].Behavior != "" {
 					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
 				}
+				@problemBadge(data, ownerEntityType, name)
 			</a>
 		}
 		<button
@@ -63,10 +66,12 @@ templ entityTypeList(data Data, selected string) {
 
 templ entityTypeEditor(data Data, name string) {
 	{{ et := data.Schema.EntityTypes[name] }}
+	{{ owned := unplacedTypeProblems(data, name) }}
 	<div class="schema__editor" data-testid="type-editor" data-type={ name }>
 		if data.Problem != "" {
 			<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
 		}
+		@components.Problems(components.ProblemsProps{Problems: owned, Testid: "type-problems"})
 		<div class="schema__title">
 			<span class="schema__name" data-testid="type-name">{ name }</span>
 			<span class="schema__source mono">schema.json · entityTypes.{ name }</span>
@@ -85,11 +90,13 @@ templ entityTypeEditor(data Data, name string) {
 			</label>
 
 			@components.Dropdown(components.DropdownProps{
-				Label:    "Behavior",
-				Signal:   "",
-				Selected: et.Behavior,
-				Options:  machineOptions(data.Machines, et.Behavior),
-				Action:   valueAction("/forge/ents/behavior", "behavior", "type", name),
+				Label:     "Behavior",
+				Signal:    "",
+				Selected:  et.Behavior,
+				Options:   machineOptions(data.Machines, et.Behavior),
+				Action:    valueAction("/forge/ents/behavior", "behavior", "type", name),
+				Problems:  typeProblems(data, name, behaviorField()),
+				ProblemID: problemsID("type", name, behaviorField()),
 			})
 			<p class="schema__note">
 				The machine runs on every entity of this type from the moment it spawns. This is
@@ -232,8 +239,8 @@ templ contextSeedsPanel(data Data, et EntityType) {
 			case SeedsMissing:
 				<p class="schema__problem" role="alert" data-testid="seeds-missing">
 					This type binds <span class="mono">{ et.Behavior }</span>, which is not among the
-					machines this project resolved — either no behaviour file declares that id, or
-					the file that does was rejected on the way in. The log says which.
+					machines this project resolved, so there is no context to show. The Behavior
+					field above says why.
 				</p>
 			default:
 				<p class="schema__hint mono" data-testid="seeds-source">

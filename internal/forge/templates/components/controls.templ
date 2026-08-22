@@ -82,30 +82,57 @@ type DropdownProps struct {
 	Options  []Option
 	Selected string
 	Action   string
+	// Problems are what is wrong with the current selection. They render below
+	// the control and are pointed at from it, which is the difference between
+	// a sighted user seeing a message beside a field and everyone else getting
+	// it: proximity is not association.
+	//
+	// The wiring lives here rather than at each call site so a caller cannot
+	// render the message and forget the attribute — the half of the pair that
+	// nothing on screen would reveal as missing.
+	Problems  []Problem
+	ProblemID string // id for the list; ProblemsID builds it
 }
 
+// The problems list is a *sibling* of the label, not a child of it.
+//
+// A wrapping <label> takes its control's accessible name from its whole
+// subtree, so a list rendered inside it appended every error message to the
+// select's name — announced once as the name and again through
+// aria-describedby, and changing whenever validation changed. It also put flow
+// content inside a phrasing-content element, which made clicking the error text
+// open the dropdown.
 templ Dropdown(props DropdownProps) {
-	<label class="dropdown">
-		if props.Label != "" {
-			<span class="dropdown__label">{ props.Label }</span>
-		}
-		<span class="dropdown__control">
-			<select
-				class="dropdown__select"
-				if props.Signal != "" {
-					data-bind={ props.Signal }
-				}
-				if props.Action != "" {
-					data-on:change={ props.Action }
-				}
-			>
-				for _, opt := range props.Options {
-					<option value={ opt.Value } selected?={ opt.Value == props.Selected }>{ opt.Label }</option>
-				}
-			</select>
-			<span class="dropdown__caret" aria-hidden="true">▾</span>
-		</span>
-	</label>
+	<div class="dropdown-field">
+		<label class="dropdown">
+			if props.Label != "" {
+				<span class="dropdown__label">{ props.Label }</span>
+			}
+			<span class="dropdown__control">
+				<select
+					class="dropdown__select"
+					if props.Signal != "" {
+						data-bind={ props.Signal }
+					}
+					if props.Action != "" {
+						data-on:change={ props.Action }
+					}
+					if DescribedBy(props.ProblemID, props.Problems) != "" {
+						aria-describedby={ props.ProblemID }
+					}
+					if Blocking(props.Problems) {
+						aria-invalid="true"
+					}
+				>
+					for _, opt := range props.Options {
+						<option value={ opt.Value } selected?={ opt.Value == props.Selected }>{ opt.Label }</option>
+					}
+				</select>
+				<span class="dropdown__caret" aria-hidden="true">▾</span>
+			</span>
+		</label>
+		@Problems(ProblemsProps{ID: props.ProblemID, Problems: props.Problems})
+	</div>
 }
 
 // CheckboxProps is a two-state toggle. There is no indeterminate state.

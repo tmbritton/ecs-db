@@ -11,6 +11,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
@@ -375,7 +376,7 @@ func TestSchemaSave_UsesTheConflictCheckingPath(t *testing.T) {
 func TestRenderFooter_ReflectsTheSession(t *testing.T) {
 	_, s, sess, _ := sessionServer(t)
 
-	clean, err := s.renderFooter()
+	clean, err := s.renderFooter(modes.Data{})
 	if err != nil {
 		t.Fatalf("renderFooter: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestRenderFooter_ReflectsTheSession(t *testing.T) {
 	if err := sess.Edit(func(d *schema.DatabaseSchema) error { d.SchemaVersion = 4; return nil }); err != nil {
 		t.Fatalf("Edit: %v", err)
 	}
-	dirty, err := s.renderFooter()
+	dirty, err := s.renderFooter(modes.Data{})
 	if err != nil {
 		t.Fatalf("renderFooter: %v", err)
 	}

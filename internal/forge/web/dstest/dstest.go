@@ -54,6 +54,12 @@ var nonDatastarAttrs = map[string]bool{
 	"component": true,
 	// The entity type an editor panel is showing.
 	"type": true,
+	// Whether the save footer is refusing to save, so a test can assert the
+	// state rather than infer it from a disabled attribute that also means
+	// "nothing to save".
+	"blocked": true,
+	// Whether a fields-table row has a validation message under it.
+	"problem": true,
 }
 
 // Plugins reads the plugin names the vendored bundle registers.

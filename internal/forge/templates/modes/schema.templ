@@ -11,6 +11,7 @@ templ SchemaMode(data Data) {
 		<div class="schema" data-testid="schema-mode">
 			@componentList(data, selected)
 			<div class="schema__main">
+				@fileProblemsPanel(data)
 				if selected == "" {
 					<div class="schema__empty" data-testid="schema-empty">
 						<p>This schema declares no components yet.</p>
@@ -43,6 +44,7 @@ templ componentList(data Data, selected string) {
 				class={ "list-row", kv("list-row--active", name == selected) }
 				data-testid={ "component-" + name }
 				data-active={ boolAttr(name == selected) }
+				data-problem={ boolAttr(hasProblems(data, ownerComponent, name)) }
 				if name == selected {
 					aria-current="true"
 				}
@@ -52,6 +54,7 @@ templ componentList(data Data, selected string) {
 				if data.Schema.Components[name].Behavior != "" {
 					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
 				}
+				@problemBadge(data, ownerComponent, name)
 			</a>
 		}
 		<button
@@ -69,10 +72,12 @@ templ componentList(data Data, selected string) {
 
 templ componentEditor(data Data, name string) {
 	{{ comp := data.Schema.Components[name] }}
+	{{ owned := unplacedComponentProblems(data, name) }}
 	<div class="schema__editor" data-testid="component-editor" data-component={ name }>
 		if data.Problem != "" {
 			<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
 		}
+		@components.Problems(components.ProblemsProps{Problems: owned, Testid: "component-problems"})
 		<div class="schema__title">
 			<span class="schema__name" data-testid="component-name">{ name }</span>
 			<span class="schema__source mono">schema.json · components.{ name }</span>
@@ -102,18 +107,20 @@ templ componentEditor(data Data, name string) {
 			})
 
 			@components.Dropdown(components.DropdownProps{
-				Label:    "Behavior",
-				Signal:   "",
-				Selected: comp.Behavior,
-				Options:  machineOptions(data.Machines, comp.Behavior),
-				Action:   valueAction("/forge/schema/behavior", "behavior", "component", name),
+				Label:     "Behavior",
+				Signal:    "",
+				Selected:  comp.Behavior,
+				Options:   machineOptions(data.Machines, comp.Behavior),
+				Action:    valueAction("/forge/schema/behavior", "behavior", "component", name),
+				Problems:  componentProblems(data, name, behaviorField()),
+				ProblemID: problemsID("component", name, behaviorField()),
 			})
 			<p class="schema__note">
 				Binding a machine makes attach and detach drive its lifecycle — a final state detaches the component.
 			</p>
 
 			if isObject(comp) {
-				@fieldsTable(comp, name)
+				@fieldsTable(data, comp, name)
 			} else {
 				<p class="schema__note" data-testid="no-fields">
 					A { comp.Type } component has no fields — it becomes a single <span class="mono">value</span> column.
@@ -134,7 +141,7 @@ templ componentEditor(data Data, name string) {
 	</div>
 }
 
-templ fieldsTable(comp Component, component string) {
+templ fieldsTable(data Data, comp Component, component string) {
 	<div class="section-heading">Fields → typed SQL columns</div>
 	<table class="fields" data-testid="fields-table">
 		<thead>
@@ -147,15 +154,28 @@ templ fieldsTable(comp Component, component string) {
 		</thead>
 		<tbody>
 			for _, field := range propertyNames(comp) {
-				<tr data-testid={ "field-" + field }>
+				{{ fieldID := problemsID("component", component, propertyField(field)) }}
+				{{ fieldProblems := componentProblems(data, component, propertyField(field)) }}
+				<tr data-testid={ "field-" + field } data-problem={ boolAttr(len(fieldProblems) > 0) }>
 					<td>
 						<input
 							class="schema__input mono"
 							type="text"
 							value={ field }
 							aria-label={ "Name of field " + field }
+							if describedBy(fieldID, fieldProblems) != "" {
+								aria-describedby={ fieldID }
+							}
+							if anyBlocking(fieldProblems) {
+								aria-invalid="true"
+							}
 							data-on:change={ valueAction("/forge/schema/field", "to", "component", component, "rename", field) }
 						/>
+						@components.Problems(components.ProblemsProps{
+							ID:       fieldID,
+							Problems: fieldProblems,
+							Testid:   "field-problems-" + field,
+						})
 					</td>
 					<td>
 						@components.Dropdown(components.DropdownProps{
@@ -319,4 +339,44 @@ templ generatedSQLPanel(comp Component, name string) {
 			on the next start when that version changes — see the pending migration below.
 		</p>
 	</div>
+}
+
+// fileProblemsPanel is what is wrong with schema.json rather than with anything
+// in it — a version below one, or a half of the file with nothing in it.
+//
+// Rendered in the main column rather than inside the editor because it applies
+// whatever is selected, and because the states that produce it are exactly the
+// ones where there may be nothing selected at all.
+templ fileProblemsPanel(data Data) {
+	{{ general := fileProblems(data) }}
+	// Partial as well as general, and this is the one place either renders. The
+	// note used to sit in both this block and the editor below it, so a page
+	// with a file-wide problem *and* a problem on the open component said the
+	// same sentence twice and gave two elements one test id — which a Playwright
+	// locator reports as a strict-mode violation a long way from its cause.
+	if len(general) > 0 || data.Validation.Partial {
+		<div class="problems-block" data-testid="file-problems">
+			@components.Problems(components.ProblemsProps{Problems: general})
+			if data.Validation.Partial {
+				@components.PartialNote()
+			}
+		</div>
+	}
+}
+
+// problemBadge marks a list row whose owner has something wrong with it.
+//
+// Two states, because they mean different things to someone looking at a
+// disabled Save button: a red ! is one of the reasons it is disabled, an amber
+// one is not. The title carries the count, so the badge is not the only way to
+// learn there is more than one.
+templ problemBadge(data Data, kind OwnerKind, name string) {
+	if hasProblems(data, kind, name) {
+		<span
+			class={ "badge-problem", kv("badge-problem--error", hasBlockingProblems(data, kind, name)) }
+			title={ problemSummary(data, kind, name) }
+			data-testid={ "row-problem-" + name }
+		>!</span>
+		<span class="sr-only">{ problemSummary(data, kind, name) }</span>
+	}
 }

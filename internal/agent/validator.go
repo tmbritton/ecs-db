@@ -122,6 +122,19 @@ func collectStateIDs(states map[string]*StateNode) map[string]bool {
 	return known
 }
 
+// FieldIndex maps each component property name to the list of component names
+// that declare a property with that name.
+//
+// Exported because Forge predicts this check while the schema is being edited:
+// a context key matching two components' fields is a hard ValidateMachine
+// error, and it surfaces at machine-load time, a long way from the schema edit
+// that caused it. Sharing the index rather than rebuilding it is what keeps the
+// prediction and the error it predicts from drifting apart.
+//
+// The returned lists are in map order. ValidateMachine sorts before rendering
+// them; so should any other caller that shows them to a human.
+func FieldIndex(s schema.DatabaseSchema) map[string][]string { return buildFieldIndex(s) }
+
 // buildFieldIndex maps each component property name to the list of component
 // names that declare a property with that name. Used for context key validation.
 func buildFieldIndex(s schema.DatabaseSchema) map[string][]string {

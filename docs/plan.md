@@ -424,13 +424,21 @@ Two places the design outruns the engine, both carried forward from the original
   - Fix first: `componentTableBuilder.go` iterates the properties map unsorted, so column order is non-deterministic and a live preview visibly reshuffles
   - Since Epic 11, the fix is authored order via `Component.PropertyOrder`, not sorting — deterministic *and* it reads like the file
 
-- [ ] **Migration framing** — `schema.Diff` against the live DB shape, rendered as the migration warning; `MigrationConfirm` policy surfaces destructive statements in a confirmation dialog.
+- [x] **Migration framing** — `schema.Diff` against the live DB shape, rendered as the migration warning; `MigrationConfirm` policy surfaces destructive statements in a confirmation dialog.
+  - The engine migrates rather than refusing, and only when `schemaVersion` changes — the panel says both
+  - The preview is recomputed per render, never cached: it depends on a database another process is writing
 
-- [ ] **ENTS mode** — Type list and editor: primary behavior, required/optional component chips, validation level, allow-extras, read-only CONTEXT SEEDS panel.
+- [x] **ENTS mode** — Type list and editor: primary behavior, required/optional component chips, validation level, allow-extras, read-only CONTEXT SEEDS panel.
+  - `Config.Machines` had never been wired, so the behaviour dropdown had been empty since Story 2
+  - Components and entity types need separate rename namespaces — the two halves may legitimately share a name
 
-- [ ] **Usage panel** — Spawn and live-instance counts; degrades gracefully with no database attached.
+- [x] **Usage panel** — Spawn and live-instance counts; degrades gracefully with no database attached.
+  - A component's count is its own `comp_*` rows, not the population of the types declaring it — those differ whenever it is optional
+  - Spawn counts are absent with a reason rather than zero; zero would be indistinguishable from an answer
 
-- [ ] **Inline validation** — `ValidateSchema` + `ValidateBehaviorRefs` (the latter has no caller anywhere today), plus a live warning when a context key matches two components' fields.
+- [x] **Inline validation** — `ValidateSchema` + `ValidateBehaviorRefs` (which gets its first caller in the codebase), plus a live warning when a context key matches two components' fields.
+  - `ValidateSchema` returns one error for a whole file; narrowing carriers recover which owner and how many, without re-deciding what is valid
+  - A missing machine file blocks the save; a file that is present but did not load is a warning naming the reason
 
 ---
 

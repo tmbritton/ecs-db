@@ -11,10 +11,27 @@ type SaveFooterProps struct {
 	File          string // display only, e.g. "overworld.tmx"
 	SaveAction    string
 	DiscardAction string
+	// Blocked is a save the engine would refuse. Save is disabled and the
+	// reason is stated beside it: a control that is disabled for a reason the
+	// user cannot see is indistinguishable from one that is broken, and the
+	// point of validating while editing is to say so before the button is
+	// pressed rather than after.
+	//
+	// Discard stays enabled. It is the way out of an invalid state, and taking
+	// it away leaves someone stuck with a file they cannot save and cannot
+	// abandon.
+	Blocked bool
+	// BlockedReason is the one-line summary shown beside the disabled button.
+	// The problems themselves render inline, against what caused them.
+	BlockedReason string
 }
 
 templ SaveFooter(props SaveFooterProps) {
-	<div class={ classes("save-footer", when(props.Dirty, "save-footer--dirty")) } data-testid="save-footer">
+	<div
+		class={ classes("save-footer", when(props.Dirty, "save-footer--dirty"), when(props.Blocked, "save-footer--blocked")) }
+		data-testid="save-footer"
+		data-blocked={ boolAttr(props.Blocked) }
+	>
 		<div class="save-footer__hint mono">
 			if props.Dirty {
 				● unsaved
@@ -23,6 +40,9 @@ templ SaveFooter(props SaveFooterProps) {
 			}
 			if props.File != "" {
 				<span class="save-footer__file">· { props.File }</span>
+			}
+			if props.Blocked && props.BlockedReason != "" {
+				<span class="save-footer__blocked" data-testid="save-blocked">· { props.BlockedReason }</span>
 			}
 		</div>
 		<div class="save-footer__actions">
@@ -37,8 +57,11 @@ templ SaveFooter(props SaveFooterProps) {
 			<button
 				type="button"
 				class="save-footer__save"
-				disabled?={ !props.Dirty }
-				if props.Dirty && props.SaveAction != "" {
+				disabled?={ !props.Dirty || props.Blocked }
+				if props.Blocked {
+					title={ props.BlockedReason }
+				}
+				if props.Dirty && !props.Blocked && props.SaveAction != "" {
 					data-on:click={ props.SaveAction }
 				}
 			>Save</button>
