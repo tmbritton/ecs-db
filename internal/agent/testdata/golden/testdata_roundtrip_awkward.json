@@ -1,0 +1,25 @@
+{
+  "id": "awkward",
+  "initial": "one",
+  "context": {
+    "quote\"key": "value with \"quotes\" and \\backslash",
+    "unicode": "héllo · ⚒ · 日本語"
+  },
+  "states": {
+    "one": {
+      "on": {
+        "GO": [{ "target": "two" }]
+      },
+      "Description": "capitalised, and not a field the parser models",
+      "meta": null
+    },
+    "two": {
+      "unknown-array": [],
+      "unknown-object": {},
+      "unknown-null": null,
+      "unknown-false": false,
+      "unknown-zero": 0
+    }
+  },
+  "zzz-last": { "deeply": { "nested": [1, 2, { "three": true }] } }
+}

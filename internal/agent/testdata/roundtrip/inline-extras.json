@@ -1,0 +1,15 @@
+{
+  "id": "inline",
+  "initial": "idle",
+  "states": {
+    "idle": {
+      "entry": [{ "type": "log", "params": { "message": "hi" }, "description": "greets" }],
+      "on": {
+        "SELF": [{ "target": "idle", "internal": false, "description": "re-enters" }],
+        "GUARDED": [{ "target": "busy", "cond": { "type": "timerExpired", "params": { "key": "t" }, "description": "waits" } }],
+        "IDENT": [{ "target": "busy", "id": "t1", "meta": { "note": "kept" } }]
+      }
+    },
+    "busy": {}
+  }
+}

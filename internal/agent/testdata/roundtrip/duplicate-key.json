@@ -1,0 +1,9 @@
+{
+  "id": "dupes",
+  "initial": "idle",
+  "note": "first",
+  "note": "second",
+  "states": {
+    "idle": {}
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "sentry",
+  "initial": "idle",
+  "context": {
+    "aggroRange": 80
+  },
+  "states": {
+    "idle": {
+      "on": {
+        "SPOTTED": { "target": "alerting" },
+        "RESET": "idle"
+      },
+      "description": "standing still",
+      "tags": ["passive"],
+      "meta": {
+        "layout": { "x": 100, "y": 200 },
+        "notes": "the resting state"
+      }
+    },
+    "alerting": {
+      "entry": { "type": "log", "params": { "message": "!" } },
+      "exit": "log",
+      "on": {
+        "CALM": [{ "target": "idle", "cond": "timerExpired" }]
+      },
+      "meta": { "layout": { "x": 320, "y": 200 } }
+    }
+  },
+  "description": "watches a corridor and shouts",
+  "tags": ["enemy", "stationary"]
+}

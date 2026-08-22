@@ -1,0 +1,31 @@
+{
+  "id": "goblin",
+  "initial": "idle",
+  "context": {
+    "target_x": 0,
+    "target_y": 0
+  },
+  "states": {
+    "idle": {
+      "entry": [
+        { "type": "setAnimation", "params": { "animation": "goblin_idle" } },
+        { "type": "pickRandomTarget", "params": { "radius": 5 } },
+        { "type": "computePath" }
+      ],
+      "after": {
+        "1000": [{ "target": "wandering" }]
+      }
+    },
+    "wandering": {
+      "entry": [
+        { "type": "setAnimation", "params": { "animation": "goblin_walk" } }
+      ],
+      "on": {
+        "TICK": [
+          { "target": "idle", "cond": { "type": "pathComplete" } },
+          { "actions": [{ "type": "stepAlongPath" }] }
+        ]
+      }
+    }
+  }
+}

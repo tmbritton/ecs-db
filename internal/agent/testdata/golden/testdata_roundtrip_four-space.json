@@ -1,0 +1,23 @@
+{
+  "id": "wide",
+  "initial": "idle",
+  "states": {
+    "idle": {
+      "on": {
+        "GO": "idle"
+      },
+      "meta": {
+          "layout": {
+              "x": 10,
+              "y": 20
+          }
+      }
+    }
+  },
+  "notes": {
+      "why": "indented four spaces, which is what prettier does by default",
+      "nested": {
+          "deeper": [1, 2, 3]
+      }
+  }
+}

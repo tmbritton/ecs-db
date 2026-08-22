@@ -1,0 +1,15 @@
+{
+  "id": "global",
+  "initial": "idle",
+  "on": {
+    "RESET": "idle",
+    "QUIT": { "target": "done" }
+  },
+  "entry": ["log"],
+  "exit": [{ "type": "log", "params": { "message": "bye" } }],
+  "after": { "5000": "done" },
+  "states": {
+    "idle": {},
+    "done": { "type": "final" }
+  }
+}

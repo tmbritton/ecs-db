@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
@@ -23,12 +24,25 @@ const (
 type ActionSpec struct {
 	Type   string
 	Params map[string]any
+	// Bare records that this was authored as a plain string rather than an
+	// object. See Form.
+	Bare bool
+	// Extra holds fields this package does not model. XState v4 gives an action
+	// a description; dropping it is the same loss as dropping a state's.
+	Extra      map[string]json.RawMessage
+	ExtraOrder []string
 }
 
 // CondSpec is a guard condition — either a string shorthand or {type, params}.
 type CondSpec struct {
 	Type   string
 	Params map[string]any
+	// Bare records that this was authored as a plain string rather than an
+	// object. See Form for why any of this is tracked.
+	Bare bool
+	// Extra holds fields this package does not model. See ActionSpec.Extra.
+	Extra      map[string]json.RawMessage
+	ExtraOrder []string
 }
 
 // Transition is a single transition within an "on" or "after" map entry.
@@ -36,7 +50,35 @@ type Transition struct {
 	Target  string
 	Cond    *CondSpec // nil = unconditional
 	Actions []ActionSpec
+	// Bare records that this was authored as a plain target string.
+	Bare bool
+	// Extra holds fields this package does not model — description, id, meta,
+	// and notably "internal", which decides whether entry and exit actions
+	// re-fire on a self-transition. Dropping that one changes what the machine
+	// does, not just what the file looks like.
+	Extra      map[string]json.RawMessage
+	ExtraOrder []string
 }
+
+// Form records whether a value XState lets you write either way was authored
+// wrapped in an array or on its own.
+//
+// XState accepts several spellings of the same thing: "on": {"E": "next"},
+// {"E": {"target": "next"}} and {"E": [{"target": "next"}]} are one transition
+// three ways, and entry/exit are the same. The engine does not care, but the
+// file is in version control and read in diffs, so a save that rewrote every
+// transition into this package's preferred spelling would be a whole-file diff
+// nobody asked for — the same reason internal/jsonorder exists.
+//
+// The zero value is the canonical form, so a machine built in code — a state
+// added on the canvas, say — emits the way the live files are written without
+// anything having to say so.
+type Form uint8
+
+const (
+	FormArray  Form = iota // [ … ]
+	FormSingle             // one value, not wrapped in an array
+)
 
 // StateNode is one node in the machine tree.
 //
@@ -61,6 +103,17 @@ type StateNode struct {
 	StateOrder []string // authored order of Children
 	OnOrder    []string // authored order of On's event keys
 	AfterOrder []string // authored order of After's duration keys
+
+	// How each of the above was spelled in the file. See Form.
+	EntryForm Form
+	ExitForm  Form
+	OnForm    map[string]Form
+	AfterForm map[string]Form
+
+	// Extra holds fields this package does not model, so a save does not delete
+	// them. See MachineDefinition.Extra.
+	Extra      map[string]json.RawMessage
+	ExtraOrder []string
 }
 
 // MachineDefinition is the parsed in-memory representation of an XState v4 machine.
@@ -74,20 +127,41 @@ type MachineDefinition struct {
 	// See StateNode for why these exist.
 	StateOrder   []string
 	ContextOrder []string
+
+	// Extra holds top-level fields this package does not model, kept verbatim
+	// so that emitting a machine does not delete them.
+	//
+	// The engine ignores them, which is the point: XState files carry
+	// description, tags and meta, Stately Studio writes all three, and a
+	// round trip through a tool that silently dropped them would destroy work
+	// on a save the user asked for and would never think to check.
+	Extra      map[string]json.RawMessage
+	ExtraOrder []string
 }
 
 // ── Raw JSON structs ──────────────────────────────────────────────────────────
 
+// rawMachine is what the machine object is decoded into, and — through
+// knownKeys — the definition of which fields are "modelled" and therefore not
+// preserved verbatim.
+//
+// It once declared on, entry, exit and after as well. Nothing ever read them:
+// the machine root is a state node in XState and this package does not
+// implement root-level transitions, so those four fields existed only to be
+// swallowed by the decoder. That was invisible dead weight until unknown fields
+// started being preserved, at which point it became a deletion allowlist — a
+// machine with a global "on": {"RESET": "idle"} had it silently removed on
+// save, with no error, which is the exact failure this story exists to stop.
+//
+// They are gone, so they reach Extra and survive. The engine still does not act
+// on them; preserving something the engine ignores is a great deal better than
+// deleting it.
 type rawMachine struct {
 	ID      string                     `json:"id"`
 	Initial string                     `json:"initial"`
 	Context map[string]any             `json:"context"`
 	States  map[string]json.RawMessage `json:"states"`
 	Invoke  json.RawMessage            `json:"invoke"`
-	On      map[string]json.RawMessage `json:"on"`
-	Entry   json.RawMessage            `json:"entry"`
-	Exit    json.RawMessage            `json:"exit"`
-	After   map[string]json.RawMessage `json:"after"`
 }
 
 type rawStateNode struct {
@@ -138,6 +212,10 @@ func ParseMachine(data []byte) (*MachineDefinition, error) {
 	if err != nil {
 		return nil, fmt.Errorf("machine %q: reading context order: %w", rm.ID, err)
 	}
+	extra, extraOrder, err := extraFields(data, machineKeys)
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: reading unmodelled fields: %w", rm.ID, err)
+	}
 
 	context := rm.Context
 	if len(context) == 0 {
@@ -152,6 +230,8 @@ func ParseMachine(data []byte) (*MachineDefinition, error) {
 		States:       states,
 		StateOrder:   stateOrder,
 		ContextOrder: contextOrder,
+		Extra:        extra,
+		ExtraOrder:   extraOrder,
 	}, nil
 }
 
@@ -220,6 +300,10 @@ func parseStateNode(machineID, name string, data json.RawMessage, parent *StateN
 	if err != nil {
 		return nil, fmt.Errorf("machine %q: state %q: after: %w", machineID, name, err)
 	}
+	extra, extraOrder, err := extraFields(data, stateKeys)
+	if err != nil {
+		return nil, fmt.Errorf("machine %q: state %q: reading unmodelled fields: %w", machineID, name, err)
+	}
 
 	sections, err := sectionsOf(data)
 	if err != nil {
@@ -252,6 +336,12 @@ func parseStateNode(machineID, name string, data json.RawMessage, parent *StateN
 		StateOrder: stateOrder,
 		OnOrder:    onOrder,
 		AfterOrder: afterOrder,
+		EntryForm:  listForm(raw.Entry),
+		ExitForm:   listForm(raw.Exit),
+		OnForm:     transitionForms(raw.On),
+		AfterForm:  transitionForms(raw.After),
+		Extra:      extra,
+		ExtraOrder: extraOrder,
 	}
 
 	if len(raw.States) > 0 {
@@ -287,11 +377,138 @@ func inferStateType(raw rawStateNode) StateType {
 }
 
 // isPresent reports whether a RawMessage contains a non-null JSON value.
+// machineKeys and stateKeys are the JSON names the parser models, derived from
+// the raw structs rather than typed out again.
+//
+// A hand-written list goes stale the first time someone adds a field to the
+// parser, and it fails badly: the new field would be parsed normally *and*
+// captured as an unknown one, so the emitter would write it twice and produce a
+// file with two "initial" keys. Deriving it means adding a field to the parser
+// automatically stops it being an extra.
+//
+// invoke is in these tags, so it is excluded by construction — which is right.
+// It is a known field the engine refuses, not an unknown one, and preserving it
+// would produce a file Forge accepts and the engine will not load.
+var (
+	machineKeys    = knownKeys(reflect.TypeOf(rawMachine{}))
+	stateKeys      = knownKeys(reflect.TypeOf(rawStateNode{}))
+	transitionKeys = knownKeys(reflect.TypeOf(rawTransition{}))
+	specKeys       = knownKeys(reflect.TypeOf(rawSpec{}))
+)
+
+// rawTransition and rawSpec are the shapes the inline objects decode into.
+// Named types rather than the anonymous structs they replace, so knownKeys can
+// derive their field sets the same way it does for the two outer ones.
+type rawTransition struct {
+	Target  string          `json:"target"`
+	Cond    json.RawMessage `json:"cond"`
+	Actions json.RawMessage `json:"actions"`
+}
+
+// rawSpec is both an action and a guard: they have the same shape.
+type rawSpec struct {
+	Type   string         `json:"type"`
+	Params map[string]any `json:"params"`
+}
+
+// knownKeys returns every field name encoding/json would bind on a struct,
+// lowercased because its matching is case-insensitive: a machine authored with
+// "States" decodes into States, so an extra by that name has already been
+// consumed and must not be captured a second time.
+//
+// Three shapes made the first version wrong, and all three are ones a future
+// field is likely to have: a field with no tag at all binds under its own name;
+// a tag written `json:",omitempty"` has an empty name and binds under the field
+// name too; and an embedded struct contributes its fields to the parent object.
+// Each would have been parsed *and* captured, so the emitter would write it
+// twice — the very failure deriving this set is supposed to make impossible.
+func knownKeys(t reflect.Type) map[string]bool {
+	keys := make(map[string]bool)
+	for _, f := range reflect.VisibleFields(t) {
+		if f.Anonymous {
+			// Contributes its own fields, which VisibleFields also reports.
+			continue
+		}
+		if !f.IsExported() {
+			// VisibleFields reports these; encoding/json never binds them. A
+			// future unexported field would otherwise claim its own name, and
+			// an input key that happened to match would be excluded from Extra
+			// and deleted on save.
+			continue
+		}
+		tag := f.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		switch name {
+		case "-":
+			continue
+		case "":
+			name = f.Name
+		}
+		keys[strings.ToLower(name)] = true
+	}
+	return keys
+}
+
+// extraFields returns the object's keys that known does not claim, in document
+// order, with their values untouched.
+func extraFields(data json.RawMessage, known map[string]bool) (map[string]json.RawMessage, []string, error) {
+	order, err := jsonorder.Keys(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, nil, err
+	}
+	var kept []string
+	out := make(map[string]json.RawMessage)
+	for _, key := range order {
+		if known[strings.ToLower(key)] {
+			continue
+		}
+		if _, seen := out[key]; seen {
+			// A duplicate key in the source. encoding/json keeps the last, so
+			// so does this — emitting it twice would produce a file that no
+			// longer parses the way the original did.
+			continue
+		}
+		out[key] = fields[key]
+		kept = append(kept, key)
+	}
+	if len(kept) == 0 {
+		return nil, nil, nil
+	}
+	return out, kept, nil
+}
+
 func isPresent(data json.RawMessage) bool {
 	return len(data) > 0 && string(data) != "null"
 }
 
 // ── Polymorphic parsing helpers ───────────────────────────────────────────────
+
+// listForm reports whether a value was authored wrapped in an array. It reads
+// the first byte rather than re-parsing: by the time it is called the value has
+// already been parsed successfully, so the byte is enough and a second decode
+// would only be another thing to keep in step.
+func listForm(data json.RawMessage) Form {
+	if !isPresent(data) || data[0] == '[' {
+		return FormArray
+	}
+	return FormSingle
+}
+
+// transitionForms records the spelling of each entry in an on/after map.
+func transitionForms(m map[string]json.RawMessage) map[string]Form {
+	if len(m) == 0 {
+		return nil
+	}
+	forms := make(map[string]Form, len(m))
+	for key, raw := range m {
+		forms[key] = listForm(raw)
+	}
+	return forms
+}
 
 func parseActionSpecs(data json.RawMessage) ([]ActionSpec, error) {
 	if !isPresent(data) {
@@ -347,16 +564,17 @@ func parseActionSpec(data json.RawMessage) (ActionSpec, error) {
 		if err := json.Unmarshal(data, &name); err != nil {
 			return ActionSpec{}, err
 		}
-		return ActionSpec{Type: name}, nil
+		return ActionSpec{Type: name, Bare: true}, nil
 	}
-	var obj struct {
-		Type   string         `json:"type"`
-		Params map[string]any `json:"params"`
-	}
+	var obj rawSpec
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return ActionSpec{}, err
 	}
-	return ActionSpec{Type: obj.Type, Params: obj.Params}, nil
+	extra, extraOrder, err := extraFields(data, specKeys)
+	if err != nil {
+		return ActionSpec{}, err
+	}
+	return ActionSpec{Type: obj.Type, Params: obj.Params, Extra: extra, ExtraOrder: extraOrder}, nil
 }
 
 func parseCondSpec(data json.RawMessage) (*CondSpec, error) {
@@ -368,16 +586,17 @@ func parseCondSpec(data json.RawMessage) (*CondSpec, error) {
 		if err := json.Unmarshal(data, &name); err != nil {
 			return nil, err
 		}
-		return &CondSpec{Type: name}, nil
+		return &CondSpec{Type: name, Bare: true}, nil
 	}
-	var obj struct {
-		Type   string         `json:"type"`
-		Params map[string]any `json:"params"`
-	}
+	var obj rawSpec
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return nil, err
 	}
-	return &CondSpec{Type: obj.Type, Params: obj.Params}, nil
+	extra, extraOrder, err := extraFields(data, specKeys)
+	if err != nil {
+		return nil, err
+	}
+	return &CondSpec{Type: obj.Type, Params: obj.Params, Extra: extra, ExtraOrder: extraOrder}, nil
 }
 
 func parseTransitions(data json.RawMessage) ([]Transition, error) {
@@ -390,7 +609,7 @@ func parseTransitions(data json.RawMessage) ([]Transition, error) {
 		if err := json.Unmarshal(data, &target); err != nil {
 			return nil, err
 		}
-		return []Transition{{Target: target}}, nil
+		return []Transition{{Target: target, Bare: true}}, nil
 	case '[':
 		var raws []json.RawMessage
 		if err := json.Unmarshal(data, &raws); err != nil {
@@ -426,7 +645,7 @@ func parseTransitionItem(data json.RawMessage) (Transition, error) {
 		if err := json.Unmarshal(data, &target); err != nil {
 			return Transition{}, err
 		}
-		return Transition{Target: target}, nil
+		return Transition{Target: target, Bare: true}, nil
 	case '[':
 		return Transition{}, fmt.Errorf("nested transition arrays are not supported")
 	default:
@@ -435,12 +654,12 @@ func parseTransitionItem(data json.RawMessage) (Transition, error) {
 }
 
 func parseTransitionObject(data json.RawMessage) (Transition, error) {
-	var raw struct {
-		Target  string          `json:"target"`
-		Cond    json.RawMessage `json:"cond"`
-		Actions json.RawMessage `json:"actions"`
-	}
+	var raw rawTransition
 	if err := json.Unmarshal(data, &raw); err != nil {
+		return Transition{}, err
+	}
+	extra, extraOrder, err := extraFields(data, transitionKeys)
+	if err != nil {
 		return Transition{}, err
 	}
 	cond, err := parseCondSpec(raw.Cond)
@@ -451,7 +670,10 @@ func parseTransitionObject(data json.RawMessage) (Transition, error) {
 	if err != nil {
 		return Transition{}, fmt.Errorf("actions: %w", err)
 	}
-	return Transition{Target: raw.Target, Cond: cond, Actions: actions}, nil
+	return Transition{
+		Target: raw.Target, Cond: cond, Actions: actions,
+		Extra: extra, ExtraOrder: extraOrder,
+	}, nil
 }
 
 func parseTransitionMap(raw map[string]json.RawMessage) (map[string][]Transition, error) {
