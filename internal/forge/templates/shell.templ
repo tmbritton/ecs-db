@@ -13,9 +13,9 @@ import (
 // top, mode rail down the left, and the active mode's content filling the
 // rest. It knows nothing about what any mode contains — it renders the
 // component it is handed.
-templ Shell(active mode.Mode, selection string, engine status.Status, saves []savereport.Report, footer Component, content Component, confirm Component) {
+templ Shell(active mode.Mode, streamQuery string, engine status.Status, saves []savereport.Report, footer Component, content Component, confirm Component) {
 	@Layout("Forge — " + active.Title) {
-		<div class="shell" data-testid="shell" data-init={ eventStream(active, selection) }>
+		<div class="shell" data-testid="shell" data-init={ eventStream(active, streamQuery) }>
 			@menuBar(engine)
 			<div class="shell__body">
 				@modeRail(active)

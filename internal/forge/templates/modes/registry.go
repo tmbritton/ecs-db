@@ -17,6 +17,6 @@ var Registry = map[string]func(Data) templ.Component{
 	"tiles":   func(Data) templ.Component { return Tiles() },
 	"ents":    EntsMode,
 	"schema":  SchemaMode,
-	"agents":  func(Data) templ.Component { return Agents() },
+	"agents":  AgentsMode,
 	"sprites": func(Data) templ.Component { return Sprites() },
 }

@@ -2,7 +2,6 @@ package templates
 
 import (
 	"fmt"
-	"net/url"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 )
@@ -24,15 +23,22 @@ const accentedMenu = "Engine"
 // naming a plugin that is not registered is skipped in silence — see
 // components/datastar_test.go, which checks every attribute this package
 // emits against the plugins the vendored bundle actually registers.
-func eventStream(m mode.Mode, selection string) string {
-	if selection == "" {
+func eventStream(m mode.Mode, query string) string {
+	if query == "" {
 		return fmt.Sprintf("@get('%s/events')", m.Path())
 	}
 	// The selection travels with the subscription so the stream can re-render
-	// the mode's content for the component the page is actually showing. The
-	// events request is a separate HTTP request and knows nothing about the
-	// page's URL otherwise.
-	return fmt.Sprintf("@get('%s/events?component=%s')", m.Path(), url.QueryEscape(selection))
+	// the mode's content for the thing the page is actually showing. The events
+	// request is a separate HTTP request and knows nothing about the page's URL
+	// otherwise.
+	//
+	// A ready-made query rather than one parameter: the shell does not know
+	// which parameter a mode selects with, and it must not learn. It carried
+	// ?component= only, which was invisible until AGENTS arrived and selected
+	// with ?machine= — every tick then re-rendered with no machine named, the
+	// fallback picked the first, and the page silently swapped to a different
+	// machine two seconds after the user clicked one.
+	return fmt.Sprintf("@get('%s/events?%s')", m.Path(), query)
 }
 
 // boolAttr renders a tri-state-safe attribute value. `data-active` is written

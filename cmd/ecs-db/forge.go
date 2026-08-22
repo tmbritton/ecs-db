@@ -11,11 +11,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/server"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/web"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // shutdownGrace bounds how long in-flight requests get to finish. Forge holds
@@ -59,7 +61,8 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		engine.ModName = cfg.Mods[0].Name
 	}
 	var editing *session.Session
-	var machines []project.Machine
+	var machineSession *machines.Session
+	var resolved []project.Machine
 	var behaviorDirs []string
 	var problems []project.Problem
 	if proj, err := project.Open(cfgPath); err != nil {
@@ -78,7 +81,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		if editing, err = session.Open(proj.SchemaPath); err != nil {
 			slog.Warn("starting an editing session", "schema", proj.SchemaPath, "err", err)
 		}
-		machines = proj.Machines
+		resolved = proj.Machines
 		problems = proj.Problems
 		// In load order, and only the mods that contribute one. Inline
 		// validation runs the engine's own behaviour-reference check against
@@ -90,16 +93,40 @@ func runForge(cmd *cobra.Command, _ []string) error {
 				behaviorDirs = append(behaviorDirs, mod.Behaviors)
 			}
 		}
+
+		// The editing session for the behaviour machines. Its schema is read
+		// through a function rather than captured, because machine validation
+		// depends on the schema — a context key has to match exactly one
+		// component field — and the user may have unsaved schema edits.
+		// Validating against the file on disk would report problems the
+		// editor's own state says are already fixed.
+		currentSchema := func() schema.DatabaseSchema {
+			if editing == nil {
+				return proj.Schema
+			}
+			var out schema.DatabaseSchema
+			editing.Read(func(d schema.DatabaseSchema) { out = d })
+			return out
+		}
+		machineSession, err = machines.Open(machines.Config{
+			Mods:   proj.Mods,
+			HasMap: cfg.Map.Path != "",
+			Schema: currentSchema,
+		})
+		if err != nil {
+			slog.Warn("starting the machine editing session", "err", err)
+		}
 	}
 
 	srv := server.New(server.Config{
-		Addr:         cfg.Forge.Addr,
-		Session:      editing,
-		Engine:       engine,
-		PollInterval: cfg.Forge.PollInterval(),
-		Machines:     machines,
-		BehaviorDirs: behaviorDirs,
-		Problems:     problems,
+		Addr:           cfg.Forge.Addr,
+		Session:        editing,
+		Engine:         engine,
+		PollInterval:   cfg.Forge.PollInterval(),
+		Machines:       resolved,
+		MachineSession: machineSession,
+		BehaviorDirs:   behaviorDirs,
+		Problems:       problems,
 	}, web.Static)
 
 	// Bind before announcing anything: otherwise a bind failure prints

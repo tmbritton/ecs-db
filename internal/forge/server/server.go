@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -62,6 +64,15 @@ type Config struct {
 	// resolved machine list cannot answer, because a file that exists and was
 	// rejected is absent from it for a different reason.
 	BehaviorDirs []string
+	// MachineSession is the editing session for the project's behaviour
+	// machines. Nil when the project could not be opened, which leaves AGENTS
+	// readable and the reason visible rather than failing the whole editor.
+	//
+	// When it is present it is also the source of truth for the resolved
+	// machine set, replacing the Machines snapshot below: Epic 12 Story 7 had
+	// to word its "no machine with this id is loaded" warning around a list
+	// that was read once at startup, and this is the story that can change it.
+	MachineSession *machines.Session
 	// Problems are the project's loading failures. They are what turns "that
 	// machine did not resolve" into a sentence naming the file and the reason,
 	// instead of sending the user to the log to find out what the tool already
@@ -109,8 +120,9 @@ type Server struct {
 	// ECS idiom — and a single map cannot tell them apart, so renaming the
 	// component silently retargeted the ENTS editor onto whatever entity type
 	// sorted first, delete button included.
-	renamedTo     map[string]string
-	renamedTypeTo map[string]string
+	renamedTo        map[string]string
+	renamedTypeTo    map[string]string
+	renamedMachineTo map[string]string
 
 	// held is the save that was stopped to ask first, or saveNone. It records
 	// which save was asked for, not the plan it would run: the modal re-reads
@@ -171,6 +183,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /forge/schema/reload", sameOriginOnly(s.handleSchemaReload))
 	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
 	s.registerSchemaEditRoutes(mux)
+	s.registerMachineEditRoutes(mux)
 	s.registerEntsEditRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
@@ -207,8 +220,41 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	s.hold(saveNone)
 	data := s.modeData(r)
 	s.render(w, r, templates.Shell(
-		m, data.Selected, status.Check(s.cfg.Engine), s.saves.All(), s.footer(data),
+		m, streamQuery(r, m.Slug, data), status.Check(s.cfg.Engine), s.saves.All(), s.footer(m.Slug, data),
 		content(data), s.confirmation(data)))
+}
+
+// streamQuery is the selection the page's SSE subscription has to carry, so
+// that the mode content it re-renders is the one on screen.
+//
+// One place names the selection parameters, because the shell must not know
+// which one a given mode uses — it carried ?component= alone until AGENTS
+// arrived selecting with ?machine=, and the stream then re-rendered every tick
+// with nothing selected.
+//
+// The resolved values, not the raw query: Epic 12's rename-following means the
+// component the page is showing may already differ from the one its URL names,
+// and the stream should follow the editor rather than the address bar.
+func streamQuery(r *http.Request, slug string, data modes.Data) string {
+	q := url.Values{}
+	if data.Selected != "" {
+		// modeData resolves ?component= first and only falls back to ?type=, so
+		// the key has to be chosen the same way round or a page carrying both
+		// would subscribe under the wrong namespace and follow the wrong
+		// rename map.
+		key := "component"
+		if r.URL.Query().Get("component") == "" && r.URL.Query().Get("type") != "" {
+			key = "type"
+		}
+		q.Set(key, data.Selected)
+	}
+	// Only where it means something. machineData runs for every mode, so
+	// without this every page — MAP, TILES, SCHEMA — put an absolute path from
+	// the developer's filesystem into its subscription URL.
+	if slug == "agents" && data.SelectedMachine != "" {
+		q.Set("machine", data.SelectedMachine)
+	}
+	return q.Encode()
 }
 
 // modeData gathers what a mode needs to render. The schema is a deep copy from
@@ -231,7 +277,7 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	}
 	data.HasSession = true
 	s.cfg.Session.Read(func(d schema.DatabaseSchema) { data.Schema = d })
-	data.Machines = s.cfg.Machines
+	data.Machines, data.MachineProblems = s.resolvedMachines()
 	// Computed for every mode, not just the two that edit the file: the save
 	// footer is in the shell and is on screen everywhere, and a Save button
 	// that only knows it would be refused while SCHEMA happens to be open is
@@ -239,9 +285,15 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	data.Validation = validation.Check(validation.Input{
 		Schema:       data.Schema,
 		BehaviorDirs: s.cfg.BehaviorDirs,
-		Machines:     s.cfg.Machines,
-		Problems:     s.cfg.Problems,
+		Machines:     data.Machines,
+		Problems:     data.MachineProblems,
 	})
+	data.SelectedMachine, data.DirtyMachines, data.ReformatMachines = s.machineData(r)
+	if s.cfg.MachineSession != nil {
+		data.HasMachines = true
+		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
+		data.Machine = s.machineDefinition(data.SelectedMachine)
+	}
 	data.Problem = s.lastEditProblem()
 	data.Confirming = s.isConfirming()
 	// The preview costs a database open and a full introspection, so it is
@@ -266,6 +318,22 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			AgainstVersion(data.Schema.SchemaVersion)
 	}
 	return data
+}
+
+// resolvedMachines is the project's machines as they are now.
+//
+// From the editing session when there is one, which re-resolves after every
+// create, rename and delete — so a machine authored in Forge is bindable in ENTS
+// immediately rather than after a restart. The Config snapshot is the fallback
+// for a server built without a session, which is every handler test that does
+// not care.
+func (s *Server) resolvedMachines() ([]project.Machine, []project.Problem) {
+	if s.cfg.MachineSession == nil {
+		return s.cfg.Machines, s.cfg.Problems
+	}
+	// The session's list, not both: Config.Problems is the same list taken at
+	// startup, so unioning them reported every broken file twice.
+	return s.cfg.MachineSession.Machines(), s.cfg.MachineSession.Problems()
 }
 
 // selectedComponent resolves which component the SCHEMA panel is showing, so
@@ -422,7 +490,7 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		}{
 			{"engine status", s.renderEngineStatus, &lastStatus},
 			{"save reports", s.renderSaveReports, &lastSaves},
-			{"save footer", func() (string, error) { return s.renderFooter(data()) }, &lastFooter},
+			{"save footer", func() (string, error) { return s.renderFooter(m.Slug, data()) }, &lastFooter},
 			{"mode content", func() (string, error) { return s.renderModeContent(m, data()) }, &lastContent},
 			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }, &lastConfirm},
 		} {
@@ -464,10 +532,20 @@ func (s *Server) ClearSaveReport(path string) { s.saves.Clear(path) }
 
 // footer renders the save footer from the session's real state. A project that
 // failed to open has no session and therefore nothing to save.
-func (s *Server) footer(data modes.Data) templates.Component {
+// footer builds the save footer for the mode on screen.
+//
+// Mode-aware because one Save button must do one thing: on AGENTS it saves
+// machines, everywhere else it saves schema.json. Unsaved work in the other
+// place is not hidden — it is reported alongside, so switching modes cannot
+// make it disappear.
+func (s *Server) footer(slug string, data modes.Data) templates.Component {
+	if slug == "agents" && s.cfg.MachineSession != nil {
+		return s.machinesFooter(data)
+	}
 	if s.cfg.Session == nil {
 		return templates.NoFooter()
 	}
+	elsewhere := s.unsavedMachines()
 	dirty, err := s.cfg.Session.Dirty()
 	if err != nil {
 		// A schema that will not serialise cannot be saved, and saying "clean"
@@ -475,7 +553,56 @@ func (s *Server) footer(data modes.Data) templates.Component {
 		slog.Error("computing dirty state", "path", s.cfg.Session.Path(), "err", err)
 		dirty = true
 	}
-	return templates.SchemaFooter(filepath.Base(s.cfg.Session.Path()), dirty, data.Validation)
+	return templates.SchemaFooter(
+		filepath.Base(s.cfg.Session.Path()), dirty, data.Validation, elsewhere)
+}
+
+// unsavedMachines counts machine edits that this footer cannot save, so
+// switching modes cannot hide them.
+//
+// Reformat-only differences are not counted: nobody edited those, and a footer
+// that reported them as pending work would be crying wolf on every project
+// whose files were not written by Forge.
+func (s *Server) unsavedMachines() int {
+	if s.cfg.MachineSession == nil {
+		return 0
+	}
+	changes, err := s.cfg.MachineSession.Changes()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, c := range changes {
+		if !c.Reformatting {
+			n++
+		}
+	}
+	return n
+}
+
+// unsavedSchema reports whether schema.json has edits the AGENTS footer cannot
+// save. Same reasoning in the other direction.
+func (s *Server) unsavedSchema() bool {
+	if s.cfg.Session == nil {
+		return false
+	}
+	dirty, err := s.cfg.Session.Dirty()
+	if err != nil {
+		// A schema that will not serialise cannot be saved, and saying "clean"
+		// would be worse than saying "dirty".
+		return true
+	}
+	return dirty
+}
+
+// machinesFooter names how many machines are unsaved, and which.
+func (s *Server) machinesFooter(data modes.Data) templates.Component {
+	return templates.MachinesFooter(
+		machinesFooterFile(data.DirtyMachines, data.ReformatMachines),
+		len(data.DirtyMachines) > len(data.ReformatMachines),
+		dirtyNames(data.DirtyMachines),
+		s.unsavedSchema(),
+	)
 }
 
 // confirmation renders the held-save dialog, or nil when nothing is held.
@@ -504,9 +631,9 @@ func (s *Server) renderConfirmRegion(data modes.Data) (string, error) {
 	return buf.String(), nil
 }
 
-func (s *Server) renderFooter(data modes.Data) (string, error) {
+func (s *Server) renderFooter(slug string, data modes.Data) (string, error) {
 	var buf bytes.Buffer
-	c := templates.SaveFooterRegion(s.footer(data))
+	c := templates.SaveFooterRegion(s.footer(slug, data))
 	if err := c.Render(context.Background(), &buf); err != nil {
 		return "", err
 	}
@@ -522,14 +649,24 @@ type renameKind int
 const (
 	renameComponentKind renameKind = iota
 	renameTypeKind
+	// renameMachineKind follows a machine's *file*, which is what a page's
+	// stream subscribes with. Renaming the file moves that path, and without a
+	// trail the stream asks for one that no longer exists, the fallback picks
+	// the first machine, and the editor silently swaps to a different one — the
+	// same failure component renames had, in a third namespace.
+	renameMachineKind
 )
 
 // renames returns the map for one namespace. Caller holds s.mu.
 func (s *Server) renames(kind renameKind) map[string]string {
-	if kind == renameTypeKind {
+	switch kind {
+	case renameTypeKind:
 		return s.renamedTypeTo
+	case renameMachineKind:
+		return s.renamedMachineTo
+	default:
+		return s.renamedTo
 	}
-	return s.renamedTo
 }
 
 // followRenames resolves a name through any renames since the page subscribed.
@@ -560,17 +697,23 @@ func (s *Server) recordRename(kind renameKind, from, to string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if kind == renameTypeKind {
+	switch kind {
+	case renameTypeKind:
 		if s.renamedTypeTo == nil {
 			s.renamedTypeTo = map[string]string{}
 		}
 		s.renamedTypeTo[from] = to
-		return
+	case renameMachineKind:
+		if s.renamedMachineTo == nil {
+			s.renamedMachineTo = map[string]string{}
+		}
+		s.renamedMachineTo[from] = to
+	default:
+		if s.renamedTo == nil {
+			s.renamedTo = map[string]string{}
+		}
+		s.renamedTo[from] = to
 	}
-	if s.renamedTo == nil {
-		s.renamedTo = map[string]string{}
-	}
-	s.renamedTo[from] = to
 }
 
 // forgetRenames drops the rename trail.
@@ -583,6 +726,7 @@ func (s *Server) forgetRenames() {
 	defer s.mu.Unlock()
 	s.renamedTo = nil
 	s.renamedTypeTo = nil
+	s.renamedMachineTo = nil
 }
 
 func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error) {

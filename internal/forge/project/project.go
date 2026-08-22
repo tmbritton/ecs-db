@@ -106,6 +106,17 @@ func Open(configPath string) (*Project, error) {
 	return p, nil
 }
 
+// ResolveMachines is loadMachines for callers outside this package.
+//
+// Forge re-resolves after creating, renaming or deleting a machine, so its view
+// stops being the startup snapshot it used to be. It takes the schema rather
+// than reading one because machine validation depends on it — a context key has
+// to match exactly one component field — and the schema being edited is not
+// necessarily the schema on disk.
+func ResolveMachines(mods []Mod, s schema.DatabaseSchema, hasMap bool) ([]Machine, []Problem) {
+	return loadMachines(mods, s, hasMap)
+}
+
 // loadMachines scans each mod in order through agent.Loader, which owns the
 // precedence rule. Override detection is derived from what the loader actually
 // did — a source that changed after scanning a later mod was overridden — so
@@ -232,6 +243,12 @@ func duplicateIDs(mod Mod) []Problem {
 	sort.Slice(problems, func(i, j int) bool { return problems[i].Err.Error() < problems[j].Err.Error() })
 	return problems
 }
+
+// BuildRegistry is buildRegistry for callers outside this package. The machine
+// editing session validates with it, and validating against a registry built
+// any other way is how the editor and the game come to disagree about whether a
+// machine loads.
+func BuildRegistry(hasMap bool) *agent.Registry { return buildRegistry(hasMap) }
 
 // buildRegistry mirrors what the running engine registers for this project.
 //

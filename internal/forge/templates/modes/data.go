@@ -1,6 +1,7 @@
 package modes
 
 import (
+	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
@@ -28,6 +29,26 @@ type Data struct {
 	// Machines are the behaviour machines the project resolved, for the binding
 	// dropdowns and for ENTS's read-only view of a bound machine's context.
 	Machines []project.Machine
+	// MachineProblems is why any behaviour file did not resolve, which is what
+	// turns "that machine is not loaded" into a sentence naming the reason.
+	MachineProblems []project.Problem
+	// Selected machine, by path. A machine's id lives inside its file and can
+	// be edited, so the path is what a selection can safely be keyed on.
+	SelectedMachine string
+	// Dirty machines, by path, so the list can mark what is unsaved.
+	DirtyMachines map[string]bool
+	// ReformatMachines is the subset of those whose *content* matches the file
+	// and whose difference is only its layout — a machine authored in another
+	// whitespace style is unsaved the moment Forge opens it, with nobody having
+	// edited anything.
+	ReformatMachines map[string]bool
+	// MachineMods are the mods a new machine could be created in.
+	MachineMods []project.Mod
+	// Machine is the selected machine's working value, already a copy.
+	Machine *agent.MachineDefinition
+	// HasMachines is false when no project could be opened, on the same terms
+	// as HasSession.
+	HasMachines bool
 	// Problem is why the last edit was refused, if it was. Rendered in the
 	// editor rather than only returned as a status code: an edit that vanishes
 	// with no explanation teaches you that the control is broken.

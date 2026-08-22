@@ -9,6 +9,9 @@ package components
 type SaveFooterProps struct {
 	Dirty         bool
 	File          string // display only, e.g. "overworld.tmx"
+	// Title is the hover text for the file label, for a File that summarises
+	// several — "3 unsaved machines" says how many and this says which.
+	Title string
 	SaveAction    string
 	DiscardAction string
 	// Blocked is a save the engine would refuse. Save is disabled and the
@@ -21,6 +24,10 @@ type SaveFooterProps struct {
 	// it away leaves someone stuck with a file they cannot save and cannot
 	// abandon.
 	Blocked bool
+	// Elsewhere names unsaved work this footer cannot save, because one Save
+	// button does one thing and the footer follows the mode. Without it,
+	// switching modes reads as "everything is saved".
+	Elsewhere string
 	// BlockedReason is the one-line summary shown beside the disabled button.
 	// The problems themselves render inline, against what caused them.
 	BlockedReason string
@@ -35,11 +42,22 @@ templ SaveFooter(props SaveFooterProps) {
 		<div class="save-footer__hint mono">
 			if props.Dirty {
 				● unsaved
+			} else if props.Elsewhere != "" {
+				● saved here
 			} else {
 				✓ saved
 			}
 			if props.File != "" {
-				<span class="save-footer__file">· { props.File }</span>
+				<span
+					class="save-footer__file"
+					data-testid="save-footer-file"
+					if props.Title != "" {
+						title={ props.Title }
+					}
+				>· { props.File }</span>
+			}
+			if props.Elsewhere != "" {
+				<span class="save-footer__elsewhere" data-testid="save-elsewhere">· { props.Elsewhere }</span>
 			}
 			if props.Blocked && props.BlockedReason != "" {
 				<span class="save-footer__blocked" data-testid="save-blocked">· { props.BlockedReason }</span>

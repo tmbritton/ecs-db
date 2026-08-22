@@ -434,14 +434,16 @@ func unresolvedMessage(behavior string, problems []project.Problem) string {
 		reasons = append(reasons, p.String())
 	}
 	if len(reasons) == 0 {
-		// Two ways to get here, and Forge cannot tell them apart: the file
-		// declares a different id, which is legal and loads fine under that
-		// other id; or the machine list is simply older than the file, because
-		// it is read once when Forge starts. Naming only the first sent people
-		// to check an id that was already correct.
+		// Still two causes, but a narrower second one. Epic 13 Story 2 made
+		// every create, rename and delete re-resolve, so Forge's own changes
+		// are never stale — but nothing watches the behaviours directory, and
+		// editing a machine file in a text editor is a first-class workflow
+		// here. Claiming the id must be wrong would send those users to check
+		// something already correct, which is what the previous wording was
+		// written to avoid.
 		return lead + ". Either the file declares a different " + quote("id") +
-			" — the binding matches the id inside the file, not the filename — or it " +
-			"was added or fixed after Forge started, which reads the project's machines once."
+			" — a binding matches the id inside the file, not the filename — or it was " +
+			"changed outside Forge, which does not watch the behaviours directory."
 	}
 	sort.Strings(reasons)
 	return lead + ": " + strings.Join(reasons, "; ")

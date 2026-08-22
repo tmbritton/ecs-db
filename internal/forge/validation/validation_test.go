@@ -507,12 +507,16 @@ func TestCheck_SaysWhereToLookWhenTheProjectRecordedNoReason(t *testing.T) {
 		t.Errorf("message %q does not point at the id inside the file, which is what\n"+
 			"the binding actually matches", on[0].Message)
 	}
-	// The machine list is read once, when Forge starts, while the file check is
-	// live — so a file added since resolves here and is still missing from the
-	// list. Naming only the id sent people to check something already correct.
-	if !strings.Contains(on[0].Message, "started") {
-		t.Errorf("message %q states one cause as though it were the only one:\n"+
-			"a machine added after Forge started reaches this too", on[0].Message)
+	// It no longer blames Forge's *startup* — the list re-resolves on every
+	// mutation now — but an edit made outside Forge is still a real cause,
+	// because nothing watches the behaviours directory.
+	if strings.Contains(on[0].Message, "started") {
+		t.Errorf("message %q still blames a list read once at startup, which stopped\n"+
+			"being true when the list started refreshing", on[0].Message)
+	}
+	if !strings.Contains(on[0].Message, "outside Forge") {
+		t.Errorf("message %q states one cause as though it were the only one: a file\n"+
+			"edited in a text editor reaches this too", on[0].Message)
 	}
 }
 

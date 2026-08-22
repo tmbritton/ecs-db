@@ -14,12 +14,13 @@ import (
 // The actions post to the session endpoints. Both buttons are disabled when
 // clean, which the primitive already supports and nothing had used until now —
 // there is nothing to commit and nothing to throw away.
-func SchemaFooter(file string, dirty bool, report validation.Report) templ.Component {
+func SchemaFooter(file string, dirty bool, report validation.Report, unsavedElsewhere int) templ.Component {
 	return components.SaveFooter(components.SaveFooterProps{
 		Dirty:         dirty,
 		File:          file,
 		Blocked:       report.Blocked(),
 		BlockedReason: blockedReason(report),
+		Elsewhere:     machinesElsewhere(unsavedElsewhere),
 		SaveAction:    "@post('/forge/schema/save')",
 		// Confirmed, because it throws away work with no undo. It also used to
 		// be the only control offered after a conflict, which made an
@@ -47,4 +48,48 @@ func blockedReason(report validation.Report) string {
 		return "1 problem to fix first"
 	}
 	return strconv.Itoa(errors) + " problems to fix first"
+}
+
+// MachinesFooter builds the save footer for AGENTS mode.
+//
+// Not blocked by validity, unlike SchemaFooter, and that difference is the
+// story's central decision rather than an oversight. An invalid schema.json
+// stops the engine starting, so blocking its save protects the project; an
+// invalid *machine* is rejected by the loader on its own, so the blast radius
+// is one file. Save writes what it can and reports what it could not, and a
+// half-built machine on the canvas cannot hold finished work hostage.
+func MachinesFooter(file string, dirty bool, title string, unsavedSchema bool) templ.Component {
+	return components.SaveFooter(components.SaveFooterProps{
+		Dirty:      dirty,
+		File:       file,
+		Title:      title,
+		Elsewhere:  schemaElsewhere(unsavedSchema),
+		SaveAction: "@post('/forge/agents/save')",
+		DiscardAction: "confirm('Discard unsaved changes to every machine?') && " +
+			"@post('/forge/agents/discard')",
+	})
+}
+
+// machinesElsewhere and schemaElsewhere say that there is unsaved work this
+// footer cannot save.
+//
+// One Save button does one thing, so the footer follows the mode — and that
+// made switching to AGENTS with a dirty schema.json show "✓ saved" and a
+// disabled Save, which is a way to lose work rather than a wording miss.
+func machinesElsewhere(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 unsaved machine in AGENTS"
+	default:
+		return strconv.Itoa(n) + " unsaved machines in AGENTS"
+	}
+}
+
+func schemaElsewhere(unsaved bool) string {
+	if !unsaved {
+		return ""
+	}
+	return "unsaved changes to schema.json in SCHEMA"
 }

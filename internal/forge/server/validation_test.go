@@ -145,7 +145,7 @@ func TestStream_CarriesValidationAsItChanges(t *testing.T) {
 	}
 	// And it does not take the Save button away. A binding the engine never
 	// reads must not stop someone saving the change they actually made.
-	footer, err := s.renderFooter(data)
+	footer, err := s.renderFooter("schema", data)
 	if err != nil {
 		t.Fatalf("renderFooter: %v", err)
 	}

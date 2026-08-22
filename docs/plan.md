@@ -452,9 +452,13 @@ The action/guard dropdowns are fed from `agent.Registry.Actions()`/`Guards()`, w
 
 Two checks against the code changed the shape (see the epic README for the probes). The round trip is **lossy today** — `ParseMachine` ignores unknown fields and `EmitMachine` writes only what it knows, so a save silently deletes a Stately export's `description`, `tags` and `meta` — which makes fidelity the first story rather than the last. And the proposed `behaviors/<id>.layout.json` sidecar would be loaded by `ScanDir` as a machine with an empty id, successfully and without an error.
 
-- [ ] **Round-trip fidelity** — Unknown fields survive parse → emit, so a Forge save stops deleting what it does not model. Decides where canvas layout lives.
+- [x] **Round-trip fidelity** — Unknown fields survive parse → emit, so a Forge save stops deleting what it does not model. Decides where canvas layout lives.
+  - Also preserves XState's several spellings of one thing — Stately writes the object form, so the epic's headline claim was failing on the input it names
+  - Layout goes in each state's own `meta`: the proposed sidecar would be loaded by `ScanDir` as a machine with an empty id
 
-- [ ] **Machine editing session** — Many files rather than one: open, create, rename, delete, save, hot-swap. A machine's identity is the `id` inside the file, not its filename.
+- [x] **Machine editing session** — Many files rather than one: open, create, rename, delete, save, hot-swap. A machine's identity is the `id` inside the file, not its filename.
+  - Saving is per machine: an invalid schema stops the engine, an invalid machine stops one entity, so the refusal is one file
+  - The shell's SSE subscription carried `?component=` alone, so AGENTS re-rendered with no machine named and swapped under the user every tick
 
 - [ ] **Machine list & context manifest** — Resolved per mod with an `override` tag; manifest from `MachineDefinition.ContextManifest`, which is populated only when validation fully succeeds.
 

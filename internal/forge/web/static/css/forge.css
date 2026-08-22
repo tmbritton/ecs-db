@@ -1668,3 +1668,9 @@ button.list-row:not(.list-row--active):hover {
   border-color: var(--border);
   color: var(--text-faint);
 }
+
+/* Unsaved work another mode owns. Amber, not red: nothing is wrong, but the
+   footer on screen cannot save it and must not read as "everything is saved". */
+.save-footer__elsewhere {
+  color: var(--amber);
+}

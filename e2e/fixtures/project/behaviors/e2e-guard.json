@@ -1,0 +1,12 @@
+{
+  "id": "e2e-guard",
+  "initial": "watching",
+  "states": {
+    "watching": {
+      "on": {
+        "ALERT": [{ "target": "alerted" }]
+      }
+    },
+    "alerted": {}
+  }
+}
