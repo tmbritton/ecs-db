@@ -16,9 +16,14 @@ type mapDef struct {
 	Rows   []string `toml:"rows"`
 }
 
-// LoadMap bootstraps Tile entities from a TOML map file and returns a
-// populated TileGrid. Idempotent: skips entity creation if Tile entities
-// already exist in the DB.
+// LoadMap reads a TOML map file, brings the Tile entities in the database in
+// line with it, and returns a populated TileGrid.
+//
+// It used to be a one-time bootstrap: it counted Tile entities and created none
+// if any existed, which made the database the source of truth after the first
+// run and the file decoration. A map edited afterwards loaded without error and
+// changed nothing. Loading now diffs — see SyncTiles for what the file owns and
+// what survives it.
 func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string) (*TileGrid, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -28,34 +33,12 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 	if err := toml.Unmarshal(data, &def); err != nil {
 		return nil, fmt.Errorf("LoadMap: parsing %q: %w", path, err)
 	}
-
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entities WHERE entity_type = 'Tile'`).Scan(&count); err != nil {
-		return nil, fmt.Errorf("LoadMap: checking existing tiles: %w", err)
+	if err := def.check(path); err != nil {
+		return nil, err
 	}
 
-	if count == 0 {
-		for y, row := range def.Rows {
-			for x, ch := range row {
-				var passable bool
-				var tileType string
-				switch ch {
-				case '.':
-					passable, tileType = true, "floor"
-				case '#':
-					passable, tileType = false, "wall"
-				default:
-					continue
-				}
-				if _, err := svc.CreateEntity(ctx, "Tile", []world.EntityComponent{
-					{Name: "Tile", Values: world.ComponentValues{
-						"x": x, "y": y, "passable": passable, "tile_type": tileType,
-					}},
-				}); err != nil {
-					return nil, fmt.Errorf("LoadMap: creating tile (%d,%d): %w", x, y, err)
-				}
-			}
-		}
+	if _, err := SyncTiles(ctx, svc, db, tilesOf(def)); err != nil {
+		return nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
 	}
 
 	grid := NewTileGrid(def.Width, def.Height)
@@ -63,4 +46,62 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 		return nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
 	}
 	return grid, nil
+}
+
+// check refuses a file that parsed but does not describe a map.
+//
+// This is load-bearing now in a way it was not before. TOML ignores keys it was
+// not asked for, so `rowz = [...]` — a typo, a renamed key, a file that is not
+// a map at all — unmarshals cleanly into a mapDef of zeroes. Under the old
+// bootstrap that was harmless: no rows meant no tiles to create and the guard
+// skipped anyway. Under a diff it means the file describes no cells, and every
+// tile in the database is a cell the file dropped. One misspelled key would
+// delete the map.
+//
+// The row-count and row-width checks are the same argument one step further: a
+// file truncated halfway is a map with real rows and missing ones, and nothing
+// downstream could tell that from an author who meant it.
+func (d mapDef) check(path string) error {
+	if d.Width <= 0 || d.Height <= 0 {
+		return fmt.Errorf("LoadMap: %q declares no size (%d×%d) — it may not be a map file",
+			path, d.Width, d.Height)
+	}
+	if len(d.Rows) != d.Height {
+		return fmt.Errorf("LoadMap: %q says height %d and holds %d rows",
+			path, d.Height, len(d.Rows))
+	}
+	for y, row := range d.Rows {
+		if n := len([]rune(row)); n != d.Width {
+			return fmt.Errorf("LoadMap: %q says width %d and row %d holds %d cells",
+				path, d.Width, y, n)
+		}
+	}
+	return nil
+}
+
+// tilesOf turns the character rows into the cells the file describes.
+//
+// A character that is neither '.' nor '#' describes no tile, so the cell is
+// absent rather than empty — and a re-import deletes whatever used to be there,
+// which is the same answer as a map that shrank.
+//
+// The rows are indexed as runes rather than ranged over as a string. Ranging
+// yields byte offsets, so one non-ASCII character used to shift every cell after
+// it to the right and push the last ones outside the grid — where TileGrid keeps
+// their entity ids but refuses to store their passability, so setTilePassable
+// would find an id, write the row, and no-op on the grid. A one-time bootstrap
+// wrote that once; a diff writes it on every load.
+func tilesOf(def mapDef) map[Point]TileState {
+	want := make(map[Point]TileState)
+	for y, row := range def.Rows {
+		for x, ch := range []rune(row) {
+			switch ch {
+			case '.':
+				want[Point{X: x, Y: y}] = TileState{Passable: true, TileType: "floor"}
+			case '#':
+				want[Point{X: x, Y: y}] = TileState{Passable: false, TileType: "wall"}
+			}
+		}
+	}
+	return want
 }

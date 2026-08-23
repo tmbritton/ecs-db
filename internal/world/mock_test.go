@@ -9,6 +9,8 @@ type mockTx struct {
 	insertCompErr       error
 	attachCompErr       error
 	detachCompErr       error
+	setValuesErr        error
+	deleteEntityErr     error
 	commitErr           error
 	rollbackErr         error
 	committed           bool
@@ -39,6 +41,14 @@ func (m *mockTx) AttachComponent(ctx context.Context, entityID int64, compName s
 
 func (m *mockTx) DetachComponent(ctx context.Context, entityID int64, compName string) error {
 	return m.detachCompErr
+}
+
+func (m *mockTx) SetComponentValues(ctx context.Context, entityID int64, compName string, values ComponentValues) error {
+	return m.setValuesErr
+}
+
+func (m *mockTx) DeleteEntity(ctx context.Context, entityID int64) error {
+	return m.deleteEntityErr
 }
 
 func (m *mockTx) Commit() error {

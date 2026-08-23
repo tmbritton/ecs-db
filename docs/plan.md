@@ -499,13 +499,21 @@ There is a subtler problem: `LoadMap` is a one-time bootstrap that skips tile *c
 
 One bullet from the first draft is gone: "passability from tile properties" pointed at `TileGrid.Rebuild`, which reads `comp_tile.passable` from the database and has never seen a `'#'`. The character switch is in `LoadMap` and goes away with the TOML format. See the epic README.
 
-- [ ] **TMX/TMJ parser** — Multiple tile layers and layer folders, CSV, base64, base64+zlib/gzip and the XML tile form, objects, map properties.
+- [x] **TMX/TMJ parser** — Multiple tile layers and layer folders, CSV, base64, base64+zlib/gzip and the XML tile form, objects, map properties.
+  - A `<group>` is a layer folder, not a layer: dropping it loaded the map empty, with nothing to notice
+  - Checked against the published format rather than against itself — four flag bits since Tiled 1.9, not three
 
 - [x] **TSX tileset parser** — `.tsx` and `.tsj`, sheets and image collections, per-tile properties, and resolving a map's external references.
   - Two kinds of tileset, not one: a collection has no sheet, `columns="0"`, and sparse ids, so the sheet rules refused every one of them
   - `passable` is this epic's own convention and is named in one place; `Passable` says both whether a tile can be walked through and whether the tileset says at all
 
-- [ ] **Map re-import semantics** — Diff the file's tiles against `comp_tile` instead of skipping when tiles exist.
+- [x] **Map re-import semantics** — Diff the file's tiles against `comp_tile` instead of skipping when tiles exist.
+  - Recorded: the file wins for what it describes, the database keeps everything else, and the entity id survives either way
+  - `world.Tx` had no update and no entity delete anywhere in the repo; both are this story's, along with `EntityService.InTx`
+  - A misspelled `rows` key would have deleted the whole map — under a bootstrap that was harmless, under a diff it is 300 tiles and no error
+  - `PRAGMA foreign_keys` is set once on a pooled `*sql.DB`, so `ON DELETE CASCADE` is enforced on one connection and no other — measured, reported, and worked around rather than relied on
+
+- [ ] **The loader writes tiles from a parsed map** — `LoadMap` takes a Tiled map; `passable` comes from a tileset property rather than a character, and which layer decides a cell is stated.
 
 - [ ] **Tileset rendering** — Draw tile layers from tileset images rather than colouring by `tile_type` string.
 

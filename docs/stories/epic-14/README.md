@@ -47,6 +47,30 @@ That is the same class of problem Epic 13 Story 1 found in the machine round
 trip, and it wants the same treatment: settle it early, before anything is built
 on top of a format that cannot be re-read.
 
+## Found while building, and not this epic's to fix
+
+**`PRAGMA foreign_keys` and `busy_timeout` are set on one connection out of the
+pool.** `sqlite.go` issues them once against `*sql.DB`; both are per-connection
+in SQLite and `database/sql` opens more connections on demand. Measured on a
+real store:
+
+```
+foreign_keys: conn1=1 conn2=0
+busy_timeout: conn1=5000 conn2=0
+```
+
+So `ON DELETE CASCADE` — declared on every `comp_*.entity_id` and on
+`behavior_components` — is enforced on whichever connection happened to be idle
+at open time and on no other, and `busy_timeout` is 0 on the rest, which turns
+WAL contention into an immediate `SQLITE_BUSY` rather than a wait.
+`migration.go` already pins a connection before a table rebuild for exactly this
+reason; the knowledge never reached the open path.
+
+Story 3 works around it — `DeleteEntity` deletes component rows explicitly — so
+nothing in this epic depends on the cascade. The fix is a DSN `_pragma=` so
+every pooled connection carries the setting, it changes behaviour for every
+database the engine opens, and it wants its own story with its own tests.
+
 ## Stories
 
 1. TMX/TMJ parser

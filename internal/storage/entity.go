@@ -50,10 +50,7 @@ func (t *sqliteTx) AttachComponent(ctx context.Context, entityID int64, compName
 // insertComponent is the shared implementation for both InsertComponent
 // and AttachComponent — they do the same SQL operation.
 func (t *sqliteTx) insertComponent(ctx context.Context, entityID int64, compName string, values world.ComponentValues) error {
-	comp, ok := t.schema.Components[compName]
-	if !ok {
-		return fmt.Errorf("component %q not declared in schema", compName)
-	}
+	comp := t.schema.Components[compName]
 
 	tableName := "comp_" + strings.ToLower(compName)
 
@@ -236,6 +233,200 @@ func (t *sqliteTx) DetachComponent(ctx context.Context, entityID int64, compName
 		return fmt.Errorf("entity %d has no %s component to detach", entityID, compName)
 	}
 	return nil
+}
+
+// SetComponentValues updates the named fields of an attached component.
+// Implements world.Tx.
+//
+// Partial by contract: a field the caller does not name keeps its stored value,
+// which is what lets a re-import rewrite passability without knowing every
+// column the component happens to have.
+func (t *sqliteTx) SetComponentValues(ctx context.Context, entityID int64, compName string, values world.ComponentValues) error {
+	comp, ok := t.schema.Components[compName]
+	if !ok {
+		return fmt.Errorf("component %q not declared in schema", compName)
+	}
+	if len(values) == 0 {
+		return nil
+	}
+
+	tableName := "comp_" + strings.ToLower(compName)
+
+	switch comp.Type {
+	case schema.ComponentTypeObject:
+		return t.updateColumns(ctx, tableName, entityID, comp, values)
+	case schema.ComponentTypeEntityRef:
+		target, ok := values["target_entity_id"]
+		if !ok {
+			target, ok = values["target"]
+		}
+		if !ok {
+			return fmt.Errorf("updating %s: entity-ref component takes target_entity_id", tableName)
+		}
+		if target == nil {
+			return fmt.Errorf("updating %s: target_entity_id is nil", tableName)
+		}
+		return t.updateSingleColumn(ctx, tableName, "target_entity_id", entityID, target)
+	case schema.ComponentTypeArray:
+		raw, ok := values["value"]
+		if !ok {
+			return fmt.Errorf("updating %s: array component takes its items under \"value\"", tableName)
+		}
+		jsonBytes, err := json.Marshal(raw)
+		if err != nil {
+			return fmt.Errorf("encoding array component %s as JSON: %w", tableName, err)
+		}
+		return t.updateSingleColumn(ctx, tableName, "value", entityID, string(jsonBytes))
+	case schema.ComponentTypeString, schema.ComponentTypeInteger,
+		schema.ComponentTypeNumber, schema.ComponentTypeBoolean:
+		val, ok := values["value"]
+		if !ok {
+			return fmt.Errorf("updating %s: scalar component takes its value under \"value\"", tableName)
+		}
+		return t.updateSingleColumn(ctx, tableName, "value", entityID, val)
+	default:
+		return fmt.Errorf("unsupported component type %q for update", comp.Type)
+	}
+}
+
+// updateColumns writes the named properties of an object component.
+//
+// Property names are sorted so the SQL is the same statement every time — the
+// same reason insertObjectComponent sorts, and it is what makes a failing
+// statement reproducible rather than a function of map iteration.
+func (t *sqliteTx) updateColumns(
+	ctx context.Context,
+	tableName string,
+	entityID int64,
+	comp schema.Component,
+	values world.ComponentValues,
+) error {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	assignments := make([]string, 0, len(names))
+	args := make([]any, 0, len(names)+1)
+	for _, name := range names {
+		if _, ok := comp.Properties[name]; !ok {
+			return fmt.Errorf("updating %s: %q is not a property of the component", tableName, name)
+		}
+		col := strings.ToLower(name)
+		if err := validateIdentifier(col, "SetComponentValues field"); err != nil {
+			return err
+		}
+		assignments = append(assignments, col+" = ?")
+		args = append(args, values[name])
+	}
+	args = append(args, entityID)
+
+	query := fmt.Sprintf("UPDATE %s SET %s WHERE entity_id = ?", tableName, strings.Join(assignments, ", "))
+	return t.exactlyOneRow(ctx, tableName, entityID, query, args...)
+}
+
+func (t *sqliteTx) updateSingleColumn(ctx context.Context, tableName, column string, entityID int64, value any) error {
+	if err := validateIdentifier(column, "SetComponentValues field"); err != nil {
+		return err
+	}
+	query := fmt.Sprintf("UPDATE %s SET %s = ? WHERE entity_id = ?", tableName, column)
+	return t.exactlyOneRow(ctx, tableName, entityID, query, value, entityID)
+}
+
+// exactlyOneRow runs an update and refuses one that matched nothing.
+//
+// An update to a component the entity does not have is a caller who believes
+// they are writing and are not, and Tx has no reader to let them check first —
+// HasComponent is on the store, which is a different pooled connection and
+// cannot see this transaction's own writes. So the write itself has to say so,
+// the way DetachComponent already does.
+func (t *sqliteTx) exactlyOneRow(ctx context.Context, tableName string, entityID int64, query string, args ...any) error {
+	res, err := t.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("updating %s: %w", tableName, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected on update of %s: %w", tableName, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("entity %d has no %s component to update", entityID, tableName)
+	}
+	return nil
+}
+
+// DeleteEntity removes an entity, the component rows belonging to it, and the
+// interpreter state that would otherwise go on running without it.
+// Implements world.Tx.
+//
+// Every component table the schema declares is cleared, not only the ones the
+// entity is known to hold: an entity type with allowExtraComponents can carry
+// any declared component, and a DELETE that matches nothing costs nothing.
+//
+// It does not rely on ON DELETE CASCADE. The cascade is in the DDL, but
+// PRAGMA foreign_keys is per-connection and the store issues it once against a
+// pooled *sql.DB — see world.Tx for the measurement.
+//
+// behavior_components and event_queue are live state, not history, and neither
+// is a comp_ table so neither is reached by the loop above. tick.go reads
+// behavior_components with no join to entities and delivers TICK to every row
+// it finds, so a machine left behind runs its actions against components that
+// are gone — quietly, on every tick, forever. event_queue is drained by tick
+// the same way. Only transitions is left: it is the audit log, and it is meant
+// to outlive what it describes, which is why it declares no foreign key.
+func (t *sqliteTx) DeleteEntity(ctx context.Context, entityID int64) error {
+	names := make([]string, 0, len(t.schema.Components))
+	for name := range t.schema.Components {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tables := make([]string, 0, len(names)+2)
+	for _, name := range names {
+		table := "comp_" + strings.ToLower(name)
+		if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "DeleteEntity component"); err != nil {
+			return err
+		}
+		tables = append(tables, table)
+	}
+	// Only if the interpreter has been set up at all: EnsureInterpreterTables is
+	// a separate call, and a store used purely for entities never made them.
+	for _, table := range []string{"behavior_components", "event_queue"} {
+		exists, err := t.tableExists(ctx, table)
+		if err != nil {
+			return err
+		}
+		if exists {
+			tables = append(tables, table)
+		}
+	}
+
+	for _, table := range tables {
+		if _, err := t.tx.ExecContext(ctx,
+			fmt.Sprintf("DELETE FROM %s WHERE entity_id = ?", table), entityID,
+		); err != nil {
+			return fmt.Errorf("deleting from %s: %w", table, err)
+		}
+	}
+
+	if _, err := t.tx.ExecContext(ctx, "DELETE FROM entities WHERE id = ?", entityID); err != nil {
+		return fmt.Errorf("deleting entity %d: %w", entityID, err)
+	}
+	return nil
+}
+
+func (t *sqliteTx) tableExists(ctx context.Context, name string) (bool, error) {
+	var found string
+	err := t.tx.QueryRowContext(ctx,
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("looking for table %s: %w", name, err)
+	}
+	return true, nil
 }
 
 // BeginTx starts a new transaction and returns it wrapped as a world.Tx.

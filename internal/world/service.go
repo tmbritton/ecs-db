@@ -47,62 +47,92 @@ func (s *EntityService) CreateEntity(
 	entityTypeName string,
 	components []EntityComponent,
 ) (*Entity, error) {
-	// Extract component names for validation.
-	names := make([]string, len(components))
-	for i, c := range components {
-		names[i] = c.Name
+	// Validated before a transaction is opened, not only inside one. The check
+	// runs again in CreateEntityInTx, which is where it belongs; doing it here
+	// as well is what keeps a ValidationError from being masked by a BeginTx
+	// that failed, so a caller can still tell "your data is bad" from "the
+	// database is busy".
+	if err := s.validateCreation(entityTypeName, components); err != nil {
+		return nil, err
 	}
 
-	// Validate against schema.
-	vr := ValidateEntityCreation(s.schema, entityTypeName, names)
-	if !vr.Valid() {
-		s.mu.Lock()
-		s.warnings = vr.Warnings
-		s.mu.Unlock()
-		return nil, &ValidationError{
-			Type:     entityTypeName,
-			Errors:   vr.Errors,
-			Warnings: vr.Warnings,
+	var entity *Entity
+	err := s.InTx(ctx, func(tx Tx) error {
+		e, err := s.CreateEntityInTx(ctx, tx, entityTypeName, components)
+		if err != nil {
+			return err
 		}
+		entity = e
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return entity, nil
+}
 
-	// Collect warnings (may be non-empty in warning mode).
-	s.mu.Lock()
-	s.warnings = make([]string, len(vr.Warnings))
-	copy(s.warnings, vr.Warnings)
-	s.mu.Unlock()
-
-	// Begin transaction.
+// InTx runs fn inside a single transaction, committing when fn returns nil and
+// rolling back otherwise.
+//
+// It exists for the callers that have to write many entities at once and cannot
+// afford a transaction each: a map re-import that commits half its tiles is a
+// map with a hole in it, and the engine reads the grid on the next tick.
+func (s *EntityService) InTx(ctx context.Context, fn func(Tx) error) error {
 	tx, err := s.store.BeginTx(ctx)
 	if err != nil {
+		return err
+	}
+	// Deferred, because fn is an arbitrary closure supplied by the caller and a
+	// panic inside it would otherwise unwind past both the rollback and the
+	// commit, leaving the transaction and its pooled connection held for the
+	// life of the process — and with SQLite in WAL, the write lock with them.
+	done := false
+	defer func() {
+		if !done {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	done = true
+	return tx.Commit()
+}
+
+// CreateEntityInTx creates an entity inside a transaction the caller owns,
+// with the same validation CreateEntity performs — CreateEntity is this
+// function wrapped in InTx, so the two cannot drift apart.
+//
+// The caller commits. On error nothing is rolled back here, because the
+// transaction is not this function's to end.
+func (s *EntityService) CreateEntityInTx(
+	ctx context.Context,
+	tx Tx,
+	entityTypeName string,
+	components []EntityComponent,
+) (*Entity, error) {
+	if err := s.validateCreation(entityTypeName, components); err != nil {
 		return nil, err
 	}
 
 	// Get current tick from world table.
 	tick, err := s.store.GetCurrentTick(ctx)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, err
 	}
 
 	// Insert entity row → get entity ID.
 	entityID, err := tx.InsertEntity(ctx, entityTypeName, tick)
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, err
 	}
 
 	// Insert each component row.
 	for _, comp := range components {
 		if err := tx.InsertComponent(ctx, entityID, comp.Name, comp.Values); err != nil {
-			_ = tx.Rollback()
 			return nil, err
 		}
-	}
-
-	// Commit.
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 
 	return &Entity{
@@ -110,6 +140,34 @@ func (s *EntityService) CreateEntity(
 		EntityType:  entityTypeName,
 		CreatedTick: tick,
 	}, nil
+}
+
+// validateCreation checks the entity type contract and records the warnings
+// the last creation produced. It returns a *ValidationError, or nil.
+func (s *EntityService) validateCreation(entityTypeName string, components []EntityComponent) error {
+	names := make([]string, len(components))
+	for i, c := range components {
+		names[i] = c.Name
+	}
+
+	vr := ValidateEntityCreation(s.schema, entityTypeName, names)
+	if !vr.Valid() {
+		s.mu.Lock()
+		s.warnings = vr.Warnings
+		s.mu.Unlock()
+		return &ValidationError{
+			Type:     entityTypeName,
+			Errors:   vr.Errors,
+			Warnings: vr.Warnings,
+		}
+	}
+
+	// Warnings may be non-empty in warning mode.
+	s.mu.Lock()
+	s.warnings = make([]string, len(vr.Warnings))
+	copy(s.warnings, vr.Warnings)
+	s.mu.Unlock()
+	return nil
 }
 
 // ValidationError is returned when entity creation fails validation.

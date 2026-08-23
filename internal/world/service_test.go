@@ -647,3 +647,128 @@ func TestEntityService_DetachComponent_BeginTxError(t *testing.T) {
 		t.Errorf("expected 'db locked' in error: %v", err)
 	}
 }
+
+func TestEntityService_InTx_CommitsWhenTheWorkSucceeds(t *testing.T) {
+	tx := &mockTx{}
+	svc := NewEntityService(&mockStore{tx: tx})
+
+	if err := svc.InTx(context.Background(), func(Tx) error { return nil }); err != nil {
+		t.Fatalf("InTx: %v", err)
+	}
+	if !tx.committed {
+		t.Error("transaction was not committed")
+	}
+	if tx.rolledBack {
+		t.Error("transaction was rolled back after work that succeeded")
+	}
+}
+
+func TestEntityService_InTx_RollsBackAndReturnsTheWorksError(t *testing.T) {
+	tx := &mockTx{}
+	svc := NewEntityService(&mockStore{tx: tx})
+	boom := fmt.Errorf("boom")
+
+	err := svc.InTx(context.Background(), func(Tx) error { return boom })
+	if !errors.Is(err, boom) {
+		t.Errorf("err = %v, want the work's own error", err)
+	}
+	if !tx.rolledBack {
+		t.Error("transaction was not rolled back")
+	}
+	if tx.committed {
+		t.Error("transaction was committed despite the failure")
+	}
+}
+
+func TestEntityService_InTx_ReportsAFailureToBegin(t *testing.T) {
+	svc := NewEntityService(&mockStore{beginTxErr: fmt.Errorf("db locked")})
+
+	called := false
+	err := svc.InTx(context.Background(), func(Tx) error {
+		called = true
+		return nil
+	})
+	if err == nil {
+		t.Fatal("InTx succeeded with no transaction to work in")
+	}
+	if called {
+		t.Error("the work ran without a transaction")
+	}
+}
+
+func TestEntityService_CreateEntityInTx_LeavesTheTransactionToTheCaller(t *testing.T) {
+	tx := &mockTx{insertEntityResults: []insertEntityResult{{id: 42}}}
+	svc := NewEntityService(&mockStore{tx: tx, currentTick: 7})
+	svc.SetSchema(baseSchema())
+
+	e, err := svc.CreateEntityInTx(context.Background(), tx, "Goblin", []EntityComponent{
+		{Name: "Position", Values: map[string]any{}},
+		{Name: "Health", Values: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("CreateEntityInTx: %v", err)
+	}
+	if e.ID != 42 || e.CreatedTick != 7 {
+		t.Errorf("entity = %+v, want id 42 at tick 7", e)
+	}
+	if tx.committed || tx.rolledBack {
+		t.Error("CreateEntityInTx ended a transaction it does not own")
+	}
+}
+
+func TestEntityService_CreateEntityInTx_ValidatesTheSameWayCreateEntityDoes(t *testing.T) {
+	tx := &mockTx{insertEntityResults: []insertEntityResult{{id: 1}}}
+	svc := NewEntityService(&mockStore{tx: tx})
+	svc.SetSchema(baseSchema())
+
+	_, err := svc.CreateEntityInTx(context.Background(), tx, "Goblin", []EntityComponent{
+		{Name: "Position", Values: map[string]any{}},
+	})
+	var verr *ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want a ValidationError for the missing required component", err)
+	}
+	if tx.rolledBack {
+		t.Error("CreateEntityInTx rolled back a transaction it does not own")
+	}
+}
+
+func TestEntityService_InTx_RollsBackWhenTheWorkPanics(t *testing.T) {
+	// fn is an arbitrary caller-supplied closure — that is the whole point of
+	// InTx — so a panic inside it must not carry the transaction and its pooled
+	// connection out of reach for the life of the process.
+	tx := &mockTx{}
+	svc := NewEntityService(&mockStore{tx: tx})
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("the panic did not reach the caller")
+			}
+		}()
+		_ = svc.InTx(context.Background(), func(Tx) error { panic("boom") })
+	}()
+
+	if !tx.rolledBack {
+		t.Error("the transaction was left open after a panic")
+	}
+	if tx.committed {
+		t.Error("the transaction was committed after a panic")
+	}
+}
+
+func TestEntityService_CreateEntity_ABadTypeIsRefusedBeforeATransactionIsOpened(t *testing.T) {
+	// A busy database must not be able to disguise itself as bad data, or the
+	// other way round: a caller distinguishing the two by errors.As gets the
+	// wrong answer, and every rejected entity costs a BEGIN and a ROLLBACK.
+	svc := NewEntityService(&mockStore{beginTxErr: fmt.Errorf("db locked")})
+	svc.SetSchema(baseSchema())
+
+	_, err := svc.CreateEntity(context.Background(), "Goblin", []EntityComponent{
+		{Name: "Position", Values: map[string]any{}},
+	})
+	var verr *ValidationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("err = %v, want the ValidationError rather than the store's", err)
+	}
+}

@@ -20,6 +20,36 @@ type Tx interface {
 	AttachComponent(ctx context.Context, entityID int64, compName string, values ComponentValues) error
 	// DetachComponent deletes the component row for the given entity.
 	DetachComponent(ctx context.Context, entityID int64, compName string) error
+	// SetComponentValues updates the named fields of a component already
+	// attached to the entity. Fields the caller does not name keep the value
+	// they hold — this is a partial update, the plural of the agent runtime's
+	// SetComponentValue and partial for the same reason.
+	//
+	// Updating a component the entity does not have is an error, the way
+	// DetachComponent is. Tx has no reader, and HasComponent is on the store,
+	// which is a different pooled connection and cannot see this transaction's
+	// own writes — so asking first is not available inside a transaction and the
+	// write itself has to answer.
+	//
+	// It is stricter than InsertComponent about where a value lives: a scalar
+	// and an array component take theirs under "value" and nothing else, where
+	// the insert path also accepts a lone key of any name. The insert cannot
+	// tell a typo from a value; an update can, and a silent write to the wrong
+	// component is worse than a refusal a caller reads once.
+	SetComponentValues(ctx context.Context, entityID int64, compName string, values ComponentValues) error
+	// DeleteEntity removes an entity, the component rows belonging to it, and
+	// the interpreter state that would otherwise keep running without it —
+	// behavior_components and event_queue, both of which the tick reads with no
+	// join to entities.
+	//
+	// The component rows go explicitly rather than by ON DELETE CASCADE. The
+	// cascade is declared, but PRAGMA foreign_keys is per-connection and the
+	// engine sets it once on a pooled *sql.DB, so it is enforced on whichever
+	// connection happened to be idle at open time and on no other.
+	//
+	// Rows in transitions are left: it is the audit log, it declares no foreign
+	// key, and it is meant to outlive what it describes.
+	DeleteEntity(ctx context.Context, entityID int64) error
 	// Commit commits the transaction.
 	Commit() error
 	// Rollback rolls back the transaction.
