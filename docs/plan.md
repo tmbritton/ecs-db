@@ -491,15 +491,17 @@ Two checks against the code changed the shape (see the epic README for the probe
 
 ## Epic 14: Tiled map & tileset formats
 
+**Refined into stories:** See [`docs/stories/epic-14/`](stories/epic-14/).
+
 An engine epic, and the largest prerequisite in the Forge sequence. The map is a bespoke TOML file of `.` and `#` characters with no tilesets, no layers and no spawns; Forge's MAP and TILES modes have no format to write to until this lands.
 
-There is a subtler problem: `LoadMap` is a one-time bootstrap that skips entirely if any `Tile` entity exists, so after first run the database — not the file — is the source of truth. A map edited in Forge would appear to do nothing.
+There is a subtler problem: `LoadMap` is a one-time bootstrap that skips tile *creation* if any `Tile` entity exists, so after first run the database — not the file — is the source of truth. A map edited in Forge would appear to do nothing, without an error to notice.
 
-- [ ] **TMX/TMJ parser** — Multiple tile layers, CSV and base64/zlib encodings, map properties.
+One bullet from the first draft is gone: "passability from tile properties" pointed at `TileGrid.Rebuild`, which reads `comp_tile.passable` from the database and has never seen a `'#'`. The character switch is in `LoadMap` and goes away with the TOML format. See the epic README.
+
+- [ ] **TMX/TMJ parser** — Multiple tile layers and layer folders, CSV, base64, base64+zlib/gzip and the XML tile form, objects, map properties.
 
 - [ ] **TSX tileset parser** — Image reference, tile size, margin/spacing, per-tile custom properties for collision / terrain / class / animation.
-
-- [ ] **Passability from tile properties** — `TileGrid.Rebuild` stops keying off `'#'`.
 
 - [ ] **Map re-import semantics** — Diff the file's tiles against `comp_tile` instead of skipping when tiles exist.
 
