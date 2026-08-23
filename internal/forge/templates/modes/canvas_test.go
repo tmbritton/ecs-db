@@ -231,26 +231,27 @@ func TestCanvas_ASelectionNamingNothingIsDropped(t *testing.T) {
 	if !strings.Contains(html, ">nothing selected<") {
 		t.Error("the readout does not say the selection went nowhere")
 	}
-	// And the ground is not offered, because there is nothing to let go of.
-	if strings.Contains(html, `data-testid="canvas-ground"`) {
-		t.Error("a link that clears nothing is still a link to everything that reads the page aloud")
+	// The ground is still there — it is what double-click and right-click land
+	// on — but it is not a link, so it offers nothing to anything that reads
+	// the page aloud.
+	ground := section(t, html, `data-testid="canvas-ground"`, ">")
+	if strings.Contains(ground, "href=") || strings.Contains(ground, "aria-label") {
+		t.Errorf("a link that clears nothing is still a link: %s", ground)
 	}
 }
 
 func TestCanvas_TheGroundClearsTheSelection(t *testing.T) {
 	html := renderCanvas(t, canvasMachine, "state:idle")
 
-	i := strings.Index(html, `data-testid="canvas-ground"`)
-	if i < 0 {
-		t.Fatal("no ground to click off onto")
-	}
-	ground := html[strings.LastIndex(html[:i], "<a"):i]
+	// The whole opening tag, not from the test id onwards: templ writes
+	// attributes in source order and href comes after it.
+	ground := section(t, html, `<a class="chart__ground"`, ">")
 	if !strings.Contains(ground, `href="/forge/agents?machine=%2Fp%2Fcore%2Fbehaviors%2Fwander.json"`) {
 		t.Errorf("the ground does not link back to the machine with no selection: %s", ground)
 	}
 	// It is a link with no text, so it needs a name to be one at all.
-	if !strings.Contains(html[i:i+200], `aria-label="Clear selection"`) {
-		t.Error("the ground is an unnamed link")
+	if !strings.Contains(ground, `aria-label="Clear selection"`) {
+		t.Errorf("the ground is an unnamed link: %s", ground)
 	}
 }
 
@@ -521,5 +522,211 @@ func TestCanvas_TheSelectionIsOnTheWrapperToo(t *testing.T) {
 	empty := renderCanvas(t, canvasMachine, "state:gone")
 	if !strings.Contains(section(t, empty, `class="chart-wrap"`, ">"), `data-selection=""`) {
 		t.Error("a dropped selection is not reported as empty")
+	}
+}
+
+// ── direct manipulation ───────────────────────────────────────────────────────
+
+func TestCanvas_EveryNodeHasAPortToDragFrom(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "")
+	for _, path := range []string{"idle", "combat", "combat.attacking"} {
+		if !strings.Contains(html, `data-testid="port-`+path+`"`) {
+			t.Errorf("%s has no port, so nothing can be connected from it", path)
+		}
+	}
+	// A history node is not a source: it is where a compound state resumes, and
+	// a transition out of one is not a thing XState models.
+	if strings.Contains(html, `data-testid="port-combat.hist"`) {
+		t.Error("a history node was given an output port")
+	}
+}
+
+// The whole JS boundary, in one attribute: the module dispatches an event
+// carrying what the drag meant, and this turns it into the same @post every
+// other control uses.
+func TestCanvas_TheDropHandlerIsBoundToTheCanvas(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "")
+	wrap := section(t, html, `class="chart-wrap"`, ">")
+
+	if !strings.Contains(wrap, "data-on:canvasdrop") {
+		t.Fatalf("nothing listens for a completed drag: %s", wrap)
+	}
+	// Both kinds, and each to its own endpoint — a move is a state edit and a
+	// connection is a transition.
+	if !strings.Contains(wrap, "/forge/agents/state?machine=") || !strings.Contains(wrap, "&amp;move=") {
+		t.Error("a completed move posts nowhere")
+	}
+	if !strings.Contains(wrap, "/forge/agents/transition?machine=") || !strings.Contains(wrap, "&amp;connect=") {
+		t.Error("a completed connection posts nowhere")
+	}
+	// A delta, not a position: only the server knows the offsets between where
+	// a box is drawn and the coordinate the file records.
+	if !strings.Contains(wrap, "dx=") || !strings.Contains(wrap, "dy=") {
+		t.Error("the move posts a position rather than a delta")
+	}
+}
+
+func TestCanvas_EmptySpaceAddsAndOffersToAdd(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "")
+	ground := section(t, html, `data-testid="canvas-ground"`, ">")
+
+	if !strings.Contains(ground, "data-on:dblclick") || !strings.Contains(ground, "add=1") {
+		t.Errorf("double-clicking empty space adds nothing: %s", ground)
+	}
+	// offsetX on the ground, which is inset over the chart, so the coordinate
+	// arrives in the space the chart draws in.
+	if !strings.Contains(ground, "evt.offsetX") {
+		t.Error("the new state is not placed where the pointer was")
+	}
+	if !strings.Contains(ground, "data-on:contextmenu") {
+		t.Error("empty space offers no menu")
+	}
+}
+
+// One element and not two. A separate overlay for the pointer gestures sat on
+// top of the ground link and swallowed every click meant for it — the same
+// defect the node layer had in Story 4, reintroduced with a different element,
+// and invisible to everything except a browser.
+func TestCanvas_TheGroundIsTheOnlyThingOverTheCanvas(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "state:idle")
+	if n := strings.Count(html, `class="chart__ground"`); n != 1 {
+		t.Errorf("%d full-canvas overlays; one of them is on top of the other", n)
+	}
+	ground := section(t, html, `data-testid="canvas-ground"`, ">")
+	// The same element does all three jobs.
+	for _, want := range []string{"href=", "data-on:dblclick", "data-on:contextmenu"} {
+		if !strings.Contains(ground, want) {
+			t.Errorf("the ground is missing %s: %s", want, ground)
+		}
+	}
+}
+
+func TestCanvas_RightClickingOffersAMenuOnEachKindOfThing(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "")
+
+	node := nodeSection(t, html, "idle")
+	if !strings.Contains(node, "data-on:contextmenu") || !strings.Contains(node, "target=state") {
+		t.Errorf("a state offers no menu: %s", node)
+	}
+	edge := edgeSection(t, html, "idle|on|SPOTTED|0")
+	if !strings.Contains(edge, "data-on:contextmenu") || !strings.Contains(edge, "target=edge") {
+		t.Errorf("a transition offers no menu: %s", edge)
+	}
+	// preventDefault, or the browser's own menu covers ours and none of this is
+	// reachable at all.
+	if !strings.Contains(node, "evt.preventDefault()") {
+		t.Error("the browser's own menu is not suppressed")
+	}
+	// Viewport coordinates: offsetX on a node is relative to the node, so a
+	// menu asked for on one would open at the corner of the canvas.
+	if !strings.Contains(node, "evt.clientX") {
+		t.Error("the menu is positioned from the wrong origin")
+	}
+}
+
+func TestCanvas_TheMenuRendersWhatItIsAbout(t *testing.T) {
+	data := canvasFixture(t, canvasMachine, "")
+	data.CanvasMenu = CanvasMenu{Kind: "state", State: "combat.attacking", X: 120, Y: 80, Open: true}
+	data.CanvasMenuWarning = "Delete state combat.attacking? on POKED from idle will be left pointing at a state that does not exist."
+	html := renderAgents(t, data)
+
+	if !strings.Contains(html, `data-testid="canvas-menu"`) {
+		t.Fatal("the menu did not render")
+	}
+	if !strings.Contains(html, "left:120px;top:80px") {
+		t.Error("the menu is not where the pointer was")
+	}
+	for _, want := range []string{"Rename…", "Set as initial", "Delete state"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the state menu is missing %q", want)
+		}
+	}
+	// The warning is the server's, and it names what would break rather than
+	// counting it.
+	if !strings.Contains(html, "on POKED from idle") {
+		t.Error("deleting does not say what it would leave dangling")
+	}
+	// Clicking anywhere else closes it, and so does Escape — both at window
+	// scope, rather than through a full-viewport backdrop that blocks the rest
+	// of the application while it is up.
+	menu := section(t, html, `class="ctx-menu__at"`, ">")
+	if !strings.Contains(menu, "data-on:click__window") {
+		t.Errorf("clicking elsewhere does not close the menu: %s", menu)
+	}
+	if !strings.Contains(menu, "data-on:keydown__window") || !strings.Contains(menu, "Escape") {
+		t.Errorf("Escape does not close the menu: %s", menu)
+	}
+	// And a click inside it is not a click elsewhere.
+	if !strings.Contains(menu, "el.contains(evt.target)") {
+		t.Error("choosing from the menu would also count as clicking away from it")
+	}
+	// Focus moves into it, or a keyboard user reaches it only by tabbing past
+	// everything between.
+	if !strings.Contains(html, "autofocus") {
+		t.Error("the menu does not take focus when it opens")
+	}
+}
+
+func TestCanvas_TheEdgeMenuAddressesTheTransitionByItsParts(t *testing.T) {
+	data := canvasFixture(t, canvasMachine, "")
+	data.CanvasMenu = CanvasMenu{
+		Kind: "edge", Edge: "idle|on|SPOTTED|0",
+		From: "idle", EdgeKind: "on", Event: "SPOTTED", Index: "0",
+		X: 10, Y: 10, Open: true,
+	}
+	html := renderAgents(t, data)
+
+	// Inside the menu, not anywhere on the page. Every edge on the canvas
+	// carries these same four parts in its own contextmenu action, so a search
+	// over the whole document passes with the menu's action carrying none of
+	// them — which is how the first version of this test passed.
+	menu := section(t, html, `data-testid="canvas-menu"`, "</div></div>")
+	for _, want := range []string{"delete=idle", "kind=on", "event=SPOTTED", "index=0"} {
+		if !strings.Contains(menu, want) {
+			t.Errorf("the delete action is missing %q: %s", want, menu)
+		}
+	}
+	if strings.Contains(menu, "delete=idle%7Con") {
+		t.Error("the transition is addressed by its joined id, which cannot be split back apart")
+	}
+}
+
+func TestCanvas_NoMenuIsRenderedWhenNoneIsOpen(t *testing.T) {
+	html := renderCanvas(t, canvasMachine, "")
+	if strings.Contains(html, `data-testid="canvas-menu"`) {
+		t.Error("a menu nobody asked for is on the page")
+	}
+	if strings.Contains(html, "ctx-menu__at") {
+		t.Error("an empty menu container is on the page")
+	}
+}
+
+// State names and event names come out of a JSON file and reach these
+// expressions, which are JavaScript inside an HTML attribute.
+func TestCanvas_MenuActionsEscapeWhatTheyCarry(t *testing.T) {
+	data := canvasFixture(t, canvasMachine, "")
+	data.CanvasMenu = CanvasMenu{Kind: "state", State: `a'; alert(1); '`, Open: true}
+	data.CanvasMenuWarning = `Delete "it"? It's gone.`
+	html := renderAgents(t, data)
+
+	// Percent-encoded where it goes into a URL, so the quote cannot close the
+	// string the expression is building.
+	if !strings.Contains(html, "initial=a%27%3B%20alert%281%29%3B%20%27") {
+		t.Error("the state name is not percent-encoded into the action")
+	}
+	// And quoted as a JS string literal where it is one — the prompt's default.
+	if !strings.Contains(html, `&#34;a&#39;; alert(1); &#39;&#34;`) {
+		t.Error("the rename prompt's default is not a quoted string")
+	}
+	// Asserted positively as well as negatively: a name that vanished
+	// altogether would satisfy every "does not contain" on its own.
+	if strings.Contains(html, `('a'; alert(1); ')`) {
+		t.Error("a state name reached the page as executable JavaScript")
+	}
+
+	// The confirmation is a JS string literal, so its own quotes are escaped
+	// rather than ending it early.
+	if !strings.Contains(html, `confirm(&#34;Delete \&#34;it\&#34;? It&#39;s gone.&#34;)`) {
+		t.Error("the warning is not quoted as a JavaScript string")
 	}
 }

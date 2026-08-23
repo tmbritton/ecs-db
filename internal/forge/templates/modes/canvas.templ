@@ -1,5 +1,7 @@
 package modes
 
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
 // statechart draws the selected machine.
 //
 // Server-rendered, and not a line of JavaScript: a chart that draws the wrong
@@ -12,7 +14,12 @@ package modes
 // and because the design system's borders, fonts and hover states come free.
 // SVG for the edges, where routing and arrowheads come free instead.
 templ statechart(data Data) {
-	<div class="chart-wrap" data-testid="statechart" data-selection={ data.Chart.Selected }>
+	<div
+		class="chart-wrap"
+		data-testid="statechart"
+		data-selection={ data.Chart.Selected }
+		data-on:canvasdrop={ dropAction(data) }
+	>
 		<div class="section-heading"><span>Statechart</span></div>
 		if canvasEmpty(data) {
 			<p class="chart__empty" data-testid="canvas-empty">
@@ -21,18 +28,28 @@ templ statechart(data Data) {
 		} else {
 			<div class="chart__scroll">
 				<div class="chart" style={ canvasStyle(data.Chart) }>
-					if data.Chart.Selected != "" {
-						// The ground, under everything, so clicking off a node
-						// lets go of it. Rendered only when there is something
-						// to let go of: a link that does nothing is still a
-						// link to everything that reads the page aloud.
-						<a
-							class="chart__ground"
+					// The ground, under everything: clicking off a node lets
+					// go of it, double-clicking adds a state where the pointer
+					// is, and right-clicking offers the same. One element and
+					// not two — a separate overlay for the pointer gestures sat
+					// on top of this one and swallowed every click meant for
+					// it, which is exactly the defect the node layer had in
+					// Story 4, reintroduced with a different element.
+					//
+					// A link only when there is a selection to clear: an anchor
+					// with no href is not focusable and has no role, so an
+					// empty canvas offers nothing to everything that reads the
+					// page aloud while still taking the pointer.
+					<a
+						class="chart__ground"
+						data-testid="canvas-ground"
+						data-on:dblclick={ addStateAction(data) }
+						data-on:contextmenu={ menuAction(data, "canvas") }
+						if data.Chart.Selected != "" {
 							href={ URL(clearSelectionHref(data)) }
-							data-testid="canvas-ground"
 							aria-label="Clear selection"
-						></a>
-					}
+						}
+					></a>
 					@chartEdges(data)
 					<div class="chart__nodes">
 						for _, n := range data.Chart.Nodes {
@@ -49,6 +66,8 @@ templ statechart(data Data) {
 							style={ labelStyle(e) }
 							href={ URL(selectEdgeHref(data, e.ID)) }
 							data-testid={ "edge-" + e.ID }
+							data-on:contextmenu={ menuAction(data, "edge", "edge", e.ID, "from", e.From,
+								"kind", string(e.Kind), "event", e.Event, "index", edgeIndex(e)) }
 							data-selected={ boolAttr(e.Selected) }
 							data-guard={ e.Guard }
 							data-dangling={ boolAttr(e.Dangling) }
@@ -61,6 +80,7 @@ templ statechart(data Data) {
 				</div>
 			</div>
 			<p class="chart__foot mono" data-testid="canvas-selection">{ selectionLabel(data) }</p>
+			@canvasMenu(data)
 		}
 	</div>
 }
@@ -136,6 +156,7 @@ templ chartNode(data Data, n ChartNode) {
 			href={ URL(selectStateHref(data, n.Path)) }
 			data-testid={ "select-state-" + n.Path }
 			title={ stateKindLabel(n) }
+			data-on:contextmenu={ menuAction(data, "state", "state", n.Path) }
 			if n.Selected {
 				aria-current="true"
 			}
@@ -154,8 +175,44 @@ templ chartNode(data Data, n ChartNode) {
 				}
 			}
 		</a>
+		if n.Kind != "history" {
+			// The amber output port. Dragging from it to another state creates
+			// a transition; the server decides what event it carries, because
+			// an event name is authored vocabulary and a client that invented
+			// one would silently merge two transitions the second time.
+			<span
+				class="chart-node__port"
+				data-testid={ "port-" + n.Path }
+				title="drag to another state to connect"
+				aria-hidden="true"
+			></span>
+		}
 		for _, child := range n.Children {
 			@chartNode(data, child)
 		}
 	</div>
+}
+
+// canvasMenu is the right-click menu, rendered where the pointer was.
+templ canvasMenu(data Data) {
+	if data.CanvasMenu.Open {
+		<div
+			class="ctx-menu__at"
+			style={ menuStyle(data.CanvasMenu) }
+			data-testid="canvas-menu"
+			data-on:keydown__window={ "evt.key === 'Escape' && " + closeMenuAction() }
+			data-on:click__window={ "!el.contains(evt.target) && " + closeMenuAction() }
+		>
+			// Clicking anywhere else closes it, and Escape does too — both at
+			// window scope, so no full-viewport backdrop is needed. There was
+			// one, and it blocked the mode rail, the machine list and the menu
+			// bar for the two seconds it took a stream tick to take it away,
+			// swallowing the click that dismissed it.
+			@components.ContextMenu(components.ContextMenuProps{
+				Title:     canvasMenuTitle(data.CanvasMenu),
+				Items:     canvasMenuItems(data),
+				Autofocus: true,
+			})
+		</div>
+	}
 }

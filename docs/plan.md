@@ -468,7 +468,9 @@ Two checks against the code changed the shape (see the epic README for the probe
   - A dotted-path target was resolvable by the interpreter and refused by the validator, so a machine with a transition into a nested state could neither run nor be opened to be fixed; both now use one exported `FindState`, which also stopped resolving ambiguous targets in map order
   - The node layer covered the whole canvas and swallowed every click meant for the ground — invisible to `go test`, and the reason the browser suite exists
 
-- [ ] **Statechart canvas: direct manipulation** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu. The JS owns pointer state and nothing else.
+- [x] **Statechart canvas: direct manipulation** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu. The JS owns pointer state and nothing else.
+  - Only the two drags need JavaScript: `evt` is in scope in every Datastar expression, so double-click, both context menus and every menu item are ordinary hypermedia
+  - The menu's backdrop covers the viewport and the menu is per-server, so one left open in another tab blocked this page's rail, list and menu bar until it was clicked away
 
 - [ ] **State inspector** — Name, entry/exit actions from `Registry.Actions()`, set-initial. Action names are chosen, never typed.
 

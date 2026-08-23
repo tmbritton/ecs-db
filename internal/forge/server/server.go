@@ -107,6 +107,13 @@ type Server struct {
 	// by a full page load, so a stale explanation never outlives the state it
 	// described or leaks into a tab that did nothing wrong.
 	editProblem string
+	// canvasMenu is the right-click menu the statechart has open, if any.
+	//
+	// Per server rather than per page, which is the same limitation
+	// editProblem has carried since Story 2 and for the same reason: there is
+	// one session and the modes render from it. Two browsers on one Forge see
+	// each other's menu. Recorded rather than dressed up.
+	canvasMenu CanvasMenu
 	// renamedTo follows components through renames.
 	//
 	// A page subscribes to its stream with the component it is showing, and
@@ -185,6 +192,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
 	s.registerSchemaEditRoutes(mux)
 	s.registerMachineEditRoutes(mux)
+	s.registerCanvasRoutes(mux)
 	s.registerEntsEditRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
@@ -216,8 +224,13 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	// Rendered server-side on load so the page is never blank before the first
 	// patch arrives; the stream takes over from there.
 	// A full page load starts clean: an edit refused in another tab is not this
-	// page's problem to report, and neither is a confirmation it never saw.
+	// page's problem to report, and neither is a confirmation it never saw —
+	// nor a right-click menu, which is worse than either. The menu's backdrop
+	// covers the viewport so that clicking anywhere closes it, so one left open
+	// somewhere else would block this page's rail, list and menu bar until it
+	// was clicked away.
 	s.setEditProblem("")
+	s.closeCanvasMenu()
 	s.hold(saveNone)
 	data := s.modeData(r)
 	s.render(w, r, templates.Shell(
@@ -317,6 +330,8 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			// to draw a machine that does not validate, because that is the
 			// one someone opened the editor to fix.
 			data.Chart = chart.Build(data.Machine, r.URL.Query().Get("sel"))
+			data.CanvasMenu = s.openCanvasMenu()
+			data.CanvasMenuWarning = s.canvasDeleteWarning(data.SelectedMachine, data.CanvasMenu)
 			data.StrandedMachines = strandedSet(s.cfg.MachineSession)
 			data.NewMachineID = s.cfg.MachineSession.FreeID("NewMachine")
 		}

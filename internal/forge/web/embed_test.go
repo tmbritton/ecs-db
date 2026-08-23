@@ -14,6 +14,8 @@ func TestStatic_RequiredAssetsArePresent(t *testing.T) {
 	required := []string{
 		"js/vendor/datastar.js",
 		"js/vendor/VERSION",
+		"js/canvas.js",
+		"js/autofocus.js",
 		"css/fonts.css",
 		"css/forge.css",
 		"fonts/chakra-petch-400.woff2",

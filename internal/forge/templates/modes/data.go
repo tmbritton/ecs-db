@@ -66,6 +66,12 @@ type Data struct {
 	// would send them back to a text editor at the moment the tool is most
 	// use.
 	Chart chart.Chart
+	// CanvasMenu is the right-click menu the statechart has open, if any.
+	CanvasMenu CanvasMenu
+	// CanvasMenuWarning is what deleting the state that menu is about would
+	// break, in words. Computed by the server, because only the session can
+	// say which transitions target it.
+	CanvasMenuWarning string
 	// StrandedMachines are held with unsaved work but no longer resolve, so
 	// they are in no list and nothing can reach them except the problem panel.
 	StrandedMachines map[string]bool
@@ -98,4 +104,24 @@ type Data struct {
 	// data, and the confirmation is on screen. The statements it lists come
 	// from Migration, not from a copy taken when the save was attempted.
 	Confirming bool
+}
+
+// CanvasMenu is the statechart's right-click menu: what it is about, and where
+// the pointer was when it was asked for.
+//
+// One type for both kinds of target, because a menu is one thing on screen and
+// two nearly-identical structs would need a rule about which one is live. Kind
+// says which of the rest mean anything: "state", "edge" or "canvas".
+type CanvasMenu struct {
+	Kind  string
+	State string // Kind == "state"
+	Edge  string // Kind == "edge": the chart's edge id, for the DOM
+	// The parts of that edge, because the id joins them with bars and both a
+	// state name and an event name may contain one.
+	From     string
+	EdgeKind string
+	Event    string
+	Index    string
+	X, Y     float64
+	Open     bool
 }

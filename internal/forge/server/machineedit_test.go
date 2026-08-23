@@ -55,6 +55,13 @@ const wanderMachine = `{
 // machineServer builds a project with a schema, one mod and one machine.
 func machineServer(t *testing.T, extraMods ...string) (*httptest.Server, *Server, string) {
 	t.Helper()
+	return machineServerWith(t, wanderMachine, extraMods...)
+}
+
+// machineServerWith is machineServer over a machine of the caller's choosing,
+// for the tests that need a shape wanderMachine does not have.
+func machineServerWith(t *testing.T, body string, extraMods ...string) (*httptest.Server, *Server, string) {
+	t.Helper()
 	root := t.TempDir()
 	schemaPath := filepath.Join(root, "schema.json")
 	if err := os.WriteFile(schemaPath, []byte(machineSchema), 0o600); err != nil {
@@ -64,7 +71,7 @@ func machineServer(t *testing.T, extraMods ...string) (*httptest.Server, *Server
 	if err := os.MkdirAll(core, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(core, "wander.json"), []byte(wanderMachine), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(core, "wander.json"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	mods := []project.Mod{{Name: "core", Behaviors: core}}

@@ -2012,3 +2012,53 @@ button.list-row:not(.list-row--active):hover {
   font-size: 12px;
   color: var(--text-dim);
 }
+
+/* ── Canvas: direct manipulation ───────────────────────────────────────────
+   The ports, the drag feedback and the menu placement. The pointer handling
+   itself is js/canvas.js, which owns pointer state and nothing else. */
+
+.chart-node__port {
+  position: absolute;
+  right: -7px;
+  top: 14px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: var(--border-w) solid var(--amber);
+  border-radius: 50%;
+  background: var(--canvas);
+  cursor: crosshair;
+  /* Above the node layer's pointer-events:none, like the header. */
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.chart-node__port:hover {
+  background: var(--amber);
+}
+
+/* While a drag is in flight nothing else on the canvas should react: a link
+   that highlights under a node being dragged over it reads as a drop target
+   that is not one. */
+.chart--dragging .chart-node__head:hover,
+.chart--dragging .chart-label:hover {
+  background: none;
+  color: inherit;
+}
+
+.chart--dragging {
+  cursor: grabbing;
+}
+
+.chart-node__head {
+  cursor: grab;
+}
+
+/* The right-click menu, placed where the pointer was — in viewport
+   coordinates, so it is not clipped by the canvas's own scroll container and
+   opens under the pointer rather than at the corner of whatever was clicked. */
+.ctx-menu__at {
+  position: fixed;
+  z-index: 6;
+}
+

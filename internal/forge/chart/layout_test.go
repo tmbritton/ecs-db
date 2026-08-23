@@ -2,6 +2,7 @@ package chart_test
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
@@ -287,3 +288,81 @@ func TestLayout_TheCanvasHoldsTheEdgesToo(t *testing.T) {
 		t.Errorf("the label at x=%v is beyond the end of its own edge at %v", e.LabelX, e.X2)
 	}
 }
+
+// RecordedX/Y is the coordinate that, written into meta, reproduces where the
+// node is now. Story 5 drags by a delta and adds it to this, which is what
+// keeps the client from having to know about any of the three offsets between a
+// recorded position and a rendered one.
+func TestLayout_RecordedPositionRoundTrips(t *testing.T) {
+	const src = `{
+	  "id": "rec", "initial": "outer",
+	  "states": {
+	    "outer": {
+	      "meta": { "forge": { "x": 200, "y": 100 } },
+	      "initial": "inner",
+	      "states": { "inner": { "meta": { "forge": { "x": 10, "y": 4 } } } }
+	    },
+	    "loose": {}
+	  }
+	}`
+	c := chart.Build(parse(t, src), "")
+
+	// A placed node reports back exactly what the file says, at both levels —
+	// even though the rendered X of the nested one is offset by its parent's
+	// inner margin and the top-level one may have been shifted to bring
+	// something else onto the canvas.
+	outer, _ := findNode(c, "outer")
+	if outer.RecordedX != 200 || outer.RecordedY != 100 {
+		t.Errorf("outer recorded (%v,%v), want (200,100)", outer.RecordedX, outer.RecordedY)
+	}
+	inner, _ := findNode(c, "outer.inner")
+	if inner.RecordedX != 10 || inner.RecordedY != 4 {
+		t.Errorf("inner recorded (%v,%v), want (10,4)", inner.RecordedX, inner.RecordedY)
+	}
+
+	// And a node the fallback grid placed has one too, so the first drag of an
+	// unpositioned state writes a position rather than starting from zero.
+	loose, _ := findNode(c, "loose")
+	if loose.RecordedX == 0 && loose.RecordedY == 0 {
+		t.Error("a state laid out by the fallback reports no recorded position")
+	}
+	// Writing it back reproduces the same layout.
+	moved := chart.Build(parse(t, `{
+	  "id": "rec", "initial": "outer",
+	  "states": {
+	    "outer": { "meta": { "forge": { "x": 200, "y": 100 } }, "initial": "inner",
+	      "states": { "inner": { "meta": { "forge": { "x": 10, "y": 4 } } } } },
+	    "loose": { "meta": { "forge": { "x": `+num(loose.RecordedX)+`, "y": `+num(loose.RecordedY)+` } } }
+	  }
+	}`), "")
+	same, _ := findNode(moved, "loose")
+	if same.X != loose.X || same.Y != loose.Y {
+		t.Errorf("writing the recorded position back moved the node from (%v,%v) to (%v,%v)",
+			loose.X, loose.Y, same.X, same.Y)
+	}
+}
+
+// The offsets a recorded position is not: normalise shifts the whole chart when
+// something would fall off it, and that shift must not leak into what gets
+// written back, or every drag on a machine with a self-transition would walk the
+// node down the canvas.
+func TestLayout_TheChartsOwnShiftIsNotRecorded(t *testing.T) {
+	c := chart.Build(parse(t, `{
+	  "id": "shift", "initial": "a",
+	  "states": { "a": { "meta": { "forge": { "x": 40, "y": 40 } },
+	    "on": { "SELF": [{ "target": "a" }] } } }
+	}`), "")
+
+	if c.OffsetY == 0 {
+		t.Fatal("this fixture is meant to be shifted; check what it is asserting")
+	}
+	a, _ := findNode(c, "a")
+	if a.RecordedX != 40 || a.RecordedY != 40 {
+		t.Errorf("recorded (%v,%v), want the file's (40,40)", a.RecordedX, a.RecordedY)
+	}
+	if a.Y == a.RecordedY {
+		t.Error("the node was not actually shifted, so this proves nothing")
+	}
+}
+
+func num(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }

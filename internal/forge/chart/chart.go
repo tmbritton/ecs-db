@@ -62,9 +62,19 @@ type Node struct {
 	// its Y is its recorded y plus the parent's own title height, so that a
 	// compound state's children move with it. Story 5 writes back into meta and
 	// must subtract both, plus the chart's OffsetX/OffsetY.
-	X, Y       float64
-	AbsX, AbsY float64 // absolute on the canvas
-	W, H       float64
+	X, Y float64
+	// RecordedX, RecordedY is the coordinate that, written into this state's
+	// meta, reproduces where the node is now — captured before either offset
+	// above is applied, and filled in for a node the fallback grid placed as
+	// well as for one the file positions.
+	//
+	// It is what Story 5's drag adds its delta to. Without it the client would
+	// have to know the chart's own shift, the parent's inner margin and the
+	// parent's title height to work out what to write back, which is three
+	// facts about layout that pointer code has no business knowing.
+	RecordedX, RecordedY float64
+	AbsX, AbsY           float64 // absolute on the canvas
+	W, H                 float64
 	// HeadH is how much of the box the name and entry actions take. A compound
 	// state's children start below it, so the two cannot be chosen separately
 	// without the title ending up underneath a child.
@@ -281,6 +291,9 @@ func buildLevel(states map[string]*agent.StateNode, order []string, initial, pre
 		if x, y, ok := Position(states[out[i].Name]); ok {
 			out[i].X, out[i].Y = x, y
 		}
+		// Captured before offsetLevel and before normalise, which is the whole
+		// point: this is the position in the file's own terms.
+		out[i].RecordedX, out[i].RecordedY = out[i].X, out[i].Y
 	}
 	return out
 }

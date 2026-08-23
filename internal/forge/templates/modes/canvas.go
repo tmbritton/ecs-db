@@ -7,6 +7,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 )
 
 // Chart types are aliased for the same reason Component and MachineDefinition
@@ -194,4 +195,141 @@ func stateKindLabel(n ChartNode) string {
 	default:
 		return "state"
 	}
+}
+
+// ── the canvas's own actions ──────────────────────────────────────────────────
+
+// dropAction turns a completed drag into a request.
+//
+// The JS dispatches one CustomEvent carrying what the drag meant; this reads it
+// back out of evt.detail and posts. That is the whole boundary: pointer state
+// is the client's, and everything past it is an ordinary Forge action.
+//
+// A delta for a move, not a position. Only the server knows the offsets between
+// where a box is drawn and the coordinate the file records.
+func dropAction(data Data) string {
+	machine := "machine=" + urlValue(data.SelectedMachine)
+	return "evt.detail.action === 'move' " +
+		"? @post('/forge/agents/state?" + machine +
+		"&move=' + encodeURIComponent(evt.detail.path) + '&dx=' + evt.detail.dx + '&dy=' + evt.detail.dy) " +
+		": @post('/forge/agents/transition?" + machine +
+		"&connect=' + encodeURIComponent(evt.detail.from) + '&to=' + encodeURIComponent(evt.detail.to))"
+}
+
+// addStateAction adds a state where the pointer is.
+//
+// offsetX/offsetY are relative to the element the handler is on, which is the
+// canvas — so this needs no JS at all, and the coordinate arrives in the same
+// space the chart draws in.
+func addStateAction(data Data) string {
+	return "@post('/forge/agents/state?machine=" + urlValue(data.SelectedMachine) +
+		"&add=1&x=' + evt.offsetX + '&y=' + evt.offsetY)"
+}
+
+// menuAction opens the right-click menu over whatever was clicked.
+//
+// preventDefault, or the browser's own menu covers ours. Browsers also fire
+// contextmenu for the keyboard menu key on the focused element, which is what
+// keeps rename, set-initial and delete reachable without a pointer until
+// Story 6 gives them an inspector.
+func menuAction(data Data, target string, params ...string) string {
+	url := "/forge/agents/menu?machine=" + urlValue(data.SelectedMachine) + "&target=" + urlValue(target)
+	for i := 0; i+1 < len(params); i += 2 {
+		url += "&" + params[i] + "=" + urlValue(params[i+1])
+	}
+	// Viewport coordinates, and the menu is positioned fixed. offsetX is
+	// relative to the element the handler is on, so a menu asked for on a node
+	// would open near the top-left of the canvas instead of under the pointer —
+	// and the keyboard menu key, which reports the focused element's corner,
+	// would be wrong in a different way.
+	return "evt.preventDefault(); @post('" + url + "&x=' + evt.clientX + '&y=' + evt.clientY)"
+}
+
+func closeMenuAction() string {
+	return "@post('/forge/agents/menu?close=1')"
+}
+
+// menuStyle places the menu where the pointer was, in viewport coordinates.
+func menuStyle(m CanvasMenu) templ.SafeCSS {
+	return templ.SafeCSS("left:" + num(m.X) + "px;top:" + num(m.Y) + "px")
+}
+
+// canvasMenuItems is what the open menu offers, which depends on what it is
+// about.
+func canvasMenuItems(data Data) []components.MenuItem {
+	m := data.CanvasMenu
+	machine := "machine=" + urlValue(data.SelectedMachine)
+	switch m.Kind {
+	case "state":
+		state := urlValue(m.State)
+		return []components.MenuItem{
+			{
+				Label: "Rename…",
+				// Guarded, so cancelling the prompt does nothing. Posting the
+				// empty string that Cancel returns raised "a state needs a
+				// name" in the banner and an error in the log, which is a
+				// refusal for an operation nobody asked to perform.
+				Action: "(name => name && @post('/forge/agents/state?" + machine + "&rename=" + state +
+					"&to=' + encodeURIComponent(name)))(prompt('Rename this state to:', " +
+					jsString(shortName(m.State)) + "))",
+			},
+			{Label: "Set as initial", Action: "@post('/forge/agents/state?" + machine + "&initial=" + state + "')"},
+			{Divider: true},
+			{
+				Label:  "Delete state",
+				Danger: true,
+				Action: confirmAction(data.CanvasMenuWarning,
+					"@post('/forge/agents/state?"+machine+"&delete="+state+"')"),
+			},
+		}
+	case "edge":
+		return []components.MenuItem{{
+			Label:  "Delete transition",
+			Danger: true,
+			Action: "@post('/forge/agents/transition?" + machine + "&delete=" + urlValue(m.From) +
+				"&kind=" + urlValue(m.EdgeKind) + "&event=" + urlValue(m.Event) + "&index=" + urlValue(m.Index) + "')",
+		}}
+	default:
+		// The menu's coordinates are the viewport's; the canvas wants its own.
+		// The difference is read at click time from the element that knows it,
+		// rather than stored — a chart that scrolled between opening the menu
+		// and choosing from it would otherwise put the state somewhere else.
+		return []components.MenuItem{{
+			Label: "Add state here",
+			Action: "@post('/forge/agents/state?" + machine + "&add=1&x=' + (" + num(m.X) +
+				" - document.querySelector('.chart').getBoundingClientRect().left) + '&y=' + (" +
+				num(m.Y) + " - document.querySelector('.chart').getBoundingClientRect().top))",
+		}}
+	}
+}
+
+// canvasMenuTitle names what the menu is about, in the mono caps the primitive
+// expects.
+func canvasMenuTitle(m CanvasMenu) string {
+	switch m.Kind {
+	case "state":
+		return "STATE · " + m.State
+	case "edge":
+		return "TRANSITION · " + m.Event
+	default:
+		return "CANVAS"
+	}
+}
+
+// shortName is the leaf of a dotted path, which is what a rename edits.
+func shortName(path string) string {
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// edgeIndex is which of the transitions on one event this edge is, taken back
+// out of the id the chart built. The last field, and the only one that cannot
+// contain a bar.
+func edgeIndex(e ChartEdge) string {
+	if i := strings.LastIndex(e.ID, "|"); i >= 0 {
+		return e.ID[i+1:]
+	}
+	return "0"
 }

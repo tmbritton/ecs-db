@@ -14,6 +14,15 @@ templ Layout(title string) {
 			<link rel="stylesheet" href="/static/css/tokens.css"/>
 			<link rel="stylesheet" href="/static/css/forge.css"/>
 			<script type="module" src="/static/js/vendor/datastar.js"></script>
+			// The statechart canvas's pointer handling. A module, loaded once,
+			// binding once from the document — the mode content is replaced by
+			// the page stream, so anything bound to it would die with it.
+			<script type="module" src="/static/js/canvas.js"></script>
+			// The browser honours autofocus only on content the parser
+			// inserted, and everything the page stream delivers is built with
+			// DOM APIs instead. This makes the attribute mean what it says
+			// wherever it appears.
+			<script type="module" src="/static/js/autofocus.js"></script>
 		</head>
 		<body>
 			{ children... }

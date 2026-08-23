@@ -26,6 +26,14 @@ type MenuItem struct {
 type ContextMenuProps struct {
 	Title string // mono caps, e.g. "GOBLIN · SPAWN #12"
 	Items []MenuItem
+	// Autofocus moves focus to the first item as the menu appears.
+	//
+	// Opt-in rather than always: a menu that opens in response to something —
+	// a right-click, or the keyboard menu key — should take focus, and one
+	// rendered as part of a page should not steal it on load. Without it a
+	// keyboard user reaches the menu only by tabbing past everything between,
+	// which is the difference between reachable and operable.
+	Autofocus bool
 }
 
 func ContextMenu(props ContextMenuProps) templ.Component {
@@ -61,7 +69,7 @@ func ContextMenu(props ContextMenuProps) templ.Component {
 			var templ_7745c5c3_Var2 string
 			templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(props.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 29, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 37, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 			if templ_7745c5c3_Err != nil {
@@ -84,7 +92,7 @@ func ContextMenu(props ContextMenuProps) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(props.Title)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 34, Col: 28}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 42, Col: 28}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 			if templ_7745c5c3_Err != nil {
@@ -99,7 +107,7 @@ func ContextMenu(props ContextMenuProps) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		for _, item := range props.Items {
+		for i, item := range props.Items {
 			if item.Divider {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"ctx-menu__divider\" role=\"separator\"></div>")
 				if templ_7745c5c3_Err != nil {
@@ -128,79 +136,96 @@ func ContextMenu(props ContextMenuProps) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
+				if props.Autofocus && i == firstItem(props.Items) {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " autofocus")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
 				if item.Action != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " data-on:click=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " data-on:click=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(item.Action)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 46, Col: 34}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 57, Col: 34}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "><span class=\"ctx-menu__label\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "><span class=\"ctx-menu__label\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(item.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 49, Col: 48}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 60, Col: 48}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if item.Submenu {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"ctx-menu__submenu\" aria-hidden=\"true\">▸</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"ctx-menu__submenu\" aria-hidden=\"true\">▸</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if item.Shortcut != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<span class=\"ctx-menu__shortcut mono\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<span class=\"ctx-menu__shortcut mono\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(item.Shortcut)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 54, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/components/menu.templ`, Line: 65, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</button>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		return nil
 	})
+}
+
+// firstItem is the index of the first thing in a menu that can take focus. A
+// menu that opened with a divider first would otherwise focus nothing.
+func firstItem(items []MenuItem) int {
+	for i, item := range items {
+		if !item.Divider {
+			return i
+		}
+	}
+	return -1
 }
 
 var _ = templruntime.GeneratedTemplate

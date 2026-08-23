@@ -18,6 +18,14 @@ type MenuItem struct {
 type ContextMenuProps struct {
 	Title string // mono caps, e.g. "GOBLIN · SPAWN #12"
 	Items []MenuItem
+	// Autofocus moves focus to the first item as the menu appears.
+	//
+	// Opt-in rather than always: a menu that opens in response to something —
+	// a right-click, or the keyboard menu key — should take focus, and one
+	// rendered as part of a page should not steal it on load. Without it a
+	// keyboard user reaches the menu only by tabbing past everything between,
+	// which is the difference between reachable and operable.
+	Autofocus bool
 }
 
 templ ContextMenu(props ContextMenuProps) {
@@ -34,7 +42,7 @@ templ ContextMenu(props ContextMenuProps) {
 				aria-label={ props.Title }
 			}
 		>
-			for _, item := range props.Items {
+			for i, item := range props.Items {
 				if item.Divider {
 					<div class="ctx-menu__divider" role="separator"></div>
 				} else {
@@ -42,6 +50,9 @@ templ ContextMenu(props ContextMenuProps) {
 						type="button"
 						role="menuitem"
 						class={ classes("ctx-menu__item", when(item.Danger, "ctx-menu__item--danger")) }
+						if props.Autofocus && i == firstItem(props.Items) {
+							autofocus
+						}
 						if item.Action != "" {
 							data-on:click={ item.Action }
 						}
@@ -58,4 +69,15 @@ templ ContextMenu(props ContextMenuProps) {
 			}
 		</div>
 	</div>
+}
+
+// firstItem is the index of the first thing in a menu that can take focus. A
+// menu that opened with a divider first would otherwise focus nothing.
+func firstItem(items []MenuItem) int {
+	for i, item := range items {
+		if !item.Divider {
+			return i
+		}
+	}
+	return -1
 }
