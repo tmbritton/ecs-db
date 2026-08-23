@@ -959,3 +959,399 @@ func TestRenameState_LeavesAnAuthoredIdThatLooksDerivedAlone(t *testing.T) {
 		t.Errorf("the authored id became %q; only the derived form follows a rename", got)
 	}
 }
+
+// ── entry and exit actions ───────────────────────────────────────────────────
+
+func actionsOf(t *testing.T, def *agent.MachineDefinition, state, kind string) []agent.ActionSpec {
+	t.Helper()
+	node, ok := def.States[state]
+	if !ok {
+		t.Fatalf("no state %q", state)
+	}
+	if kind == "exit" {
+		return node.Exit
+	}
+	return node.Entry
+}
+
+func TestAddAction_AppendsInAuthoredOrderAndReportsWhatItAdded(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+
+	for _, name := range []string{"log", "setAnimation"} {
+		if err := s.AddAction(path, "idle", "entry", name); err != nil {
+			t.Fatalf("AddAction %s: %v", name, err)
+		}
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")
+	if len(got) != 2 || got[0].Type != "log" || got[1].Type != "setAnimation" {
+		t.Fatalf("entry = %+v, want log then setAnimation", got)
+	}
+	// Added bare, so the file says only what has been chosen. An action written
+	// out with an empty params object claims a decision nobody made.
+	if got[0].Params != nil {
+		t.Errorf("the new action carries params nobody set: %+v", got[0].Params)
+	}
+}
+
+func TestAddAction_ReachesExitAndNestedStates(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+
+	if err := s.AddAction(path, "combat.attacking", "exit", "log"); err != nil {
+		t.Fatalf("AddAction: %v", err)
+	}
+	node := working(t, s, path).States["combat"].Children["attacking"]
+	if len(node.Exit) != 1 || node.Exit[0].Type != "log" {
+		t.Errorf("exit = %+v", node.Exit)
+	}
+	if len(node.Entry) != 0 {
+		t.Errorf("it went on entry instead: %+v", node.Entry)
+	}
+}
+
+// The registry is the list of what the engine will accept. A name that is not
+// on it makes a machine the engine refuses to load, found at startup rather
+// than at the moment of the mistake.
+func TestAddAction_RefusesANameTheRegistryDoesNotHave(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+
+	if err := s.AddAction(path, "idle", "entry", "teleport"); err == nil {
+		t.Error("accepted an action the engine does not register")
+	}
+	// And the map-gated ones, which this project does not have: the engine
+	// would not register computePath either, so offering it would be Forge and
+	// the game disagreeing about the vocabulary.
+	if err := s.AddAction(path, "idle", "entry", "computePath"); err == nil {
+		t.Error("accepted an action that needs a map this project has not got")
+	}
+	if err := s.AddAction(path, "idle", "nowhere", "log"); err == nil {
+		t.Error("accepted a kind of action list that does not exist")
+	}
+}
+
+func TestRemoveAction_TakesTheOneNamedAndNotItsNeighbour(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	for _, name := range []string{"log", "setAnimation", "setPursueTarget"} {
+		if err := s.AddAction(path, "idle", "entry", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.RemoveAction(path, "idle", "entry", 1); err != nil {
+		t.Fatalf("RemoveAction: %v", err)
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")
+	if len(got) != 2 || got[0].Type != "log" || got[1].Type != "setPursueTarget" {
+		t.Errorf("entry = %+v, want log then setPursueTarget", got)
+	}
+}
+
+func TestRemoveAction_RefusesAnIndexThatIsNotThere(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "log"); err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range []int{-1, 1, 99} {
+		if err := s.RemoveAction(path, "idle", "entry", i); err == nil {
+			t.Errorf("accepted index %d", i)
+		}
+	}
+}
+
+func TestSetActionParam_ConvertsByTheTypeTheRegistryDeclares(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "dealDamage"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetActionParam(path, "idle", "entry", 0, "amount", "5"); err != nil {
+		t.Fatalf("SetActionParam: %v", err)
+	}
+	if err := s.SetActionParam(path, "idle", "entry", 0, "target", "$player"); err != nil {
+		t.Fatalf("SetActionParam: %v", err)
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")[0]
+	// A number, not the string "5" — the engine reads these as their declared
+	// type and a quoted number is a different value.
+	if amount, ok := got.Params["amount"].(float64); !ok || amount != 5 {
+		t.Errorf("amount = %#v, want the number 5", got.Params["amount"])
+	}
+	if target, ok := got.Params["target"].(string); !ok || target != "$player" {
+		t.Errorf("target = %#v", got.Params["target"])
+	}
+}
+
+func TestSetActionParam_RefusesAValueTheTypeCannotHold(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "dealDamage"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := s.SetActionParam(path, "idle", "entry", 0, "amount", "quite a lot")
+	if err == nil {
+		t.Fatal("accepted a word where the registry declares a number")
+	}
+	// Named, so the message says which field to go and fix.
+	if !strings.Contains(err.Error(), "amount") {
+		t.Errorf("the refusal does not name the parameter: %v", err)
+	}
+	if err := s.SetActionParam(path, "idle", "entry", 0, "nonesuch", "1"); err == nil {
+		t.Error("accepted a parameter the action does not take")
+	}
+}
+
+// An absent optional parameter is what the engine expects. An empty string is a
+// value — and for dealDamage.target it is a different one from the default.
+func TestSetActionParam_ClearingRemovesTheParameterRatherThanEmptyingIt(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "dealDamage"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActionParam(path, "idle", "entry", 0, "target", "12"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetActionParam(path, "idle", "entry", 0, "target", ""); err != nil {
+		t.Fatalf("SetActionParam: %v", err)
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")[0]
+	if _, present := got.Params["target"]; present {
+		t.Errorf("target is still there as %#v", got.Params["target"])
+	}
+	// And the last one going leaves no empty params object behind.
+	if err := s.SetActionParam(path, "idle", "entry", 0, "amount", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := actionsOf(t, working(t, s, path), "idle", "entry")[0]; got.Params != nil {
+		t.Errorf("an empty params object was left behind: %#v", got.Params)
+	}
+}
+
+func TestSetActionParam_HandlesEveryTypeTheRegistryDeclares(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "attachComponent"); err != nil {
+		t.Fatal(err)
+	}
+
+	// object: a JSON document, which is what the engine takes there.
+	if err := s.SetActionParam(path, "idle", "entry", 0, "data", `{"hp": 3}`); err != nil {
+		t.Fatalf("SetActionParam: %v", err)
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")[0]
+	obj, ok := got.Params["data"].(map[string]any)
+	if !ok || obj["hp"] != float64(3) {
+		t.Errorf("data = %#v", got.Params["data"])
+	}
+	if err := s.SetActionParam(path, "idle", "entry", 0, "data", "{not json"); err == nil {
+		t.Error("accepted something that is not JSON where an object is declared")
+	}
+}
+
+// The catalogue is the engine's own vocabulary for this project, not a list.
+func TestActionCatalogue_IsTheRegistrysAndFollowsWhetherTheresAMap(t *testing.T) {
+	s, _ := open(t, map[string]string{"nested.json": nestedMachine})
+
+	names := map[string]bool{}
+	for _, meta := range s.ActionCatalogue() {
+		names[meta.Name] = true
+		if meta.Description == "" {
+			t.Errorf("%s has no description, so the dropdown can only show its name", meta.Name)
+		}
+	}
+	if !names["dealDamage"] {
+		t.Error("the catalogue is missing a built-in the engine registers")
+	}
+	// This project has no map, so the engine would not register these — and a
+	// machine using one would not load.
+	if names["computePath"] {
+		t.Error("the catalogue offers an action that needs a map this project has not got")
+	}
+	// Sorted, so two renders of the same project agree.
+	got := s.ActionCatalogue()
+	for i := 1; i < len(got); i++ {
+		if got[i-1].Name > got[i].Name {
+			t.Fatalf("the catalogue is not in a settled order: %s before %s", got[i-1].Name, got[i].Name)
+		}
+	}
+}
+
+// An action edit addresses the node the inspector named, so its path resolves
+// exactly. The engine's own resolver searches by bare name across the tree,
+// because that is what an author may write in a transition target — accepting a
+// fuzzy match here would let an edit land on a state nobody pointed at.
+func TestActionEdits_ResolveAPathExactly(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+
+	// "attacking" exists, but only under combat. The engine would find it.
+	if _, found := agent.FindState(working(t, s, path), "attacking"); found == "" {
+		t.Fatal("the premise is wrong: the engine cannot find this either")
+	}
+	if err := s.AddAction(path, "attacking", "entry", "log"); err == nil {
+		t.Error("an action landed on a state its path does not name")
+	}
+	if err := s.AddAction(path, "combat.attacking", "entry", "log"); err != nil {
+		t.Fatalf("the real path was refused: %v", err)
+	}
+	for _, op := range []struct {
+		name string
+		run  func() error
+	}{
+		{"remove", func() error { return s.RemoveAction(path, "attacking", "entry", 0) }},
+		{"param", func() error { return s.SetActionParam(path, "attacking", "entry", 0, "message", "x") }},
+	} {
+		if err := op.run(); err == nil {
+			t.Errorf("%s landed on a state its path does not name", op.name)
+		}
+	}
+}
+
+// ParseFloat accepts three things a JSON file cannot hold, and storing one is
+// not recoverable without loss: every later edit clones through the emitter and
+// fails, so the machine cannot be edited, rendered or saved, and only Discard
+// gets out — throwing away everything else unsaved with it.
+func TestSetActionParam_RefusesANumberTheFileCannotHold(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "dealDamage"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{"NaN", "Inf", "+Inf", "-Inf", "infinity", "1_000", "0x1p4"} {
+		if err := s.SetActionParam(path, "idle", "entry", 0, "amount", bad); err == nil {
+			t.Errorf("%q was accepted as a number", bad)
+		}
+		// And the session is still usable, which is the part that matters.
+		if _, err := s.Working(path); err != nil {
+			t.Fatalf("the machine is wedged after %q: %v", bad, err)
+		}
+	}
+	// The ordinary spellings still work, including the ones JSON allows.
+	for _, good := range []string{"5", "-2", "0", "1.5", "1e3", "-0.25"} {
+		if err := s.SetActionParam(path, "idle", "entry", 0, "amount", good); err != nil {
+			t.Errorf("%q was refused: %v", good, err)
+		}
+	}
+}
+
+// null unmarshals into a nil map without error, so it is the one non-object
+// that slips past a map-typed decode.
+func TestSetActionParam_RefusesEveryJSONValueThatIsNotAnObject(t *testing.T) {
+	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "attachComponent"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{"null", " null ", "[1,2]", `"a string"`, "3", "true"} {
+		if err := s.SetActionParam(path, "idle", "entry", 0, "data", bad); err == nil {
+			t.Errorf("%q was accepted where an object is declared", bad)
+		}
+	}
+}
+
+func TestSetActionParam_TakesTheTwoSpellingsOfABooleanAndNoOthers(t *testing.T) {
+	// setTilePassable is map-gated, so the catalogue only has it with a map.
+	s, dir := openWithMap(t, map[string]string{"nested.json": nestedMachine})
+	path := machinePath(t, dir)
+	if err := s.AddAction(path, "idle", "entry", "setTilePassable"); err != nil {
+		t.Fatalf("AddAction: %v", err)
+	}
+
+	if err := s.SetActionParam(path, "idle", "entry", 0, "passable", "true"); err != nil {
+		t.Fatalf("SetActionParam: %v", err)
+	}
+	got := actionsOf(t, working(t, s, path), "idle", "entry")[0]
+	if v, ok := got.Params["passable"].(bool); !ok || !v {
+		t.Errorf("passable = %#v, want the boolean true", got.Params["passable"])
+	}
+	if err := s.SetActionParam(path, "idle", "entry", 0, "passable", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if v := actionsOf(t, working(t, s, path), "idle", "entry")[0].Params["passable"]; v != false {
+		t.Errorf("passable = %#v, want the boolean false", v)
+	}
+	// ParseBool takes seven other spellings; the file holds two.
+	for _, bad := range []string{"1", "t", "TRUE", "yes", "on"} {
+		if err := s.SetActionParam(path, "idle", "entry", 0, "passable", bad); err == nil {
+			t.Errorf("%q was accepted as a boolean", bad)
+		}
+	}
+}
+
+// The catalogue follows the project both ways. Nothing tested the direction
+// that *narrows* it, which silently makes a legitimate action unreachable.
+func TestActionCatalogue_OffersTheMapActionsWhenThereIsAMap(t *testing.T) {
+	without, _ := open(t, map[string]string{"nested.json": nestedMachine})
+	with, _ := openWithMap(t, map[string]string{"nested.json": nestedMachine})
+
+	has := func(s interface{ ActionCatalogue() []agent.ActionMeta }, name string) bool {
+		for _, meta := range s.ActionCatalogue() {
+			if meta.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	for _, name := range []string{"computePath", "stepAlongPath", "setTilePassable"} {
+		if has(without, name) {
+			t.Errorf("%s is offered to a project with no map", name)
+		}
+		if !has(with, name) {
+			t.Errorf("%s is not offered to a project that has one", name)
+		}
+	}
+	// And the ungated ones are there either way.
+	if !has(without, "dealDamage") || !has(with, "dealDamage") {
+		t.Error("an ungated builtin went missing")
+	}
+}
+
+// The emitter writes the bare string form only when Bare is set and there are
+// no params, so an action authored as "dealDamage" has to come back as one
+// after a parameter is set and cleared again. Clearing the flag on set made
+// that one-way, leaving a spurious {"type": "dealDamage"} in the file.
+func TestSetActionParam_LeavesABareActionBareAfterAParameterComesAndGoes(t *testing.T) {
+	const bare = `{
+	  "id": "bare", "initial": "a",
+	  "states": { "a": { "entry": ["dealDamage"] } }
+	}`
+	s, dir := open(t, map[string]string{"bare.json": bare})
+	path := filepath.Join(dir, "bare.json")
+
+	before := emitted(t, s, path)
+	if err := s.SetActionParam(path, "a", "entry", 0, "amount", "5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetActionParam(path, "a", "entry", 0, "amount", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := emitted(t, s, path); got != before {
+		t.Errorf("setting a parameter and clearing it rewrote the file:\n%s\nwant:\n%s", got, before)
+	}
+	// Compared on what would be written rather than on Dirty, which also
+	// reports the whitespace difference between this fixture and the emitter's
+	// own layout — a difference that was there before the edit and is Story 2's
+	// "would be reformatted", not this one's.
+}
+
+// emitted is what the session would write, which is where a spurious diff shows.
+func emitted(t *testing.T, s interface {
+	Working(string) (*agent.MachineDefinition, error)
+}, path string,
+) string {
+	t.Helper()
+	raw, err := agent.EmitMachine(working(t, s, path))
+	if err != nil {
+		t.Fatalf("EmitMachine: %v", err)
+	}
+	return string(raw)
+}

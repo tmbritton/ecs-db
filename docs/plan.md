@@ -472,7 +472,9 @@ Two checks against the code changed the shape (see the epic README for the probe
   - Only the two drags need JavaScript: `evt` is in scope in every Datastar expression, so double-click, both context menus and every menu item are ordinary hypermedia
   - The menu's backdrop covers the viewport and the menu is per-server, so one left open in another tab blocked this page's rail, list and menu bar until it was clicked away
 
-- [ ] **State inspector** — Name, entry/exit actions from `Registry.Actions()`, set-initial. Action names are chosen, never typed.
+- [x] **State inspector** — Name, entry/exit actions from `Registry.Actions()`, set-initial. Action names are chosen, never typed.
+  - The catalogue is gated as the engine gates it: a project with no map is not offered `computePath`, because the engine would not register it and a machine using it would not load
+  - A required parameter left empty is a warning and not a refusal — `ValidateMachine` never looks at parameters, so blocking the save would be a rule the engine does not have
 
 - [ ] **Transition inspector** — Event, target, `cond` from `Registry.Guards()`, and a param form generated from the registered schema.
 

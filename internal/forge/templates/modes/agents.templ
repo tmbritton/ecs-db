@@ -205,7 +205,10 @@ templ machineEditor(data Data) {
 			</p>
 		</div>
 
-		@statechart(data)
+		<div class="machine-body">
+			@statechart(data)
+			@stateInspector(data)
+		</div>
 
 		<button
 			type="button"

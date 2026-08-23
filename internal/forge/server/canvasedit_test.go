@@ -438,3 +438,110 @@ func TestCanvasMove_RefusesACoordinateThatIsNotFinite(t *testing.T) {
 		}
 	}
 }
+
+// ── the state inspector's actions ────────────────────────────────────────────
+
+func TestActionEdit_AddsRemovesAndFillsIn(t *testing.T) {
+	s, srv, machine := canvasFixture(t)
+	q := "&machine=" + url.QueryEscape(machine) + "&state=idle&kind=entry"
+
+	if code := post(t, srv, "/forge/agents/action?add=dealDamage"+q); code != 204 {
+		t.Fatalf("add: %d (%s)", code, s.lastEditProblem())
+	}
+	def, _ := s.cfg.MachineSession.Working(machine)
+	if len(def.States["idle"].Entry) != 1 {
+		t.Fatalf("entry = %+v", def.States["idle"].Entry)
+	}
+
+	if code := post(t, srv, "/forge/agents/action?index=0&param=amount&value=7"+q); code != 204 {
+		t.Fatalf("param: %d (%s)", code, s.lastEditProblem())
+	}
+	def, _ = s.cfg.MachineSession.Working(machine)
+	if got := def.States["idle"].Entry[0].Params["amount"]; got != float64(7) {
+		t.Errorf("amount = %#v, want the number 7", got)
+	}
+
+	if code := post(t, srv, "/forge/agents/action?remove=0"+q); code != 204 {
+		t.Fatalf("remove: %d (%s)", code, s.lastEditProblem())
+	}
+	def, _ = s.cfg.MachineSession.Working(machine)
+	if len(def.States["idle"].Entry) != 0 {
+		t.Errorf("entry = %+v", def.States["idle"].Entry)
+	}
+}
+
+func TestActionEdit_ReportsWhatItRefuses(t *testing.T) {
+	s, srv, machine := canvasFixture(t)
+	q := "&machine=" + url.QueryEscape(machine) + "&state=idle&kind=entry"
+
+	for _, tc := range []struct{ name, target string }{
+		{"an action the engine does not register", "/forge/agents/action?add=teleport" + q},
+		{"an action needing a map this project has not got", "/forge/agents/action?add=computePath" + q},
+		{"an index that is not a number", "/forge/agents/action?remove=first" + q},
+		{"a state that is not there", "/forge/agents/action?add=log&machine=" +
+			url.QueryEscape(machine) + "&state=nowhere&kind=entry"},
+		{"a kind of list that does not exist", "/forge/agents/action?add=log&machine=" +
+			url.QueryEscape(machine) + "&state=idle&kind=during"},
+		{"no operation at all", "/forge/agents/action?" + strings.TrimPrefix(q, "&")},
+	} {
+		s.setEditProblem("")
+		if code := post(t, srv, tc.target); code != 204 {
+			t.Fatalf("%s: unexpected status %d", tc.name, code)
+		}
+		if s.lastEditProblem() == "" {
+			t.Errorf("%s was accepted", tc.name)
+		}
+	}
+}
+
+// The catalogue reaches the page, and it is the engine's for this project.
+func TestAgentsPage_OffersTheEnginesActionCatalogue(t *testing.T) {
+	srv, _, core := machineServerWith(t, canvasMachine)
+	machine := filepath.Join(core, "wander.json")
+
+	_, body := get(t, srv, "/forge/agents?machine="+url.QueryEscape(machine)+"&sel=state:idle")
+	if !strings.Contains(body, `value="dealDamage"`) {
+		t.Error("the catalogue is not on the page")
+	}
+	// The fixture project has no map, so the engine would not register these.
+	if strings.Contains(body, "computePath") {
+		t.Error("the page offers an action the engine would not register")
+	}
+	// And the description comes with it, so the list says what an action does.
+	if !strings.Contains(body, "Decrement Health.hp") {
+		t.Error("the registry's description did not reach the page")
+	}
+}
+
+// Every canvas handler checks the machine it is told to edit; the action one
+// must not be the exception.
+func TestActionEdit_RefusesAMachineThisProjectDoesNotHaveOpen(t *testing.T) {
+	s, srv, _ := canvasFixture(t)
+	s.setEditProblem("")
+	post(t, srv, "/forge/agents/action?add=log&state=idle&kind=entry&machine=/etc/passwd")
+	if !strings.Contains(s.lastEditProblem(), "not a machine this project has open") {
+		t.Errorf("an action edit on an unopened machine was not refused: %q", s.lastEditProblem())
+	}
+}
+
+// The inspector's delete offers the same warning as the canvas menu, computed
+// by the server from the session — not a second sentence that could drift.
+func TestAgentsPage_TheInspectorsDeleteNamesWhatWouldDangle(t *testing.T) {
+	srv, _, core := machineServerWith(t, canvasMachine)
+	machine := filepath.Join(core, "wander.json")
+
+	// moving is the target of idle's GO transition.
+	_, body := get(t, srv, "/forge/agents?machine="+url.QueryEscape(machine)+"&sel=state:moving")
+	if !strings.Contains(body, `data-testid="delete-state"`) {
+		t.Fatal("the inspector does not offer to delete the state")
+	}
+	if !strings.Contains(body, "on GO from idle") {
+		t.Errorf("the delete does not name the transition that would dangle")
+	}
+
+	// And a state nothing targets says so rather than warning about nothing.
+	_, body = get(t, srv, "/forge/agents?machine="+url.QueryEscape(machine)+"&sel=state:combat.attacking")
+	if !strings.Contains(body, "Nothing transitions into it") {
+		t.Error("a state nothing targets does not say so")
+	}
+}

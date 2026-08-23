@@ -2062,3 +2062,177 @@ button.list-row:not(.list-row--active):hover {
   z-index: 6;
 }
 
+
+/* ── State inspector ───────────────────────────────────────────────────────
+   The prototype's right rail: what the selected state is, and the controls
+   that change it. */
+
+.machine-body {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.machine-body > .chart-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.inspector {
+  flex: none;
+  width: 238px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+  background: var(--panel);
+  border: var(--border-w) solid var(--border);
+  margin-top: 14px;
+}
+
+.inspector__empty {
+  padding: 30px 6px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.inspector__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.inspector__label {
+  width: 44px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.inspector__input {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 8px;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+  color: var(--text-hi);
+  font-size: 12px;
+}
+
+.inspector__note {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+}
+
+.inspector__initial,
+.inspector__delete {
+  display: block;
+  width: 100%;
+  margin: 8px 0;
+  padding: 5px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.inspector__actions {
+  margin-top: 10px;
+}
+
+.action {
+  margin-bottom: 8px;
+  padding: 5px 7px;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+}
+
+.action__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-hi);
+  overflow-wrap: anywhere;
+}
+
+.action__remove {
+  flex: none;
+  padding: 0 3px;
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font: inherit;
+  cursor: pointer;
+}
+
+.action__remove:hover {
+  color: var(--red);
+}
+
+.action__desc {
+  margin: 3px 0 5px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.action__desc--unknown {
+  color: var(--red);
+}
+
+.action__none {
+  margin: 3px 0 0;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.action__param {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.action__param-name {
+  width: 74px;
+  flex: none;
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Required is a mark as well as an attribute: the asterisk is what a sighted
+   user reads, and `required` plus the message below is what everyone else
+   gets. */
+.action__required {
+  color: var(--amber);
+}
+
+.action__input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  background: var(--void);
+  border: var(--border-w) solid var(--border);
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.action__check {
+  margin-right: auto;
+}
+
+/* A registered default, for the one control that cannot carry a placeholder. */
+.action__hint {
+  font-size: 9.5px;
+  color: var(--text-faint);
+}

@@ -15,12 +15,16 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/forge/chart"
+	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 )
 
 func (s *Server) registerCanvasRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/agents/state", sameOriginOnly(s.handleStateEdit))
 	mux.HandleFunc("POST /forge/agents/transition", sameOriginOnly(s.handleTransitionEdit))
+	mux.HandleFunc("POST /forge/agents/action", sameOriginOnly(s.handleActionEdit))
 	mux.HandleFunc("POST /forge/agents/menu", sameOriginOnly(s.handleCanvasMenu))
 }
 
@@ -120,6 +124,55 @@ func (s *Server) handleTransitionEdit(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		s.refuseMachineEdit(w, r, fmt.Errorf("no transition operation named"))
+		return
+	}
+	s.setEditProblem("")
+	s.closeCanvasMenu()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleActionEdit adds, removes and fills in a state's entry and exit actions.
+func (s *Server) handleActionEdit(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.machineSession(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	path, err := s.machinePath(sess, q.Get("machine"))
+	if err != nil {
+		s.refuseMachineEdit(w, r, err)
+		return
+	}
+	state, kind := q.Get("state"), q.Get("kind")
+
+	switch {
+	case q.Get("add") != "":
+		if err := sess.AddAction(path, state, kind, q.Get("add")); err != nil {
+			s.refuseMachineEdit(w, r, err)
+			return
+		}
+	case q.Get("remove") != "":
+		index, err := strconv.Atoi(q.Get("remove"))
+		if err != nil {
+			s.refuseMachineEdit(w, r, fmt.Errorf("which action: %w", err))
+			return
+		}
+		if err := sess.RemoveAction(path, state, kind, index); err != nil {
+			s.refuseMachineEdit(w, r, err)
+			return
+		}
+	case q.Get("param") != "":
+		index, err := strconv.Atoi(q.Get("index"))
+		if err != nil {
+			s.refuseMachineEdit(w, r, fmt.Errorf("which action: %w", err))
+			return
+		}
+		if err := sess.SetActionParam(path, state, kind, index, q.Get("param"), q.Get("value")); err != nil {
+			s.refuseMachineEdit(w, r, err)
+			return
+		}
+	default:
+		s.refuseMachineEdit(w, r, fmt.Errorf("no action operation named"))
 		return
 	}
 	s.setEditProblem("")
@@ -235,4 +288,26 @@ func (s *Server) canvasDeleteWarning(machine string, m CanvasMenu) string {
 	}
 	return "Delete state " + m.State + "? " + strings.Join(dangling, ", ") +
 		" will be left pointing at a state that does not exist."
+}
+
+// selectedState is the state the canvas selection names, or nil when the
+// selection is an edge, is nothing, or names a state that is no longer there.
+//
+// Resolved off the same definition the chart was built from, so the inspector
+// and the canvas cannot be describing different machines.
+//
+// StateAt is what refuses everything that is not a state, including an edge
+// selection: trimming the "state:" prefix off "edge:idle|on|GO|0" leaves it
+// unchanged, and no state has a path like that. An explicit prefix check was
+// here as well and no mutation could reach it — a second guard over the first
+// one's answer reads as a safety net and is not one.
+func selectedState(def *agent.MachineDefinition, selection string) *agent.StateNode {
+	if def == nil {
+		return nil
+	}
+	node, err := machines.StateAt(def, strings.TrimPrefix(selection, chart.SelState))
+	if err != nil {
+		return nil
+	}
+	return node
 }

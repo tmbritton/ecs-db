@@ -330,6 +330,11 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			// to draw a machine that does not validate, because that is the
 			// one someone opened the editor to fix.
 			data.Chart = chart.Build(data.Machine, r.URL.Query().Get("sel"))
+			data.Actions = s.cfg.MachineSession.ActionCatalogue()
+			data.SelectedState = selectedState(data.Machine, data.Chart.Selected)
+			data.SelectedStateWarning = s.canvasDeleteWarning(data.SelectedMachine, CanvasMenu{
+				Kind: "state", State: strings.TrimPrefix(data.Chart.Selected, chart.SelState), Open: data.SelectedState != nil,
+			})
 			data.CanvasMenu = s.openCanvasMenu()
 			data.CanvasMenuWarning = s.canvasDeleteWarning(data.SelectedMachine, data.CanvasMenu)
 			data.StrandedMachines = strandedSet(s.cfg.MachineSession)

@@ -74,7 +74,21 @@ func openWithSchema(t *testing.T, files map[string]string, extraMods ...string) 
 	return s, current
 }
 
+// openWithMap is open for a project that has a map, which is what makes the
+// engine register the pathfinding and line-of-sight builtins — and therefore
+// what makes them appear in the action catalogue.
+func openWithMap(t *testing.T, files map[string]string) (*machines.Session, string) {
+	t.Helper()
+	s, core, _ := openProjectWith(t, files, true)
+	return s, core
+}
+
 func openProject(t *testing.T, files map[string]string, extraMods ...string) (*machines.Session, string, *schema.DatabaseSchema) {
+	t.Helper()
+	return openProjectWith(t, files, false, extraMods...)
+}
+
+func openProjectWith(t *testing.T, files map[string]string, hasMap bool, extraMods ...string) (*machines.Session, string, *schema.DatabaseSchema) {
 	t.Helper()
 	root := t.TempDir()
 	core := filepath.Join(root, "core", "behaviors")
@@ -98,6 +112,7 @@ func openProject(t *testing.T, files map[string]string, extraMods ...string) (*m
 	current := testSchema()
 	s, err := machines.Open(machines.Config{
 		Mods:   mods,
+		HasMap: hasMap,
 		Schema: func() schema.DatabaseSchema { return current },
 	})
 	if err != nil {

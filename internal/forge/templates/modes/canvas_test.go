@@ -323,17 +323,29 @@ func TestCanvas_StateNamesAreEscaped(t *testing.T) {
 	}
 }
 
-// nodeElement is a node's whole element, children included, found by matching
-// the div that opens it against the one that closes it.
+// nodeElement is a node's whole element, children included.
 func nodeElement(t *testing.T, html, path string) string {
 	t.Helper()
-	i := strings.Index(html, `data-testid="state-`+path+`"`)
+	return elementWith(t, html, "state-"+path)
+}
+
+// elementWith is the whole element carrying a test id, found by matching the
+// div that opens it against the one that closes it.
+//
+// Balanced, and that is the point: a section that ran from a test id to the
+// next "</div></div>" swallowed everything after the element as well, so an
+// assertion "inside the row" was really an assertion about the rest of the
+// page — which is how a description test passed against text that was only in
+// the dropdown below it.
+func elementWith(t *testing.T, html, testid string) string {
+	t.Helper()
+	i := strings.Index(html, `data-testid="`+testid+`"`)
 	if i < 0 {
-		t.Fatalf("no node %s", path)
+		t.Fatalf("no element with test id %q", testid)
 	}
 	start := strings.LastIndex(html[:i], "<div")
 	if start < 0 {
-		t.Fatalf("node %s is not in an element", path)
+		t.Fatalf("%s is not in a div", testid)
 	}
 	depth, j := 0, start
 	for j < len(html) {
@@ -351,7 +363,7 @@ func nodeElement(t *testing.T, html, path string) string {
 			j++
 		}
 	}
-	t.Fatalf("node %s is never closed", path)
+	t.Fatalf("%s is never closed", testid)
 	return ""
 }
 

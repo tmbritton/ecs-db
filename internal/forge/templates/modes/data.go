@@ -66,6 +66,19 @@ type Data struct {
 	// would send them back to a text editor at the moment the tool is most
 	// use.
 	Chart chart.Chart
+	// Actions is every action this project's engine registers, sorted by name
+	// and each with the description and parameter schema the registry carries.
+	//
+	// The catalogue rather than a list: an action name that is not registered
+	// makes a machine the engine refuses to load, and offering exactly what the
+	// engine accepts makes that mistake unreachable rather than reported.
+	Actions []agent.ActionMeta
+	// SelectedState is the state the canvas selection names, or nil. Resolved
+	// exactly, by the same rule the mutations use.
+	SelectedState *agent.StateNode
+	// SelectedStateWarning is what deleting the selected state would break, in
+	// words — the same sentence the canvas menu uses, from the same place.
+	SelectedStateWarning string
 	// CanvasMenu is the right-click menu the statechart has open, if any.
 	CanvasMenu CanvasMenu
 	// CanvasMenuWarning is what deleting the state that menu is about would

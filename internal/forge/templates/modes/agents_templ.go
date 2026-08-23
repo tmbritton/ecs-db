@@ -749,7 +749,7 @@ func machineEditor(data Data) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\"></label><p class=\"schema__note\">Nothing resolves through a filename, so renaming this breaks nothing. It is offered because a machine that has been renamed usually wants its file to follow.</p></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\"></label><p class=\"schema__note\">Nothing resolves through a filename, so renaming this breaks nothing. It is offered because a machine that has been renamed usually wants its file to follow.</p></div><div class=\"machine-body\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -757,14 +757,18 @@ func machineEditor(data Data) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<button type=\"button\" class=\"btn--danger schema__delete\" data-testid=\"delete-machine\" data-on:click=\"")
+		templ_7745c5c3_Err = stateInspector(data).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</div><button type=\"button\" class=\"btn--danger schema__delete\" data-testid=\"delete-machine\" data-on:click=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(confirmAction(deleteWarning(data, machineID(def)), action("/forge/agents/machine", "delete", data.SelectedMachine)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 214, Col: 134}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 217, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
@@ -818,7 +822,7 @@ func projectProblems(data Data) templ.Component {
 				var templ_7745c5c3_Var39 string
 				templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fileName(p.Path))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 232, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 235, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 				if templ_7745c5c3_Err != nil {
@@ -831,7 +835,7 @@ func projectProblems(data Data) templ.Component {
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(p.Err.Error())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 233, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 236, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 				if templ_7745c5c3_Err != nil {
@@ -849,7 +853,7 @@ func projectProblems(data Data) templ.Component {
 					var templ_7745c5c3_Var41 string
 					templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue("discard-stranded-" + fileName(p.Path))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 238, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 241, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 					if templ_7745c5c3_Err != nil {
@@ -864,7 +868,7 @@ func projectProblems(data Data) templ.Component {
 						"Discard the unsaved changes to "+fileName(p.Path)+"? They cannot be recovered.",
 						action("/forge/agents/discard", "machine", p.Path)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 241, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/agents.templ`, Line: 244, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 					if templ_7745c5c3_Err != nil {

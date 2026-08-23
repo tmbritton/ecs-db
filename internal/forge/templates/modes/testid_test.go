@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 )
@@ -101,5 +102,63 @@ func TestValidation_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// 13-state-inspector.spec.js selects on these. AGENTS.md asks for the pin so a
+// rename fails in seconds rather than as a browser timeout minutes later, and
+// the parameterised ones — built from a kind, an index and a parameter name —
+// are the easiest to break without noticing.
+func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
+	data := inspectorFixture(t, "state:idle")
+	data.SelectedState.Entry = []agent.ActionSpec{{Type: "dealDamage"}}
+	data.SelectedStateWarning = "Delete state idle? Nothing transitions into it."
+
+	var buf bytes.Buffer
+	if err := AgentsMode(data).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{
+		"state-inspector", "state-name", "state-rename-note", "already-initial",
+		"delete-state", "entry-actions", "exit-actions", "catalogue-is-closed",
+		"add-entry-action", "add-exit-action",
+		"entry-action-0", "remove-entry-0", "entry-desc-0",
+		"entry-param-0-amount", "input-entry-0-amount", "problem-entry-0-amount",
+		"entry-param-0-target", "input-entry-0-target",
+	})
+
+	// The ones that only render in the other states, which no other test would
+	// notice going missing either.
+	var empty bytes.Buffer
+	if err := AgentsMode(inspectorFixture(t, "")).Render(context.Background(), &empty); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertModeTestIDs(t, empty.String(), []string{"inspector-empty"})
+
+	notInitial := inspectorFixture(t, "state:combat")
+	var other bytes.Buffer
+	if err := AgentsMode(notInitial).Render(context.Background(), &other); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertModeTestIDs(t, other.String(), []string{"set-initial"})
+}
+
+// assertModeTestIDs is the shared check: present, and present exactly once — a
+// duplicate makes a Playwright locator match two elements and surfaces as a
+// strict-mode violation a long way from its cause.
+func assertModeTestIDs(t *testing.T, markup string, want []string) {
+	t.Helper()
+	seen := map[string]int{}
+	for _, match := range testIDRE.FindAllStringSubmatch(markup, -1) {
+		seen[match[1]]++
+	}
+	for _, id := range want {
+		switch seen[id] {
+		case 1:
+		case 0:
+			t.Errorf("data-testid=%q is no longer rendered; e2e/specs select on it", id)
+		default:
+			t.Errorf("data-testid=%q is rendered %d times; it must be unique", id, seen[id])
+		}
 	}
 }
