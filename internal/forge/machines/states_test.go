@@ -394,7 +394,7 @@ func TestDeleteTransition_RemovesTheOneNamedAndNotItsSibling(t *testing.T) {
 	path := machinePath(t, dir)
 
 	// idle has two transitions on GO. Delete the second.
-	if err := s.DeleteTransition(path, "idle", "on", "GO", 1); err != nil {
+	if err := s.DeleteTransition(path, ref("idle", "on", "GO", 1)); err != nil {
 		t.Fatalf("DeleteTransition: %v", err)
 	}
 	got := working(t, s, path).States["idle"].On["GO"]
@@ -412,7 +412,7 @@ func TestDeleteTransition_RemovesTheEventWhenItsLastOneGoes(t *testing.T) {
 	s, dir := open(t, map[string]string{"nested.json": nestedMachine})
 	path := machinePath(t, dir)
 
-	if err := s.DeleteTransition(path, "idle", "on", "POKE", 0); err != nil {
+	if err := s.DeleteTransition(path, ref("idle", "on", "POKE", 0)); err != nil {
 		t.Fatalf("DeleteTransition: %v", err)
 	}
 	def := working(t, s, path)
@@ -439,7 +439,7 @@ func TestDeleteTransition_RefusesAnIndexThatIsNotThere(t *testing.T) {
 		{"nowhere", "on", "GO", 0},
 		{"idle", "after", "GO", 0},
 	} {
-		if err := s.DeleteTransition(path, tc.from, tc.kind, tc.event, tc.i); err == nil {
+		if err := s.DeleteTransition(path, ref(tc.from, tc.kind, tc.event, tc.i)); err == nil {
 			t.Errorf("accepted %+v", tc)
 		}
 	}

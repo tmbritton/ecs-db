@@ -476,7 +476,10 @@ Two checks against the code changed the shape (see the epic README for the probe
   - The catalogue is gated as the engine gates it: a project with no map is not offered `computePath`, because the engine would not register it and a machine using it would not load
   - A required parameter left empty is a warning and not a refusal — `ValidateMachine` never looks at parameters, so blocking the save would be a rule the engine does not have
 
-- [ ] **Transition inspector** — Event, target, `cond` from `Registry.Guards()`, and a param form generated from the registered schema.
+- [x] **Transition inspector** — Event, target, `cond` from `Registry.Guards()`, and a param form generated from the registered schema.
+  - One generated form, not two: actions and guards both carry `[]ParamSchema`, so Story 6's form took a scope and gained two more callers rather than a twin
+  - Transition order is semantics — the interpreter takes the first transition on an event whose guard passes — so reordering is offered, and the panel says what the order means
+  - The chart's edge id is positional, so renaming an event or reordering moves the selection; those two edits answer with an SSE redirect carrying where it went, because only the server knows and selection lives in the URL
 
 - [ ] **Inline validation** — `agent.ValidateMachine` returns every error at once, each already carrying the state and field it is about; render them against the node or edge that caused them.
 

@@ -568,7 +568,7 @@ func TestCanvas_TheDropHandlerIsBoundToTheCanvas(t *testing.T) {
 	if !strings.Contains(wrap, "/forge/agents/state?machine=") || !strings.Contains(wrap, "&amp;move=") {
 		t.Error("a completed move posts nowhere")
 	}
-	if !strings.Contains(wrap, "/forge/agents/transition?machine=") || !strings.Contains(wrap, "&amp;connect=") {
+	if !strings.Contains(wrap, "/forge/agents/transition?op=connect&amp;machine=") || !strings.Contains(wrap, "&amp;from=") {
 		t.Error("a completed connection posts nowhere")
 	}
 	// A delta, not a position: only the server knows the offsets between where
@@ -693,12 +693,12 @@ func TestCanvas_TheEdgeMenuAddressesTheTransitionByItsParts(t *testing.T) {
 	// over the whole document passes with the menu's action carrying none of
 	// them — which is how the first version of this test passed.
 	menu := section(t, html, `data-testid="canvas-menu"`, "</div></div>")
-	for _, want := range []string{"delete=idle", "kind=on", "event=SPOTTED", "index=0"} {
+	for _, want := range []string{"op=delete", "from=idle", "kind=on", "event=SPOTTED", "index=0"} {
 		if !strings.Contains(menu, want) {
 			t.Errorf("the delete action is missing %q: %s", want, menu)
 		}
 	}
-	if strings.Contains(menu, "delete=idle%7Con") {
+	if strings.Contains(menu, "from=idle%7Con") {
 		t.Error("the transition is addressed by its joined id, which cannot be split back apart")
 	}
 }

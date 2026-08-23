@@ -102,6 +102,12 @@ type Edge struct {
 	// Event is the event name, or the raw duration string for an after
 	// transition, since that is what the key is.
 	Event string
+	// Index is which of the transitions on that key this one is.
+	//
+	// Carried rather than recovered from the id, which joins four fields with
+	// bars: the inspector needs all four to address the transition, and taking
+	// them back out of a string a state name may contain a bar in is guesswork.
+	Index int
 	// Guard is the cond's type, empty when the transition is unconditional.
 	Guard string
 	Kind  EdgeKind
@@ -166,6 +172,17 @@ type Chart struct {
 	// there. One field, because one thing is selected at a time and making
 	// that structural is cheaper than a rule about which of two wins.
 	Selected string
+}
+
+// EdgeID is how a transition is named in a selection: its source, which of the
+// two maps it is in, the key it is under and which of the transitions on that
+// key it is.
+//
+// One place that spells it, because the server builds the same id when an edit
+// moves a transition and the selection has to follow — and two spellings of a
+// four-field join would agree until the day they did not.
+func EdgeID(from, kind, key string, index int) string {
+	return fmt.Sprintf("%s|%s|%s|%d", from, kind, key, index)
 }
 
 // Selection prefixes. A single ?sel= parameter carries both kinds.
@@ -544,9 +561,10 @@ func groupKey(e Edge) string {
 
 func edge(resolver *agent.StateResolver, from string, kind EdgeKind, key string, i int, t agent.Transition) Edge {
 	e := Edge{
-		ID:     fmt.Sprintf("%s|%s|%s|%d", from, kind, key, i),
+		ID:     EdgeID(from, string(kind), key, i),
 		From:   from,
 		Event:  key,
+		Index:  i,
 		Kind:   kind,
 		Target: t.Target,
 	}

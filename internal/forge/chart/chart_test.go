@@ -722,3 +722,28 @@ func TestBuild_ADotInAStateNameCollidesWithThePathNotation(t *testing.T) {
 		t.Errorf("GO resolved to %q (dangling=%v)", e.To, e.Dangling)
 	}
 }
+
+// The index is carried on the edge rather than recovered from its id: the
+// inspector addresses a transition by source, kind, key and index, and taking
+// those back out of a bar-joined string a state name may contain a bar in is
+// guesswork.
+func TestBuild_EdgeCarriesWhichTransitionOnTheKeyItIs(t *testing.T) {
+	c := chart.Build(parse(t, `{
+	  "id": "fork",
+	  "initial": "a",
+	  "states": {
+	    "a": { "on": { "GO": [{ "target": "b", "cond": "isReady" }, { "target": "c" }] } },
+	    "b": {}, "c": {}
+	  }
+	}`), "")
+
+	var got []int
+	for _, e := range c.Edges {
+		if e.Event == "GO" {
+			got = append(got, e.Index)
+		}
+	}
+	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
+		t.Errorf("indexes = %v, want [0 1]", got)
+	}
+}

@@ -368,3 +368,37 @@ func TestReducedMotion_CoversEveryAnimatedClass(t *testing.T) {
 		}
 	}
 }
+
+// The list a native <select> opens is painted by the browser, not by the page:
+// it takes the control's colour and its own white ground, so the catalogue
+// rendered as pale cream on white and could not be read. Nothing about the
+// closed control shows it, and no screenshot of the page catches it either —
+// the popup only exists while it is open.
+//
+// Pinned because it is a one-line rule that looks like tidying and is not.
+func TestStylesheets_PaintTheNativeSelectPopup(t *testing.T) {
+	// color-scheme is what makes the browser paint its own widgets dark, and it
+	// is the half that works everywhere: an option rule is honoured by some
+	// engines and ignored by others.
+	if !strings.Contains(stripComments(cssFiles(t)["css/tokens.css"]), "color-scheme: dark") {
+		t.Error("nothing tells the browser to paint its own widgets dark, so a select's list opens white")
+	}
+
+	body := stripComments(cssFiles(t)["css/forge.css"])
+	i := strings.Index(body, "option,")
+	if i < 0 {
+		i = strings.Index(body, "option {")
+	}
+	if i < 0 {
+		t.Fatal("nothing styles option, so a select's list is left to the browser alone")
+	}
+	rule := body[i:]
+	if j := strings.Index(rule, "}"); j >= 0 {
+		rule = rule[:j]
+	}
+	for _, want := range []string{"background:", "color:"} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("the option rule declares no %s, so half the popup stays browser-default: %s", want, rule)
+		}
+	}
+}

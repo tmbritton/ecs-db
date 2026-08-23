@@ -132,8 +132,17 @@ func (s *Server) handleMachineEdit(w http.ResponseWriter, r *http.Request) {
 // than only in the log: an edit that vanishes with no explanation teaches you
 // that the control is broken.
 func (s *Server) refuseMachineEdit(w http.ResponseWriter, r *http.Request, err error) {
-	slog.ErrorContext(r.Context(), "machine edit", "err", err)
-	s.setEditProblem(err.Error())
+	s.refuseMachineEditOn(w, r, "", err)
+}
+
+// refuseMachineEditOn is refuseMachineEdit naming the field the refusal is
+// about, so a panel can report it where the mistake was made rather than only
+// in the banner at the top of the page.
+//
+// Empty for a refusal that belongs to no one control, which is most of them.
+func (s *Server) refuseMachineEditOn(w http.ResponseWriter, r *http.Request, field string, err error) {
+	slog.ErrorContext(r.Context(), "machine edit", "err", err, "field", field)
+	s.setEditProblemOn(field, err.Error())
 	w.WriteHeader(http.StatusNoContent)
 }
 

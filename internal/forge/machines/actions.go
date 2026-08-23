@@ -37,11 +37,6 @@ func (s *Session) registry() *agent.Registry {
 // the control that adds one does not need a form before it knows what it is
 // adding. SetActionParam fills them in.
 func (s *Session) AddAction(path, statePath, kind, name string) error {
-	if _, ok := actionMeta(s.registry(), name); !ok {
-		return fmt.Errorf(
-			"%q is not an action this project's engine registers, so a machine using it "+
-				"would not load", name)
-	}
 	return s.Edit(path, func(def *agent.MachineDefinition) error {
 		node, err := stateAt(def, statePath)
 		if err != nil {
@@ -51,9 +46,48 @@ func (s *Session) AddAction(path, statePath, kind, name string) error {
 		if err != nil {
 			return err
 		}
-		*list = append(*list, agent.ActionSpec{Type: name, Bare: true})
-		return nil
+		return addActionTo(list, s.registry(), name)
 	})
+}
+
+// addActionTo, removeActionFrom and setActionParamOn are the three edits an
+// action list takes, written against the list and not against what holds it.
+//
+// A state's entry list, a state's exit list and a transition's actions are the
+// same list with three owners, and Story 7 added the third. Two copies of
+// "clearing the last parameter restores the bare shorthand" is how one of them
+// stops doing it.
+func addActionTo(list *[]agent.ActionSpec, r *agent.Registry, name string) error {
+	if _, ok := actionMeta(r, name); !ok {
+		return fmt.Errorf(
+			"%q is not an action this project's engine registers, so a machine using it "+
+				"would not load", name)
+	}
+	*list = append(*list, agent.ActionSpec{Type: name, Bare: true})
+	return nil
+}
+
+func removeActionFrom(list *[]agent.ActionSpec, what string, index int) error {
+	if index < 0 || index >= len(*list) {
+		return fmt.Errorf("there are %d %s, not %d", len(*list), what, index+1)
+	}
+	*list = append((*list)[:index:index], (*list)[index+1:]...)
+	if len(*list) == 0 {
+		*list = nil
+	}
+	return nil
+}
+
+func setActionParamOn(list *[]agent.ActionSpec, r *agent.Registry, what string, index int, param, value string) error {
+	if index < 0 || index >= len(*list) {
+		return fmt.Errorf("there are %d %s, not %d", len(*list), what, index+1)
+	}
+	spec := &(*list)[index]
+	schema, ok := paramSchema(r, spec.Type, param)
+	if !ok {
+		return fmt.Errorf("%q does not take a parameter called %q", spec.Type, param)
+	}
+	return setParam(&spec.Params, &spec.Bare, schema, value)
 }
 
 // RemoveAction takes one action out of a state's list, by position.
@@ -67,14 +101,7 @@ func (s *Session) RemoveAction(path, statePath, kind string, index int) error {
 		if err != nil {
 			return err
 		}
-		if index < 0 || index >= len(*list) {
-			return fmt.Errorf("this state has %d %s actions, not %d", len(*list), kind, index+1)
-		}
-		*list = append((*list)[:index:index], (*list)[index+1:]...)
-		if len(*list) == 0 {
-			*list = nil
-		}
-		return nil
+		return removeActionFrom(list, kind+" actions on this state", index)
 	})
 }
 
@@ -98,53 +125,55 @@ func (s *Session) SetActionParam(path, statePath, kind string, index int, param,
 		if err != nil {
 			return err
 		}
-		if index < 0 || index >= len(*list) {
-			return fmt.Errorf("this state has %d %s actions, not %d", len(*list), kind, index+1)
-		}
-		spec := &(*list)[index]
-		schema, ok := paramSchema(s.registry(), spec.Type, param)
-		if !ok {
-			return fmt.Errorf("%q does not take a parameter called %q", spec.Type, param)
-		}
-		// Empty after trimming, so a field holding only spaces clears rather
-		// than storing them. A string parameter's value is *not* trimmed when
-		// it is stored: "  hi  " is something someone may have meant, and only
-		// a field with nothing in it is a field that was cleared.
-		if strings.TrimSpace(value) == "" {
-			delete(spec.Params, param)
-			if len(spec.Params) == 0 {
-				// No empty object left behind: it would emit as "params": {},
-				// which reads as a decision someone made.
-				spec.Params = nil
-				// And back to the bare string, which is the canonical spelling
-				// of an action with nothing on it.
-				//
-				// Restored rather than preserved, because it cannot be
-				// preserved: Edit clones by emitting and re-parsing, and an
-				// action carrying params emits as an object, so by the time the
-				// last one is cleared the file has already forgotten it was
-				// ever written as a bare string. Setting a parameter and
-				// changing your mind therefore left {"type": "dealDamage"}
-				// behind forever. This returns the common case — an action
-				// Forge itself added — to exactly what it was.
-				spec.Bare = true
-			}
-			return nil
-		}
-		converted, err := convert(schema, value)
-		if err != nil {
-			return err
-		}
-		if spec.Params == nil {
-			spec.Params = map[string]any{}
-		}
-		spec.Params[param] = converted
-		// Bare is deliberately not cleared. The emitter writes the bare string
-		// form only when Bare is set *and* there are no params, so an action
-		// carrying one emits as an object either way — and clearing the flag
-		// here would only make that state stick after the params went again.
-		return nil
+		return setActionParamOn(list, s.registry(), kind+" actions on this state", index, param, value)
 	})
+}
+
+// setParam writes one parameter into a spec's params, or clears it, restoring
+// the bare shorthand when the last one goes.
+//
+// One implementation for actions and for guards. ActionSpec and CondSpec carry
+// the same Params/Bare pair and the emitter applies the same rule to both, so
+// the writing rule is one rule; a second copy is how a guard grows a behaviour
+// an action does not have.
+func setParam(params *map[string]any, bare *bool, schema agent.ParamSchema, value string) error {
+	// Empty after trimming, so a field holding only spaces clears rather than
+	// storing them. A string parameter's value is *not* trimmed when it is
+	// stored: "  hi  " is something someone may have meant, and only a field
+	// with nothing in it is a field that was cleared.
+	if strings.TrimSpace(value) == "" {
+		delete(*params, schema.Name)
+		if len(*params) == 0 {
+			// No empty object left behind: it would emit as "params": {}, which
+			// reads as a decision someone made.
+			*params = nil
+			// And back to the bare string, which is the canonical spelling of
+			// an action or a guard with nothing on it.
+			//
+			// Restored rather than preserved, because it cannot be preserved:
+			// Edit clones by emitting and re-parsing, and one carrying params
+			// emits as an object, so by the time the last one is cleared the
+			// file has already forgotten it was ever written as a bare string.
+			// Setting a parameter and changing your mind therefore left
+			// {"type": "dealDamage"} behind forever. This returns the common
+			// case — one Forge itself added — to exactly what it was.
+			*bare = true
+		}
+		return nil
+	}
+	converted, err := convert(schema, value)
+	if err != nil {
+		return err
+	}
+	if *params == nil {
+		*params = map[string]any{}
+	}
+	(*params)[schema.Name] = converted
+	// Bare is deliberately not cleared. The emitter writes the bare string form
+	// only when Bare is set *and* there are no params, so one carrying a
+	// parameter emits as an object either way — and clearing the flag here
+	// would only make that state stick after the params went again.
+	return nil
 }
 
 // actionList picks the entry or the exit list, by name.
@@ -173,8 +202,15 @@ func paramSchema(r *agent.Registry, action, param string) (agent.ParamSchema, bo
 	if !ok {
 		return agent.ParamSchema{}, false
 	}
-	for _, p := range meta.Params {
-		if p.Name == param {
+	return schemaNamed(meta.Params, param)
+}
+
+// schemaNamed is the declaration of one parameter, from either an action's list
+// or a guard's — the two are the same []ParamSchema and the lookup is the same
+// lookup.
+func schemaNamed(params []agent.ParamSchema, name string) (agent.ParamSchema, bool) {
+	for _, p := range params {
+		if p.Name == name {
 			return p, true
 		}
 	}

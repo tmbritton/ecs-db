@@ -65,13 +65,83 @@ func actionParams(data Data, name string) []ParamSchema {
 	return nil
 }
 
+// ParamForm is one generated parameter form: what the registry declares, what
+// the file holds, and where a change goes.
+//
+// A struct rather than four arguments because there are four callers — a
+// state's entry actions, a state's exit actions, a transition's actions and a
+// transition's guard — and each of them builds it from something different.
+// Scope is what makes the test ids and the problem ids unique, and keeping
+// "entry-0" as a scope is what keeps Story 6's ids exactly as they were.
+type ParamForm struct {
+	Scope string
+	// What the form is generating for, in words — "action" or "guard". It ends
+	// up in the required-parameter message, which said "the action fails when
+	// it runs" under a guard's parameters once the form gained a second kind of
+	// caller. The form was generalised; its copy has to be too.
+	What   string
+	Params []ParamSchema
+	Values map[string]any
+	// Post builds the Datastar expression that sends one parameter's new value.
+	// A checkbox reports what it means through `checked` rather than `value`,
+	// which is the only reason the caller has to know which control it is.
+	Post func(param string, checkbox bool) string
+}
+
+// ActionList is a list of actions and the controls that change it: what is in
+// it, where an add goes, where a remove goes, and how to build the parameter
+// form for one of them.
+//
+// A struct for the same reason ParamForm is one. A state's entry list, a
+// state's exit list and a transition's actions are the same list with three
+// owners; the alternative is three templates that agree until one of them
+// grows a feature.
+type ActionList struct {
+	Title  string // "entry actions", "exit actions", "actions"
+	Scope  string // what keeps the three sets of test ids apart
+	Specs  []ActionSpec
+	Add    string
+	Remove func(index int) string
+	Form   func(index int, spec ActionSpec) ParamForm
+	// Note asks for the line saying the catalogue is closed. Once per panel,
+	// not once per list.
+	Note bool
+}
+
+// stateActionList is one of the two lists a state carries, in authored order —
+// which is the order they run in, so sorting them would be sorting the logic.
+func stateActionList(data Data, kind string) ActionList {
+	return ActionList{
+		Title:  kind + " actions",
+		Scope:  kind,
+		Specs:  stateActions(data, kind),
+		Add:    addActionAction(data, kind),
+		Remove: func(i int) string { return removeActionAction(data, kind, i) },
+		Form:   func(i int, spec ActionSpec) ParamForm { return stateActionForm(data, kind, i, spec) },
+		Note:   kind == "entry",
+	}
+}
+
+// stateActionForm is the form for one action in a state's entry or exit list.
+func stateActionForm(data Data, kind string, index int, spec agent.ActionSpec) ParamForm {
+	return ParamForm{
+		Scope:  kind + "-" + strconv.Itoa(index),
+		What:   "action",
+		Params: actionParams(data, spec.Type),
+		Values: spec.Params,
+		Post: func(param string, checkbox bool) string {
+			return paramAction(data, kind, index, param, checkbox)
+		},
+	}
+}
+
 // paramValue is what the file holds for one parameter, as a form field shows it.
 //
 // The value only. A registered default is a placeholder, never a value: writing
 // it in would put the default into the file as though someone had chosen it,
 // and there would then be no way to say "leave this alone".
-func paramValue(spec agent.ActionSpec, name string) string {
-	v, ok := spec.Params[name]
+func paramValue(values map[string]any, name string) string {
+	v, ok := values[name]
 	if !ok {
 		return ""
 	}
@@ -161,8 +231,8 @@ func paramHint(p ParamSchema) string {
 
 func paramIsObject(p ParamSchema) bool { return p.Type == "object" }
 
-func paramIsChecked(spec agent.ActionSpec, name string) bool {
-	v, ok := spec.Params[name]
+func paramIsChecked(values map[string]any, name string) bool {
+	v, ok := values[name]
 	if !ok {
 		return false
 	}
@@ -177,18 +247,18 @@ func paramIsChecked(spec agent.ActionSpec, name string) bool {
 // parameters. So "required and empty" is Forge's rule, not the engine's, and
 // blocking the save for it would be inventing a rule the engine does not have —
 // the same line internal/forge/validation draws for the ambiguity warning.
-func paramProblems(spec agent.ActionSpec, p ParamSchema) []components.Problem {
-	if !p.Required || paramValue(spec, p.Name) != "" {
+func paramProblems(values map[string]any, p ParamSchema, what string) []components.Problem {
+	if !p.Required || paramValue(values, p.Name) != "" {
 		return nil
 	}
 	return []components.Problem{{
 		Field:   p.Name,
-		Message: p.Name + " is required — the machine still loads, and the action fails when it runs.",
+		Message: p.Name + " is required — the machine still loads, and the " + what + " fails when it runs.",
 	}}
 }
 
-func paramProblemsID(kind string, index int, param string) string {
-	return components.ProblemsID("action", kind, strconv.Itoa(index), param)
+func paramProblemsID(scope, param string) string {
+	return components.ProblemsID("param", scope, param)
 }
 
 // initialLabel says what "set as initial" would do, naming the container it

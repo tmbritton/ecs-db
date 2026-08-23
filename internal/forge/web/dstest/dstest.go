@@ -60,6 +60,46 @@ var nonDatastarAttrs = map[string]bool{
 	"blocked": true,
 	// Whether a fields-table row has a validation message under it.
 	"problem": true,
+
+	// ── AGENTS: the canvas and the two inspectors ────────────────────────────
+	//
+	// The statechart carries most of its state in plain data attributes,
+	// because a browser test cannot read a class list usefully and canvas.js
+	// reads several of them to work out what was dragged onto what.
+	//
+	// Whether a machine in the list has unsaved work, and which file it is.
+	"dirty":   true,
+	"machine": true,
+	// Whether the working machine would load, so a test can assert the readout
+	// rather than the wording beside it.
+	"valid": true,
+	// What the canvas has selected, in one place, so a test does not have to
+	// find the marked element to find out.
+	"selection": true,
+	// A node's dotted path and a state's kind — canvas.js reads the first to
+	// say what was dragged, and both are how a test addresses a node.
+	"path": true,
+	"kind": true,
+	// Whether a node is the one its container enters, and whether it is
+	// selected: both are drawn as marks that a test cannot read back.
+	"initial":  true,
+	"selected": true,
+	// An edge's guard, its resolved target, and whether it resolves at all.
+	// The first two are asserted directly when an edit is expected to change
+	// them without a reload.
+	"guard":    true,
+	"to":       true,
+	"dangling": true,
+	// The action an inspector row is for, and the registry type its parameter
+	// input was generated from — the claim "this control came from the
+	// registry's schema" is otherwise unassertable.
+	"action":     true,
+	"param-type": true,
+	// Which row of a transition order is the selected one.
+	"current": true,
+	// Whether a problem stops the save, which is the difference the badge and
+	// the hue carry and which a test should not have to read off a class.
+	"blocking": true,
 }
 
 // Plugins reads the plugin names the vendored bundle registers.

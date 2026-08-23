@@ -123,8 +123,8 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 		"delete-state", "entry-actions", "exit-actions", "catalogue-is-closed",
 		"add-entry-action", "add-exit-action",
 		"entry-action-0", "remove-entry-0", "entry-desc-0",
-		"entry-param-0-amount", "input-entry-0-amount", "problem-entry-0-amount",
-		"entry-param-0-target", "input-entry-0-target",
+		"param-entry-0-amount", "input-entry-0-amount", "problem-entry-0-amount",
+		"param-entry-0-target", "input-entry-0-target",
 	})
 
 	// The ones that only render in the other states, which no other test would
@@ -134,6 +134,21 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	assertModeTestIDs(t, empty.String(), []string{"inspector-empty"})
+
+	// 13-transition-inspector.spec.js selects on these.
+	transition := transitionFixture(t, guardedGo)
+	var edge bytes.Buffer
+	if err := AgentsMode(transition).Render(context.Background(), &edge); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	assertModeTestIDs(t, edge.String(), []string{
+		"transition-inspector", "transition-route", "transition-event",
+		"transition-target", "transition-guard", "delete-transition",
+		"param-guard-distance", "input-guard-distance", "problem-guard-target",
+		"taction-actions", "add-taction-action",
+		"transition-order", "order-note", "order-0", "order-1",
+		"move-up-0", "move-down-0", "move-up-1", "move-down-1",
+	})
 
 	notInitial := inspectorFixture(t, "state:combat")
 	var other bytes.Buffer

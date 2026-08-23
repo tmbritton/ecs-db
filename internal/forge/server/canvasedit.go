@@ -10,10 +10,14 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
@@ -91,6 +95,15 @@ func (s *Server) handleStateEdit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleTransitionEdit dispatches on a named operation rather than on which
+// parameter is present, which is what the state, schema, ents and machine
+// editors do.
+//
+// Deliberately different, for a reason the others do not have: two of these
+// write an *empty* value on purpose. Clearing a target makes a transition
+// internal — it runs its actions and changes no state — and clearing a guard
+// removes the cond. A dispatch keyed on "which parameter is non-empty" cannot
+// tell either of those from a parameter nobody sent.
 func (s *Server) handleTransitionEdit(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.machineSession(w)
 	if !ok {
@@ -103,32 +116,155 @@ func (s *Server) handleTransitionEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch {
-	case q.Get("connect") != "":
-		if _, err := sess.AddTransition(path, q.Get("connect"), q.Get("to")); err != nil {
+	// connect is the canvas's, not the panel's, and names two states rather
+	// than a transition — so it is answered before the ref is parsed.
+	if q.Get("op") == "connect" {
+		if _, err := sess.AddTransition(path, q.Get("from"), q.Get("to")); err != nil {
 			s.refuseMachineEdit(w, r, err)
 			return
 		}
-	case q.Get("delete") != "":
-		// By its parts. The chart's edge id joins source, kind, event and index
-		// with bars, and a state name or an event name may contain one, so
-		// splitting it back apart is guesswork.
-		index, err := strconv.Atoi(q.Get("index"))
-		if err != nil {
-			s.refuseMachineEdit(w, r, fmt.Errorf("which transition: %w", err))
-			return
-		}
-		if err := sess.DeleteTransition(path, q.Get("delete"), q.Get("kind"), q.Get("event"), index); err != nil {
-			s.refuseMachineEdit(w, r, err)
-			return
-		}
-	default:
-		s.refuseMachineEdit(w, r, fmt.Errorf("no transition operation named"))
+		s.transitionEdited(w)
 		return
 	}
+
+	ref, err := transitionRef(q)
+	if err != nil {
+		s.refuseMachineEdit(w, r, err)
+		return
+	}
+	value := q.Get("value")
+	// moved is set by the two operations that relocate the transition, and is
+	// what the answer redirects to.
+	var moved *machines.TransitionRef
+	// cleared is a delete: the transition that was selected is gone, and every
+	// sibling after it moved down one — so the selection cannot stay where it
+	// is either. It names nothing rather than naming the survivor that took the
+	// index, which a second Delete would then remove.
+	cleared := false
+	switch op := q.Get("op"); op {
+	case "delete":
+		err = sess.DeleteTransition(path, ref)
+		cleared = true
+	case "event":
+		var to machines.TransitionRef
+		to, err = sess.SetTransitionEvent(path, ref, value)
+		moved = &to
+	case "target":
+		err = sess.SetTransitionTarget(path, ref, value)
+	case "guard":
+		err = sess.SetTransitionGuard(path, ref, value)
+	case "guardparam":
+		err = sess.SetGuardParam(path, ref, q.Get("param"), value)
+	case "addaction":
+		err = sess.AddTransitionAction(path, ref, value)
+	case "removeaction":
+		var index int
+		if index, err = actionIndex(q); err == nil {
+			err = sess.RemoveTransitionAction(path, ref, index)
+		}
+	case "actionparam":
+		var index int
+		if index, err = actionIndex(q); err == nil {
+			err = sess.SetTransitionActionParam(path, ref, index, q.Get("param"), value)
+		}
+	case "move":
+		var by int
+		if by, err = strconv.Atoi(q.Get("by")); err != nil {
+			err = fmt.Errorf("how far to move: %w", err)
+			break
+		}
+		var to machines.TransitionRef
+		to, err = sess.MoveTransition(path, ref, by)
+		moved = &to
+	default:
+		err = fmt.Errorf("%q is not something a transition can do", op)
+	}
+	if err != nil {
+		s.refuseMachineEditOn(w, r, transitionField(q), err)
+		return
+	}
+	switch {
+	case cleared:
+		s.redirectToMachine(w, r, q.Get("machine"), "")
+	case moved != nil && *moved != ref:
+		// The chart's edge id is positional, so renaming an event or reordering
+		// moves the thing that is selected — and only the session knows where
+		// it went, because moving onto an event that already exists appends.
+		// Selection lives in the URL, so following it is a navigation.
+		//
+		// Only when it actually moved: renaming an event to the name it already
+		// has is a no-op, and answering it with a navigation would make a
+		// stray blur reload the page.
+		s.redirectToMachine(w, r, q.Get("machine"),
+			chart.SelEdge+chart.EdgeID(moved.From, moved.Kind, moved.Event, moved.Index))
+	default:
+		s.transitionEdited(w)
+	}
+}
+
+func (s *Server) transitionEdited(w http.ResponseWriter) {
 	s.setEditProblem("")
 	s.closeCanvasMenu()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// transitionRef is which transition an op is about, from the four fields that
+// address one.
+func transitionRef(q url.Values) (machines.TransitionRef, error) {
+	index, err := strconv.Atoi(q.Get("index"))
+	if err != nil {
+		return machines.TransitionRef{}, fmt.Errorf("which transition: %w", err)
+	}
+	return machines.TransitionRef{
+		From: q.Get("from"), Kind: q.Get("kind"), Event: q.Get("event"), Index: index,
+	}, nil
+}
+
+func actionIndex(q url.Values) (int, error) {
+	index, err := strconv.Atoi(q.Get("action"))
+	if err != nil {
+		return 0, fmt.Errorf("which action: %w", err)
+	}
+	return index, nil
+}
+
+// transitionField is the panel field an op's refusal belongs against, so a
+// duration the engine cannot read is reported where it was typed rather than
+// only in the banner at the top of the page.
+//
+// Three of the ten ops, and empty for the rest. A refused delete or move is
+// about the transition rather than about one control, and a refused *parameter*
+// goes to the banner exactly as every action parameter's does — the generated
+// form has one problem slot per parameter and it carries the registry's
+// "required" warning, not the last refusal. Naming a field nothing renders
+// would be a claim with nothing behind it.
+func transitionField(q url.Values) string {
+	switch q.Get("op") {
+	case "event":
+		return "event"
+	case "target":
+		return "target"
+	case "guard":
+		return "guard"
+	default:
+		return ""
+	}
+}
+
+// redirectToMachine answers with the machine's page carrying a given selection,
+// over SSE, because a 204 cannot change the URL and the URL is where selection
+// lives. An empty sel selects nothing.
+func (s *Server) redirectToMachine(w http.ResponseWriter, r *http.Request, machine, sel string) {
+	s.setEditProblem("")
+	s.closeCanvasMenu()
+	q := url.Values{"machine": {machine}}
+	if sel != "" {
+		q.Set("sel", sel)
+	}
+	sse := datastar.NewSSE(w, r)
+	if err := sse.Redirect("/forge/agents?" + q.Encode()); err != nil {
+		slog.ErrorContext(r.Context(), "transition redirect", "err", err)
+	}
 }
 
 // handleActionEdit adds, removes and fills in a state's entry and exit actions.

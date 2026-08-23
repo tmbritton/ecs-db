@@ -1,0 +1,172 @@
+package modes
+
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
+// inspectorRail is the right rail: whichever of the two panels the selection
+// calls for.
+//
+// One rail and not two stacked, because one thing is selected at a time —
+// structural rather than a rule about which of the two wins, the same decision
+// the ?sel= parameter made in Story 4.
+templ inspectorRail(data Data) {
+	if selectedTransition(data) != nil {
+		@transitionInspector(data)
+	} else {
+		@stateInspector(data)
+	}
+}
+
+// transitionInspector is what the selected transition is, and the controls that
+// change it: what fires it, where it goes, what gates it, what it runs on the
+// way through, and where it sits among the transitions that share its event.
+//
+// The last of those is the machine's logic and not its presentation. XState
+// takes the first transition on an event whose guard passes, so the order of
+// that list decides what the machine does.
+templ transitionInspector(data Data) {
+	{{ e := selectedEdge(data) }}
+	{{ t := selectedTransition(data) }}
+	<aside class="inspector" aria-label="Transition inspector" data-testid="transition-inspector">
+		<div class="section-heading"><span>Transition</span></div>
+		<p class="inspector__route mono" data-testid="transition-route">{ transitionRoute(*e) }</p>
+
+		// Pointed at only when there is a message to point at: an
+		// aria-describedby naming an id nothing carries is the same as none at
+		// all and looks identical, which is the failure it exists to prevent.
+		{{ eventProblems := fieldProblems(data, "event") }}
+		<label class="inspector__row">
+			<span class="inspector__label">{ eventLabel(*e) }</span>
+			<input
+				class="inspector__input mono"
+				type="text"
+				value={ e.Event }
+				if !isAfter(*e) {
+					list="transition-events"
+				}
+				data-testid="transition-event"
+				if len(eventProblems) > 0 {
+					aria-describedby={ fieldProblemsID("event") }
+					aria-invalid="true"
+				}
+				data-on:change={ setEventAction(data, *e) }
+			/>
+		</label>
+		// Suggestions that do not prevent a new one. An event name is authored
+		// rather than registered — any string is legal — so nothing can
+		// validate one, and a typo makes a transition that simply never fires.
+		//
+		// Offered only for an event. An after transition's key is a duration,
+		// and every one of these would be refused by ParseDurationMs the moment
+		// it was chosen.
+		<datalist id="transition-events">
+			for _, name := range data.EventNames {
+				<option value={ name }></option>
+			}
+		</datalist>
+		if isAfter(*e) {
+			<p class="inspector__note" data-testid="duration-hint">
+				A number is milliseconds. <span class="mono">1s</span> and
+				<span class="mono">1.5s</span> work; <span class="mono">1 second</span> does not.
+			</p>
+		}
+		@components.Problems(components.ProblemsProps{
+			ID:       fieldProblemsID("event"),
+			Problems: eventProblems,
+			Testid:   "problem-transition-event",
+		})
+
+		<div data-testid="transition-target">
+			@components.Dropdown(components.DropdownProps{
+				Label:     "target",
+				Signal:    "",
+				Selected:  selectedTarget(*e),
+				Options:   targetOptions(data, *e),
+				Action:    setTargetAction(data, *e),
+				Problems:  fieldProblems(data, "target"),
+				ProblemID: fieldProblemsID("target"),
+			})
+		</div>
+
+		<div data-testid="transition-guard">
+			@components.Dropdown(components.DropdownProps{
+				Label:     "guard",
+				Signal:    "",
+				Selected:  guardName(t),
+				Options:   guardOptions(data, t),
+				Action:    setGuardAction(data, *e),
+				Problems:  fieldProblems(data, "guard"),
+				ProblemID: fieldProblemsID("guard"),
+			})
+		</div>
+		if guardName(t) != "" {
+			@paramForm(guardForm(data, *e, t))
+		}
+
+		@actionList(data, transitionActionList(data, *e, t))
+
+		@transitionOrder(data, *e)
+
+		<button
+			type="button"
+			class="btn--danger inspector__delete"
+			data-testid="delete-transition"
+			data-on:click={ deleteTransitionAction(data, *e) }
+		>Delete transition</button>
+	</aside>
+}
+
+// transitionOrder is the transitions sharing this one's event, in the order
+// XState tries them.
+//
+// Rendered only when there is more than one, because with one there is no
+// order — and a panel that showed a list of one would be inviting a reorder
+// that cannot happen.
+templ transitionOrder(data Data, e ChartEdge) {
+	{{ siblings := transitionSiblings(data, e) }}
+	if len(siblings) > 1 {
+		<div class="inspector__order" data-testid="transition-order">
+			<div class="section-heading"><span>order on { e.Event }</span></div>
+			<p class="inspector__note" data-testid="order-note">
+				XState takes the first one whose guard passes. This order is the machine's
+				logic, not its layout.
+			</p>
+			<ol class="order-list">
+				for i, sibling := range siblings {
+					<li
+						class={ "order-row", kv("order-row--current", i == e.Index),
+							kv("order-row--unreachable", isUnreachable(siblings, i)) }
+						data-testid={ "order-" + itoa(i) }
+						data-current={ boolAttr(i == e.Index) }
+					>
+						<span class="order-row__label mono">{ orderLabel(sibling) }</span>
+						<button
+							type="button"
+							class="order-row__move"
+							data-testid={ "move-up-" + itoa(i) }
+							aria-label={ "Move " + orderLabel(sibling) + " earlier" }
+							disabled?={ i == 0 }
+							data-on:click={ moveTransitionAction(data, e, i, -1) }
+						>↑</button>
+						<button
+							type="button"
+							class="order-row__move"
+							data-testid={ "move-down-" + itoa(i) }
+							aria-label={ "Move " + orderLabel(sibling) + " later" }
+							disabled?={ i == len(siblings)-1 }
+							data-on:click={ moveTransitionAction(data, e, i, 1) }
+						>↓</button>
+					</li>
+				}
+			</ol>
+			if unreachableFrom(siblings) >= 0 {
+				// A warning and not an error: ValidateMachine does not check
+				// this, and blocking the save for it would invent a rule the
+				// engine does not have.
+				<p class="inspector__warn" data-testid="unreachable-warning">
+					Everything below the first unguarded transition is unreachable — an
+					unconditional guard always passes.
+				</p>
+			}
+		</div>
+	}
+}

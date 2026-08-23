@@ -287,7 +287,9 @@ test("accessibility", async ({ page }) => {
   const described = await amount.getAttribute("aria-describedby");
   expect(described, "the input points at no message").toBeTruthy();
   await expect(page.locator(`#${described}`)).toContainText("amount is required");
-  await expect(amount).toHaveAttribute("aria-invalid", "true");
+  // And not marked invalid: this is a warning, the file is one the engine
+  // accepts, and the save is not blocked — aria-invalid would say otherwise.
+  await expect(amount).not.toHaveAttribute("aria-invalid", "true");
 
   // The remove control is a named button, not a bare glyph.
   await expect(byTestId(page, "remove-entry-0")).toHaveAccessibleName(/remove dealDamage/i);

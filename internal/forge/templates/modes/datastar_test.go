@@ -36,10 +36,17 @@ func TestModes_DatastarAttributesResolve(t *testing.T) {
 	}
 	data.Confirming = true
 
-	// Both modes. Scanning only SCHEMA left every handler in ENTS unchecked —
-	// which is how the exemption for data-type came to be added for an
-	// attribute no scan ever saw.
-	seen := dstest.AssertAttrs(t, plugins, renderMode(t, data), renderEnts(t, entsWithSelection()))
+	// Every mode that emits handlers. Scanning only SCHEMA left every handler in
+	// ENTS unchecked — which is how the exemption for data-type came to be
+	// added for an attribute no scan ever saw. AGENTS was the same gap: the
+	// canvas and both inspectors carry more data-on: bindings than the other
+	// two modes together, and a Datastar attribute naming a plugin that does
+	// not exist renders perfectly and does nothing.
+	seen := dstest.AssertAttrs(t, plugins,
+		renderMode(t, data),
+		renderEnts(t, entsWithSelection()),
+		renderAgents(t, transitionFixture(t, guardedGo)),
+		renderAgents(t, inspectorFixture(t, "state:idle")))
 	// Without this the scan passes on a template that emits no handlers at all.
 	dstest.RequireSeen(t, seen, "on:click", "on:change", "testid", "type")
 }

@@ -34,7 +34,7 @@ func TestCanvasMove_AddsTheDeltaToTheRecordedPosition(t *testing.T) {
 	q := "&machine=" + url.QueryEscape(machine)
 
 	if code := post(t, srv, "/forge/agents/state?move=idle&dx=25&dy=-10"+q); code != 204 {
-		t.Fatalf("move: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("move: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
 	meta := string(def.States["idle"].Extra["meta"])
@@ -68,7 +68,7 @@ func TestCanvasMove_MovesANestedStateFromWhereTheFileSaysItIs(t *testing.T) {
 	}
 
 	if code := post(t, srv, "/forge/agents/state?move=combat.attacking&dx=7&dy=3"+q); code != 204 {
-		t.Fatalf("move: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("move: %d (%s)", code, problemOf(s))
 	}
 	def, _ = s.cfg.MachineSession.Working(machine)
 	after, _ := findNodeIn(chart.Build(def, "").Nodes, "combat.attacking")
@@ -95,7 +95,7 @@ func TestCanvasMove_RefusesACoordinateThatIsNotOne(t *testing.T) {
 		if code := post(t, srv, "/forge/agents/state?move=idle&"+bad+q); code != 204 {
 			t.Fatalf("unexpected status %d", code)
 		}
-		if s.lastEditProblem() == "" {
+		if problemOf(s) == "" {
 			t.Errorf("%q was accepted as a position", bad)
 		}
 	}
@@ -106,7 +106,7 @@ func TestCanvasAdd_PutsTheStateWhereThePointerWas(t *testing.T) {
 	q := "&machine=" + url.QueryEscape(machine)
 
 	if code := post(t, srv, "/forge/agents/state?add=1&x=300&y=120"+q); code != 204 {
-		t.Fatalf("add: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("add: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
 	added := addedState(t, def, "idle", "moving", "combat")
@@ -139,7 +139,7 @@ func TestCanvasAdd_TakesTheCanvasesOwnShiftBackOff(t *testing.T) {
 	}
 
 	if code := post(t, srv, "/forge/agents/state?add=1&x=200&y=200&machine="+url.QueryEscape(machine)); code != 204 {
-		t.Fatalf("add: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("add: %d (%s)", code, problemOf(s))
 	}
 	def, _ = s.cfg.MachineSession.Working(machine)
 	added := addedState(t, def, "idle")
@@ -199,8 +199,8 @@ func TestCanvasConnect_CreatesATransitionAndNamesItsEvent(t *testing.T) {
 	s, srv, machine := canvasFixture(t)
 	q := "&machine=" + url.QueryEscape(machine)
 
-	if code := post(t, srv, "/forge/agents/transition?connect=moving&to=combat.attacking"+q); code != 204 {
-		t.Fatalf("connect: %d (%s)", code, s.lastEditProblem())
+	if code := post(t, srv, "/forge/agents/transition?op=connect&from=moving&to=combat.attacking"+q); code != 204 {
+		t.Fatalf("connect: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
 	if len(def.States["moving"].On) != 1 {
@@ -220,8 +220,10 @@ func TestCanvasDisconnect_RemovesTheTransitionNamed(t *testing.T) {
 	s, srv, machine := canvasFixture(t)
 	q := "&machine=" + url.QueryEscape(machine)
 
-	if code := post(t, srv, "/forge/agents/transition?delete=idle&kind=on&event=GO&index=0"+q); code != 204 {
-		t.Fatalf("delete: %d (%s)", code, s.lastEditProblem())
+	// 200 and not 204: a delete shifts every later index, so it answers with a
+	// redirect that lets go of the selection.
+	if code := post(t, srv, "/forge/agents/transition?op=delete&from=idle&kind=on&event=GO&index=0"+q); code != 200 {
+		t.Fatalf("delete: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
 	if _, ok := def.States["idle"].On["GO"]; ok {
@@ -234,10 +236,10 @@ func TestCanvasDisconnect_RefusesAnIndexThatIsNotANumber(t *testing.T) {
 	q := "&machine=" + url.QueryEscape(machine)
 
 	s.setEditProblem("")
-	if code := post(t, srv, "/forge/agents/transition?delete=idle&kind=on&event=GO&index=first"+q); code != 204 {
+	if code := post(t, srv, "/forge/agents/transition?op=delete&from=idle&kind=on&event=GO&index=first"+q); code != 204 {
 		t.Fatalf("unexpected status %d", code)
 	}
-	if s.lastEditProblem() == "" {
+	if problemOf(s) == "" {
 		t.Error("a non-numeric index was accepted")
 	}
 }
@@ -250,15 +252,15 @@ func TestCanvasEdits_RefuseAMachineThisProjectDoesNotHaveOpen(t *testing.T) {
 	for _, target := range []string{
 		"/forge/agents/state?move=idle&dx=1&dy=1&machine=/etc/passwd",
 		"/forge/agents/state?add=1&x=1&y=1&machine=/etc/passwd",
-		"/forge/agents/transition?connect=idle&to=moving&machine=/etc/passwd",
-		"/forge/agents/transition?delete=idle&kind=on&event=GO&index=0&machine=/etc/passwd",
+		"/forge/agents/transition?op=connect&from=idle&to=moving&machine=/etc/passwd",
+		"/forge/agents/transition?op=delete&from=idle&kind=on&event=GO&index=0&machine=/etc/passwd",
 	} {
 		s.setEditProblem("")
 		if code := post(t, srv, target); code != 204 {
 			t.Fatalf("unexpected status %d for %s", code, target)
 		}
-		if !strings.Contains(s.lastEditProblem(), "not a machine this project has open") {
-			t.Errorf("%s was not refused: %q", target, s.lastEditProblem())
+		if !strings.Contains(problemOf(s), "not a machine this project has open") {
+			t.Errorf("%s was not refused: %q", target, problemOf(s))
 		}
 	}
 }
@@ -278,7 +280,7 @@ func TestCanvasMenu_OpensOverWhatWasClickedAndClosesOnTheNextEdit(t *testing.T) 
 	// An edit closes it: a menu left open over a machine that has just changed
 	// describes something that may no longer be there.
 	if code := post(t, srv, "/forge/agents/state?initial=moving"+q); code != 204 {
-		t.Fatalf("set initial: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("set initial: %d (%s)", code, problemOf(s))
 	}
 	if s.openCanvasMenu().Open {
 		t.Error("the menu is still open over a machine that has changed")
@@ -332,11 +334,11 @@ func TestCanvasEdits_DoNotTouchTheFile(t *testing.T) {
 	for _, target := range []string{
 		"/forge/agents/state?move=idle&dx=5&dy=5",
 		"/forge/agents/state?add=1&x=9&y=9",
-		"/forge/agents/transition?connect=moving&to=idle",
+		"/forge/agents/transition?op=connect&from=moving&to=idle",
 		"/forge/agents/state?initial=moving",
 	} {
 		if code := post(t, srv, target+q); code != 204 {
-			t.Fatalf("%s: %d (%s)", target, code, s.lastEditProblem())
+			t.Fatalf("%s: %d (%s)", target, code, problemOf(s))
 		}
 	}
 	after, err := os.ReadFile(machine)
@@ -387,7 +389,7 @@ func TestCanvasState_RenameAndDeleteReachTheSession(t *testing.T) {
 	if code := post(t, srv, "/forge/agents/state?rename=moving&to=running"+q); code != 204 {
 		t.Fatalf("rename: %d", code)
 	}
-	if got := s.lastEditProblem(); got != "" {
+	if got := problemOf(s); got != "" {
 		t.Fatalf("rename was refused: %s", got)
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
@@ -398,7 +400,7 @@ func TestCanvasState_RenameAndDeleteReachTheSession(t *testing.T) {
 	if code := post(t, srv, "/forge/agents/state?delete=running"+q); code != 204 {
 		t.Fatalf("delete: %d", code)
 	}
-	if got := s.lastEditProblem(); got != "" {
+	if got := problemOf(s); got != "" {
 		t.Fatalf("delete was refused: %s", got)
 	}
 	def, _ = s.cfg.MachineSession.Working(machine)
@@ -416,7 +418,7 @@ func TestCanvasState_RefusesANameTheEngineCannotUse(t *testing.T) {
 	for _, bad := range []string{"a.b", "", "idle"} {
 		s.setEditProblem("")
 		post(t, srv, "/forge/agents/state?rename=moving&to="+url.QueryEscape(bad)+q)
-		if s.lastEditProblem() == "" {
+		if problemOf(s) == "" {
 			t.Errorf("%q was accepted as a state name", bad)
 		}
 	}
@@ -433,8 +435,8 @@ func TestCanvasMove_RefusesACoordinateThatIsNotFinite(t *testing.T) {
 		if code := post(t, srv, "/forge/agents/state?move=idle&"+bad+q); code != 204 {
 			t.Fatalf("unexpected status %d", code)
 		}
-		if !strings.Contains(s.lastEditProblem(), "finite") {
-			t.Errorf("%q was accepted: %q", bad, s.lastEditProblem())
+		if !strings.Contains(problemOf(s), "finite") {
+			t.Errorf("%q was accepted: %q", bad, problemOf(s))
 		}
 	}
 }
@@ -446,7 +448,7 @@ func TestActionEdit_AddsRemovesAndFillsIn(t *testing.T) {
 	q := "&machine=" + url.QueryEscape(machine) + "&state=idle&kind=entry"
 
 	if code := post(t, srv, "/forge/agents/action?add=dealDamage"+q); code != 204 {
-		t.Fatalf("add: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("add: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)
 	if len(def.States["idle"].Entry) != 1 {
@@ -454,7 +456,7 @@ func TestActionEdit_AddsRemovesAndFillsIn(t *testing.T) {
 	}
 
 	if code := post(t, srv, "/forge/agents/action?index=0&param=amount&value=7"+q); code != 204 {
-		t.Fatalf("param: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("param: %d (%s)", code, problemOf(s))
 	}
 	def, _ = s.cfg.MachineSession.Working(machine)
 	if got := def.States["idle"].Entry[0].Params["amount"]; got != float64(7) {
@@ -462,7 +464,7 @@ func TestActionEdit_AddsRemovesAndFillsIn(t *testing.T) {
 	}
 
 	if code := post(t, srv, "/forge/agents/action?remove=0"+q); code != 204 {
-		t.Fatalf("remove: %d (%s)", code, s.lastEditProblem())
+		t.Fatalf("remove: %d (%s)", code, problemOf(s))
 	}
 	def, _ = s.cfg.MachineSession.Working(machine)
 	if len(def.States["idle"].Entry) != 0 {
@@ -488,7 +490,7 @@ func TestActionEdit_ReportsWhatItRefuses(t *testing.T) {
 		if code := post(t, srv, tc.target); code != 204 {
 			t.Fatalf("%s: unexpected status %d", tc.name, code)
 		}
-		if s.lastEditProblem() == "" {
+		if problemOf(s) == "" {
 			t.Errorf("%s was accepted", tc.name)
 		}
 	}
@@ -519,8 +521,8 @@ func TestActionEdit_RefusesAMachineThisProjectDoesNotHaveOpen(t *testing.T) {
 	s, srv, _ := canvasFixture(t)
 	s.setEditProblem("")
 	post(t, srv, "/forge/agents/action?add=log&state=idle&kind=entry&machine=/etc/passwd")
-	if !strings.Contains(s.lastEditProblem(), "not a machine this project has open") {
-		t.Errorf("an action edit on an unopened machine was not refused: %q", s.lastEditProblem())
+	if !strings.Contains(problemOf(s), "not a machine this project has open") {
+		t.Errorf("an action edit on an unopened machine was not refused: %q", problemOf(s))
 	}
 }
 

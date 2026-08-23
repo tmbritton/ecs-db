@@ -483,14 +483,24 @@ func replaceIn(list []string, from, to string) []string {
 	return list
 }
 
-func (s *Server) setEditProblem(msg string) {
+func (s *Server) setEditProblem(msg string) { s.setEditProblemOn("", msg) }
+
+// setEditProblemOn records the refusal and which field it was about, together —
+// one write, because a field left over from an earlier refusal would make the
+// next one point at the wrong control.
+func (s *Server) setEditProblemOn(field, msg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.editProblem = msg
+	s.editProblemField = field
 }
 
-func (s *Server) lastEditProblem() string {
+// lastEditProblem is why the last edit was refused and which control it was
+// about, together — the pair setEditProblemOn writes under one lock, read back
+// under one lock. Two acquisitions could pair one refusal's message with the
+// next one's field, which is the same defect the write side avoids.
+func (s *Server) lastEditProblem() (string, string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editProblem
+	return s.editProblem, s.editProblemField
 }

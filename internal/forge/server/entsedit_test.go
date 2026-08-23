@@ -329,8 +329,8 @@ func TestEntsRoutes_ThePlaceholderIsNotAnEdit(t *testing.T) {
 	if code := post(t, srv, "/forge/ents/component?type=Player&require="); code != 204 {
 		t.Fatalf("choosing the placeholder: %d", code)
 	}
-	if s.lastEditProblem() != "" {
-		t.Errorf("the placeholder reported a problem: %q", s.lastEditProblem())
+	if problemOf(s) != "" {
+		t.Errorf("the placeholder reported a problem: %q", problemOf(s))
 	}
 	var after schema.EntityType
 	sess.Read(func(d schema.DatabaseSchema) { after = d.EntityTypes["Player"] })
@@ -347,7 +347,7 @@ func TestEntsRoutes_ARefusedDetachExplainsItself(t *testing.T) {
 	if code := post(t, srv, "/forge/ents/component?type=Player&detach=Position"); code != 204 {
 		t.Fatalf("detaching a required component: %d", code)
 	}
-	if s.lastEditProblem() == "" {
+	if problemOf(s) == "" {
 		t.Error("a refused detach left nothing on screen to explain it")
 	}
 	var got schema.EntityType

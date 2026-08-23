@@ -212,8 +212,8 @@ func dropAction(data Data) string {
 	return "evt.detail.action === 'move' " +
 		"? @post('/forge/agents/state?" + machine +
 		"&move=' + encodeURIComponent(evt.detail.path) + '&dx=' + evt.detail.dx + '&dy=' + evt.detail.dy) " +
-		": @post('/forge/agents/transition?" + machine +
-		"&connect=' + encodeURIComponent(evt.detail.from) + '&to=' + encodeURIComponent(evt.detail.to))"
+		": @post('/forge/agents/transition?op=connect&" + machine +
+		"&from=' + encodeURIComponent(evt.detail.from) + '&to=' + encodeURIComponent(evt.detail.to))"
 }
 
 // addStateAction adds a state where the pointer is.
@@ -286,7 +286,7 @@ func canvasMenuItems(data Data) []components.MenuItem {
 		return []components.MenuItem{{
 			Label:  "Delete transition",
 			Danger: true,
-			Action: "@post('/forge/agents/transition?" + machine + "&delete=" + urlValue(m.From) +
+			Action: "@post('/forge/agents/transition?op=delete&" + machine + "&from=" + urlValue(m.From) +
 				"&kind=" + urlValue(m.EdgeKind) + "&event=" + urlValue(m.Event) + "&index=" + urlValue(m.Index) + "')",
 		}}
 	default:
@@ -324,12 +324,8 @@ func shortName(path string) string {
 	return path
 }
 
-// edgeIndex is which of the transitions on one event this edge is, taken back
-// out of the id the chart built. The last field, and the only one that cannot
-// contain a bar.
-func edgeIndex(e ChartEdge) string {
-	if i := strings.LastIndex(e.ID, "|"); i >= 0 {
-		return e.ID[i+1:]
-	}
-	return "0"
-}
+// edgeIndex is which of the transitions on one event this edge is.
+//
+// Read off the edge rather than taken back out of its id, which joins four
+// fields with bars — two of which may contain one.
+func edgeIndex(e ChartEdge) string { return strconv.Itoa(e.Index) }

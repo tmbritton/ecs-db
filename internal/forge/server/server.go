@@ -107,6 +107,10 @@ type Server struct {
 	// by a full page load, so a stale explanation never outlives the state it
 	// described or leaks into a tab that did nothing wrong.
 	editProblem string
+	// editProblemField is the control that refusal was about, so a panel can
+	// report it where the mistake was made. Empty for a refusal about no one
+	// control, which is most of them.
+	editProblemField string
 	// canvasMenu is the right-click menu the statechart has open, if any.
 	//
 	// Per server rather than per page, which is the same limitation
@@ -331,6 +335,14 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			// one someone opened the editor to fix.
 			data.Chart = chart.Build(data.Machine, r.URL.Query().Get("sel"))
 			data.Actions = s.cfg.MachineSession.ActionCatalogue()
+			data.Guards = s.cfg.MachineSession.GuardCatalogue()
+			// From the definition already in hand, not through the session: a
+			// Session.Read clones by emitting and re-parsing the whole machine,
+			// so asking for these here would serialise and re-parse it twice
+			// more every stream tick — and build the dropdowns from a different
+			// snapshot than the chart beside them.
+			data.StateTargets = machines.StateTargets(data.Machine)
+			data.EventNames = machines.EventNames(data.Machine)
 			data.SelectedState = selectedState(data.Machine, data.Chart.Selected)
 			data.SelectedStateWarning = s.canvasDeleteWarning(data.SelectedMachine, CanvasMenu{
 				Kind: "state", State: strings.TrimPrefix(data.Chart.Selected, chart.SelState), Open: data.SelectedState != nil,
@@ -341,7 +353,10 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			data.NewMachineID = s.cfg.MachineSession.FreeID("NewMachine")
 		}
 	}
-	data.Problem = s.lastEditProblem()
+	// Both from one acquisition. They are written together for a reason — a
+	// field left over from an earlier refusal would make the next one point at
+	// the wrong control — and reading them apart would undo that.
+	data.Problem, data.ProblemField = s.lastEditProblem()
 	data.Confirming = s.isConfirming()
 	// The preview costs a database open and a full introspection, so it is
 	// computed only where it is read: the panel is SCHEMA's, and the

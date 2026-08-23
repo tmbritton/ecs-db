@@ -615,14 +615,14 @@ func TestEditHandlers_RecordAndClearTheProblem(t *testing.T) {
 	if code := postTo(t, srv, "/forge/schema/component?add=Behavior"); code != 204 {
 		t.Fatalf("status = %d, want 204 — the outcome travels on the stream", code)
 	}
-	if got := s.lastEditProblem(); !strings.Contains(got, "reserved") {
+	if got := problemOf(s); !strings.Contains(got, "reserved") {
 		t.Errorf("problem = %q, want the reason recorded", got)
 	}
 
 	if code := postTo(t, srv, "/forge/schema/version"); code != 204 {
 		t.Fatalf("status = %d", code)
 	}
-	if got := s.lastEditProblem(); got != "" {
+	if got := problemOf(s); got != "" {
 		t.Errorf("problem = %q, want it cleared by a successful edit", got)
 	}
 }
@@ -634,11 +634,11 @@ func TestModePage_ClearsAStaleEditProblem(t *testing.T) {
 	if code := postTo(t, srv, "/forge/schema/component?add=Behavior"); code != 204 {
 		t.Fatalf("status = %d", code)
 	}
-	if s.lastEditProblem() == "" {
+	if problemOf(s) == "" {
 		t.Fatal("the fixture did not record a problem")
 	}
 	get(t, srv, "/forge/schema")
-	if got := s.lastEditProblem(); got != "" {
+	if got := problemOf(s); got != "" {
 		t.Errorf("problem = %q, want a page load to start clean", got)
 	}
 }

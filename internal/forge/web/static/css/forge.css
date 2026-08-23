@@ -370,6 +370,27 @@ button.list-row:not(.list-row--active):hover {
   outline: none;
 }
 
+/* The list a native select opens is painted by the browser, not by the page.
+ *
+ * It takes the control's colour and its own default ground, which is white — so
+ * the whole catalogue rendered as pale cream on white and could not be read at
+ * all. Nothing in the page's own styling shows it: the closed control is
+ * correct, and the popup only exists while it is open.
+ *
+ * Both halves have to be stated, and on `option` rather than on the select:
+ * the popup does not inherit the select's background. Every select in Forge is
+ * this primitive, but the rule is left unscoped anyway, because a select that
+ * skipped the primitive would be exactly the one nobody styled. */
+option,
+optgroup {
+  background: var(--panel);
+  color: var(--text-hi);
+}
+
+option:disabled {
+  color: var(--text-faint);
+}
+
 .dropdown__control:focus-within {
   border-color: var(--amber);
 }
@@ -2141,6 +2162,101 @@ button.list-row:not(.list-row--active):hover {
 
 .inspector__actions {
   margin-top: 10px;
+}
+
+/* The transition panel: where it goes, and the order it is tried in. */
+
+.inspector__route {
+  margin: 0 0 8px;
+  padding: 4px 6px;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+
+.inspector__warn {
+  margin: 6px 0 0;
+  padding: 4px 6px;
+  border-left: 3px solid var(--amber);
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.inspector__order {
+  margin-top: 10px;
+}
+
+.order-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: order;
+}
+
+.order-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 3px;
+  padding: 3px 5px;
+  background: var(--ink);
+  border: var(--border-w) solid var(--border);
+}
+
+.order-row::before {
+  counter-increment: order;
+  content: counter(order);
+  flex: none;
+  width: 12px;
+  font-size: 9.5px;
+  color: var(--text-faint);
+}
+
+.order-row--current {
+  border-color: var(--amber);
+}
+
+/* Nothing below the first unguarded transition can ever fire. */
+.order-row--unreachable .order-row__label {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.order-row__label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--text-hi);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-row__move {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: var(--raised);
+  border: var(--border-w) solid var(--border);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.order-row__move:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--text-hi);
+}
+
+.order-row__move:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .action {

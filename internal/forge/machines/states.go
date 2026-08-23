@@ -258,45 +258,30 @@ func (s *Session) AddTransition(path, from, to string) (string, error) {
 	return event, nil
 }
 
-// DeleteTransition removes one transition, addressed by its parts.
+// DeleteTransition removes one transition.
 //
-// By its parts and not by the chart's edge id: that id is source, kind, event
-// and index joined with bars, and both a state name and an event name may
-// contain a bar, so splitting it back apart is guesswork.
-func (s *Session) DeleteTransition(path, from, kind, event string, index int) error {
+// Addressed by a TransitionRef and not by the chart's edge id: that id is
+// source, kind, event and index joined with bars, and both a state name and an
+// event name may contain a bar, so splitting it back apart is guesswork.
+func (s *Session) DeleteTransition(path string, r TransitionRef) error {
 	return s.Edit(path, func(def *agent.MachineDefinition) error {
-		src, err := stateAt(def, from)
+		_, set, order, err := transitionSet(def, r)
 		if err != nil {
 			return err
 		}
-		var (
-			set   map[string][]agent.Transition
-			order *[]string
-		)
-		switch kind {
-		case "on":
-			set, order = src.On, &src.OnOrder
-		case "after":
-			set, order = src.After, &src.AfterOrder
-		default:
-			return fmt.Errorf("%q is not a kind of transition", kind)
+		list := set[r.Event]
+		if r.Index < 0 || r.Index >= len(list) {
+			return outOfRange(r, len(list))
 		}
-		list, ok := set[event]
-		if !ok {
-			return fmt.Errorf("state %q has no %s %q", from, kind, event)
-		}
-		if index < 0 || index >= len(list) {
-			return fmt.Errorf("state %q has %d transitions on %q, not %d", from, len(list), event, index+1)
-		}
-		list = append(list[:index:index], list[index+1:]...)
+		list = append(list[:r.Index:r.Index], list[r.Index+1:]...)
 		if len(list) == 0 {
 			// An event key with an empty list fires on nothing, draws no edge,
 			// and reads in the file as something someone meant.
-			delete(set, event)
-			removeFromOrder(order, event)
+			delete(set, r.Event)
+			removeFromOrder(order, r.Event)
 			return nil
 		}
-		set[event] = list
+		set[r.Event] = list
 		return nil
 	})
 }

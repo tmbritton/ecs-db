@@ -13,8 +13,8 @@ templ stateInspector(data Data) {
 	<aside class="inspector" aria-label="State inspector" data-testid="state-inspector">
 		if data.SelectedState == nil {
 			<p class="inspector__empty" data-testid="inspector-empty">
-				Select a state to edit it. Drag the amber port from one state onto another to
-				connect them.
+				Select a state or a transition to edit it. Drag the amber port from one
+				state onto another to connect them.
 			</p>
 		} else {
 			<div class="section-heading"><span>State</span></div>
@@ -49,8 +49,8 @@ templ stateInspector(data Data) {
 				</p>
 			}
 
-			@actionList(data, "entry")
-			@actionList(data, "exit")
+			@actionList(data, stateActionList(data, "entry"))
+			@actionList(data, stateActionList(data, "exit"))
 
 			<button
 				type="button"
@@ -62,47 +62,51 @@ templ stateInspector(data Data) {
 	</aside>
 }
 
-// actionList is one of the two lists a state carries, in authored order —
-// which is the order they run in, so sorting them would be sorting the logic.
-templ actionList(data Data, kind string) {
-	<div class="inspector__actions" data-testid={ kind + "-actions" }>
-		<div class="section-heading"><span>{ kind } actions</span></div>
-		for i, spec := range stateActions(data, kind) {
-			<div class="action" data-testid={ kind + "-action-" + itoa(i) } data-action={ spec.Type }>
+// actionList is a list of actions and the controls that change it.
+//
+// Three callers: a state's entry list, a state's exit list, and a transition's.
+// All three are []ActionSpec with the same catalogue behind them, so they are
+// one list with three owners — and the scope is what keeps their test ids and
+// their post URLs apart.
+templ actionList(data Data, l ActionList) {
+	<div class="inspector__actions" data-testid={ l.Scope + "-actions" }>
+		<div class="section-heading"><span>{ l.Title }</span></div>
+		for i, spec := range l.Specs {
+			<div class="action" data-testid={ l.Scope + "-action-" + itoa(i) } data-action={ spec.Type }>
 				<div class="action__head">
 					<span class="action__name mono">{ spec.Type }</span>
 					<button
 						type="button"
 						class="action__remove"
-						data-testid={ "remove-" + kind + "-" + itoa(i) }
+						data-testid={ "remove-" + l.Scope + "-" + itoa(i) }
 						aria-label={ "Remove " + spec.Type }
-						data-on:click={ removeActionAction(data, kind, i) }
+						data-on:click={ l.Remove(i) }
 					>✕</button>
 				</div>
 				if actionDescription(data, spec.Type) != "" {
-					<p class="action__desc" data-testid={ kind + "-desc-" + itoa(i) }>{ actionDescription(data, spec.Type) }</p>
+					<p class="action__desc" data-testid={ l.Scope + "-desc-" + itoa(i) }>{ actionDescription(data, spec.Type) }</p>
 				} else {
 					// The registry does not have it, so this machine names an
 					// action the engine will refuse. The problem list says so;
 					// the inspector does not invent a description for it.
-					<p class="action__desc action__desc--unknown" data-testid={ kind + "-unknown-" + itoa(i) }>
+					<p class="action__desc action__desc--unknown" data-testid={ l.Scope + "-unknown-" + itoa(i) }>
 						Not an action this project's engine registers.
 					</p>
 				}
-				@actionParamForm(data, kind, i, spec)
+				@paramForm(l.Form(i, spec))
 			</div>
 		}
-		<div data-testid={ "add-" + kind + "-action" }>
+		<div data-testid={ "add-" + l.Scope + "-action" }>
 			@components.Dropdown(components.DropdownProps{
 				Label:    "",
 				Signal:   "",
 				Selected: "",
 				Options:  actionOptions(data),
-				Action:   addActionAction(data, kind),
+				Action:   l.Add,
 			})
 		</div>
-		if kind == "entry" {
-			// Said once per state rather than once per list. The catalogue is
+		if l.Note {
+			// Said once per panel rather than once per list. The catalogue is
 			// closed and looks extensible: a modder cannot add an action
 			// without rebuilding the binary, because registration is Go and
 			// game.toml's actions list is parsed and read by nothing.
@@ -114,19 +118,31 @@ templ actionList(data Data, kind string) {
 	</div>
 }
 
-// actionParamForm is generated from the registry's ParamSchema, never written
-// out: the registry is where an action's parameters, their types and their
-// defaults are declared, and a hand-written form is a second copy that goes
-// stale the first time a built-in gains one.
-templ actionParamForm(data Data, kind string, index int, spec ActionSpec) {
-	{{ params := actionParams(data, spec.Type) }}
-	if len(params) == 0 {
-		<p class="action__none mono" data-testid={ kind + "-noparams-" + itoa(index) }>no parameters</p>
+// paramForm is generated from the registry's ParamSchema, never written out:
+// the registry is where a parameter's type and default are declared, and a
+// hand-written form is a second copy that goes stale the first time a built-in
+// gains one.
+//
+// One form for four callers — a state's entry actions, a state's exit actions, a
+// transition's actions and a transition's guard. Actions and guards both carry
+// []ParamSchema and this is the same form; two implementations is how the guard
+// form grows a feature the action form does not have.
+//
+// The scope names the form in test ids and in problem ids, so "entry-0" emits
+// exactly the input and problem ids Story 6 emitted.
+//
+// aria-invalid follows components.Blocking and not "is there a message": a
+// required parameter left empty is a warning, the file is one the engine
+// accepts, and telling a screen reader the field is invalid would be a
+// different claim from the one on screen.
+templ paramForm(f ParamForm) {
+	if len(f.Params) == 0 {
+		<p class="action__none mono" data-testid={ "noparams-" + f.Scope }>no parameters</p>
 	} else {
-		for _, p := range params {
-			{{ fieldID := paramProblemsID(kind, index, p.Name) }}
-			{{ problems := paramProblems(spec, p) }}
-			<label class="action__param" data-testid={ kind + "-param-" + itoa(index) + "-" + p.Name }>
+		for _, p := range f.Params {
+			{{ fieldID := paramProblemsID(f.Scope, p.Name) }}
+			{{ problems := paramProblems(f.Values, p, f.What) }}
+			<label class="action__param" data-testid={ "param-" + f.Scope + "-" + p.Name }>
 				<span class="action__param-name mono">
 					{ p.Name }
 					if p.Required {
@@ -137,24 +153,30 @@ templ actionParamForm(data Data, kind string, index int, spec ActionSpec) {
 					<textarea
 						class="action__input mono"
 						rows="2"
-						data-testid={ "input-" + kind + "-" + itoa(index) + "-" + p.Name }
+						data-param-type={ p.Type }
+						data-testid={ "input-" + f.Scope + "-" + p.Name }
 						if len(problems) > 0 {
 							aria-describedby={ fieldID }
+						}
+						if components.Blocking(problems) {
 							aria-invalid="true"
 						}
-						data-on:change={ paramAction(data, kind, index, p.Name, false) }
-					>{ paramValue(spec, p.Name) }</textarea>
+						data-on:change={ f.Post(p.Name, false) }
+					>{ paramValue(f.Values, p.Name) }</textarea>
 				} else if paramInputType(p) == "checkbox" {
 					<input
 						class="action__check"
 						type="checkbox"
-						checked?={ paramIsChecked(spec, p.Name) }
-						data-testid={ "input-" + kind + "-" + itoa(index) + "-" + p.Name }
+						checked?={ paramIsChecked(f.Values, p.Name) }
+						data-param-type={ p.Type }
+						data-testid={ "input-" + f.Scope + "-" + p.Name }
 						if len(problems) > 0 {
 							aria-describedby={ fieldID }
+						}
+						if components.Blocking(problems) {
 							aria-invalid="true"
 						}
-						data-on:change={ paramAction(data, kind, index, p.Name, true) }
+						data-on:change={ f.Post(p.Name, true) }
 					/>
 					if paramHint(p) != "" {
 						<span class="action__hint mono">{ paramHint(p) }</span>
@@ -167,21 +189,23 @@ templ actionParamForm(data Data, kind string, index int, spec ActionSpec) {
 							inputmode={ paramInputMode(p) }
 						}
 						data-param-type={ p.Type }
-						value={ paramValue(spec, p.Name) }
+						value={ paramValue(f.Values, p.Name) }
 						placeholder={ paramPlaceholder(p) }
-						data-testid={ "input-" + kind + "-" + itoa(index) + "-" + p.Name }
+						data-testid={ "input-" + f.Scope + "-" + p.Name }
 						if len(problems) > 0 {
 							aria-describedby={ fieldID }
+						}
+						if components.Blocking(problems) {
 							aria-invalid="true"
 						}
-						data-on:change={ paramAction(data, kind, index, p.Name, false) }
+						data-on:change={ f.Post(p.Name, false) }
 					/>
 				}
 			</label>
 			@components.Problems(components.ProblemsProps{
 				ID:       fieldID,
 				Problems: problems,
-				Testid:   "problem-" + kind + "-" + itoa(index) + "-" + p.Name,
+				Testid:   "problem-" + f.Scope + "-" + p.Name,
 			})
 		}
 	}

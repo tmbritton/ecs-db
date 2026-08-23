@@ -58,10 +58,14 @@ func TestInspector_SaysWhatToDoWhenNothingIsSelected(t *testing.T) {
 	}
 }
 
-// An edge is Story 7's. The state inspector does not claim it.
-func TestInspector_ShowsNothingForASelectedEdge(t *testing.T) {
+// One rail, and the selection decides which panel is in it. The state panel
+// does not claim an edge, and it does not render alongside the transition one.
+func TestInspector_ShowsTheTransitionPanelForASelectedEdge(t *testing.T) {
 	html := renderAgents(t, inspectorFixture(t, "edge:idle|on|SPOTTED|0"))
-	if !strings.Contains(html, `data-testid="inspector-empty"`) {
+	if !strings.Contains(html, `data-testid="transition-inspector"`) {
+		t.Error("a selected transition gets no panel")
+	}
+	if strings.Contains(html, `data-testid="state-inspector"`) {
 		t.Error("the state inspector filled itself in for a transition")
 	}
 }
@@ -171,7 +175,7 @@ func TestInspector_GeneratesTheFormFromTheParameterSchema(t *testing.T) {
 	// The registered default is a placeholder, never a value: writing it in
 	// would put the default into the file as though someone had chosen it, and
 	// there would be no way to say "leave this alone".
-	target := section(t, html, `data-testid="entry-param-0-target"`, "</label>")
+	target := section(t, html, `data-testid="param-entry-0-target"`, "</label>")
 	if !strings.Contains(target, `placeholder="$player"`) {
 		t.Errorf("the registered default is not shown as a hint: %s", target)
 	}
@@ -180,7 +184,7 @@ func TestInspector_GeneratesTheFormFromTheParameterSchema(t *testing.T) {
 	}
 	// An action with no parameters says so rather than rendering an empty box.
 	data.SelectedState.Entry = []agent.ActionSpec{{Type: "setPursueTarget"}}
-	if !strings.Contains(renderAgents(t, data), `data-testid="entry-noparams-0"`) {
+	if !strings.Contains(renderAgents(t, data), `data-testid="noparams-entry-0"`) {
 		t.Error("an action with no parameters renders as nothing at all")
 	}
 }
@@ -205,13 +209,17 @@ func TestInspector_ReportsARequiredParameterAgainstItsField(t *testing.T) {
 	}
 	// The value, not merely the attribute: an aria-describedby pointing at an
 	// id nothing carries is the same as none at all, and looks identical.
-	wantID := paramProblemsID("entry", 0, "amount")
+	wantID := paramProblemsID("entry-0", "amount")
 	input := section(t, html, `<input class="action__input mono"`, ">")
 	if !strings.Contains(input, `aria-describedby="`+wantID+`"`) {
 		t.Errorf("the input does not point at its message: %s", input)
 	}
-	if !strings.Contains(input, `aria-invalid="true"`) {
-		t.Errorf("the input is not marked invalid: %s", input)
+	// And *not* marked invalid. This is a warning: the file is one the engine
+	// accepts, ValidateMachine never looks at parameters, and the save is not
+	// blocked — so aria-invalid would tell a screen reader something the screen
+	// does not say. components.Blocking is what decides it.
+	if strings.Contains(input, "aria-invalid") {
+		t.Errorf("a warning marks the field invalid: %s", input)
 	}
 	if !strings.Contains(html, `id="`+wantID+`"`) {
 		t.Errorf("nothing carries the id the input points at (%s)", wantID)
@@ -330,7 +338,7 @@ func TestInspector_RendersABooleanAsACheckboxThatSaysItsDefault(t *testing.T) {
 	// rendered the problem list with an id and pointed nothing at it, which is
 	// exactly the failure aria-describedby exists to prevent, in the one branch
 	// no test reached.
-	wantID := paramProblemsID("entry", 0, "passable")
+	wantID := paramProblemsID("entry-0", "passable")
 	if !strings.Contains(box, `aria-describedby="`+wantID+`"`) {
 		t.Errorf("the checkbox does not point at its message: %s", box)
 	}

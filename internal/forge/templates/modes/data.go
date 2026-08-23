@@ -73,6 +73,19 @@ type Data struct {
 	// makes a machine the engine refuses to load, and offering exactly what the
 	// engine accepts makes that mistake unreachable rather than reported.
 	Actions []agent.ActionMeta
+	// Guards is every guard this project's engine registers, on exactly the
+	// same terms as Actions — including the gating, so a mapless project does
+	// not offer inLineOfSight.
+	Guards []agent.GuardMeta
+	// StateTargets is every state in the selected machine, as a dotted path in
+	// authored order. What the transition inspector's target dropdown is made
+	// of: offering only these makes "transition target is not a known state"
+	// unreachable rather than merely reported.
+	StateTargets []string
+	// EventNames is every event the selected machine already reacts to, for the
+	// event field's suggestions. Suggestions only — an event name is authored
+	// rather than registered, so nothing can validate one.
+	EventNames []string
 	// SelectedState is the state the canvas selection names, or nil. Resolved
 	// exactly, by the same rule the mutations use.
 	SelectedState *agent.StateNode
@@ -95,6 +108,10 @@ type Data struct {
 	// HasMachines is false when no project could be opened, on the same terms
 	// as HasSession.
 	HasMachines bool
+	// ProblemField is the control that refusal was about, so the panel can
+	// report it under the field where the mistake was made. Empty when the
+	// refusal belongs to no one control.
+	ProblemField string
 	// Problem is why the last edit was refused, if it was. Rendered in the
 	// editor rather than only returned as a status code: an edit that vanishes
 	// with no explanation teaches you that the control is broken.

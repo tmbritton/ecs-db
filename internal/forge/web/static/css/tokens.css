@@ -7,6 +7,14 @@
  * emphasis, reach for weight, border, or the active-row fill — not a new hue.
  */
 :root {
+  /* Native UI the page does not paint — select popups, scrollbars, the
+   * form-control defaults — follows this rather than the palette below. Without
+   * it a <select>'s list opens on the browser's white ground with the cream
+   * text the control declares, and the whole catalogue is unreadable. Nothing
+   * about the closed control shows it, and no screenshot of the page catches it
+   * either: the popup exists only while it is open. */
+  color-scheme: dark;
+
   /* --- surfaces --- */
   --void: #1a1714;    /* app backdrop */
   --ink: #201d1a;     /* canvas, inset wells */

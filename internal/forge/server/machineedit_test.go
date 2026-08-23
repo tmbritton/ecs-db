@@ -250,7 +250,7 @@ func TestMachineEdit_RefusesAndSaysWhy(t *testing.T) {
 	if code := post(t, srv, "/forge/agents/machine?add=wander"); code != 204 {
 		t.Fatalf("create: %d", code)
 	}
-	if got := s.lastEditProblem(); !strings.Contains(got, "already declared by") {
+	if got := problemOf(s); !strings.Contains(got, "already declared by") {
 		t.Errorf("the refusal is not reported to the editor: %q", got)
 	}
 	if !strings.Contains(renderAgents(t, s, ""), "already declared by") {
@@ -265,14 +265,14 @@ func TestMachineEdit_RefusesToGuessTheMod(t *testing.T) {
 	if code := post(t, srv, "/forge/agents/machine?add=patrol"); code != 204 {
 		t.Fatalf("create: %d", code)
 	}
-	if got := s.lastEditProblem(); !strings.Contains(got, "name the one to use") {
+	if got := problemOf(s); !strings.Contains(got, "name the one to use") {
 		t.Errorf("Forge picked a mod rather than asking: %q", got)
 	}
 
 	if code := post(t, srv, "/forge/agents/machine?add=patrol&mod=extra"); code != 204 {
 		t.Fatalf("create with a mod: %d", code)
 	}
-	if got := s.lastEditProblem(); got != "" {
+	if got := problemOf(s); got != "" {
 		t.Errorf("naming the mod still failed: %q", got)
 	}
 }
@@ -293,7 +293,7 @@ func TestMachineEdit_RefusesAPathItDoesNotHold(t *testing.T) {
 	}
 	// The handler's own wording, not the session's: both check, and asserting a
 	// message they shared could not tell which one answered.
-	if got := s.lastEditProblem(); !strings.Contains(got, "not a machine this project has open") {
+	if got := problemOf(s); !strings.Contains(got, "not a machine this project has open") {
 		t.Errorf("the handler passed an unchecked path straight through, got %q", got)
 	}
 }
@@ -743,7 +743,7 @@ func TestMachineEdit_DoesNotReachStrandedWork(t *testing.T) {
 	}
 
 	post(t, srv, "/forge/agents/machine?renameID=roam&machine="+url.QueryEscape(path))
-	if got := s.lastEditProblem(); !strings.Contains(got, "not a machine this project has open") {
+	if got := problemOf(s); !strings.Contains(got, "not a machine this project has open") {
 		t.Errorf("renaming a stranded machine was not refused: %q", got)
 	}
 }
