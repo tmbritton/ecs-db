@@ -17,6 +17,9 @@ import (
 
 // Map is a Tiled map, whichever serialisation it arrived in.
 type Map struct {
+	// Name is the file this map was read from, for refusals raised after
+	// parsing — a tileset that will not open is the map's problem to report.
+	Name                  string
 	Width, Height         int // in tiles
 	TileWidth, TileHeight int // in pixels
 	Orientation           string
@@ -154,9 +157,13 @@ func (o Object) Tile() Tile { return TileOf(o.GID) }
 type TilesetRef struct {
 	FirstGID uint32
 	Source   string
-	// Embedded is the raw element for a tileset defined inline, kept verbatim
-	// so Story 2 can parse it with the same code that parses a .tsx file.
+	// Embedded is the raw element for a tileset defined inline, kept whole —
+	// attributes and all — so it parses with the same code a .tsx file does.
 	Embedded []byte
+	// Tileset is the resolved tileset, and is nil until ResolveTilesets has
+	// run. Nil rather than a zero value: a tileset nobody has read is not a
+	// tileset with no tiles in it.
+	Tileset *Tileset
 }
 
 // TilesetFor is the tileset a global tile id belongs to, and the id within it.
@@ -258,14 +265,26 @@ func (p Properties) Bool(name string) (bool, bool) {
 // what someone reads when a map they have just exported will not load, and "an
 // unsupported encoding" without a filename is a search rather than a report.
 func Parse(data []byte, name string) (*Map, error) {
+	var (
+		m   *Map
+		err error
+	)
 	switch first := firstMeaningfulByte(data); first {
 	case '{':
-		return parseTMJ(data, name)
+		m, err = parseTMJ(data, name)
 	case '<':
-		return parseTMX(data, name)
+		m, err = parseTMX(data, name)
 	default:
 		return nil, fmt.Errorf("tiled: %s is neither a .tmx nor a .tmj map", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	// Recorded for the refusals raised after parsing: a tileset that will not
+	// open is the map's problem to report, and by then the caller's name for it
+	// is gone.
+	m.Name = name
+	return m, nil
 }
 
 // firstMeaningfulByte skips leading whitespace and a UTF-8 byte-order mark,

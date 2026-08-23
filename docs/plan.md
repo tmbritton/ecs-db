@@ -501,7 +501,9 @@ One bullet from the first draft is gone: "passability from tile properties" poin
 
 - [ ] **TMX/TMJ parser** — Multiple tile layers and layer folders, CSV, base64, base64+zlib/gzip and the XML tile form, objects, map properties.
 
-- [ ] **TSX tileset parser** — Image reference, tile size, margin/spacing, per-tile custom properties for collision / terrain / class / animation.
+- [x] **TSX tileset parser** — `.tsx` and `.tsj`, sheets and image collections, per-tile properties, and resolving a map's external references.
+  - Two kinds of tileset, not one: a collection has no sheet, `columns="0"`, and sparse ids, so the sheet rules refused every one of them
+  - `passable` is this epic's own convention and is named in one place; `Passable` says both whether a tile can be walked through and whether the tileset says at all
 
 - [ ] **Map re-import semantics** — Diff the file's tiles against `comp_tile` instead of skipping when tiles exist.
 

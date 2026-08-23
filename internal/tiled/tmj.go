@@ -31,7 +31,9 @@ type jsonProperty struct {
 	Value        json.RawMessage `json:"value"`
 }
 
-type jsonTileset struct {
+// jsonTilesetRef is a map's reference: the first gid, plus either a source or
+// the whole embedded tileset object, which tsj.go parses.
+type jsonTilesetRef struct {
 	FirstGID uint32 `json:"firstgid"`
 	Source   string `json:"source"`
 }
@@ -105,7 +107,7 @@ func parseTMJ(data []byte, name string) (*Map, error) {
 		Properties:  convertJSONProperties(wire.Properties),
 	}
 	for _, raw := range wire.Tilesets {
-		var ts jsonTileset
+		var ts jsonTilesetRef
 		if err := json.Unmarshal(raw, &ts); err != nil {
 			return nil, fmt.Errorf("tiled: %s: a tileset reference will not read: %w", name, err)
 		}
