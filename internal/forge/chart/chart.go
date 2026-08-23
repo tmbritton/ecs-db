@@ -110,7 +110,15 @@ type Edge struct {
 	Index int
 	// Guard is the cond's type, empty when the transition is unconditional.
 	Guard string
-	Kind  EdgeKind
+	// Actions are the action types this transition runs, in authored order.
+	//
+	// Carried so that a validation error naming one can be attached to the edge
+	// that runs it. Everything else an error about a transition can name — its
+	// target, its guard, its duration — the edge already holds; without this,
+	// "transition action X is not registered" would have to fall back to the
+	// state, which is a near miss rather than an answer.
+	Actions []string
+	Kind    EdgeKind
 	// Target is the raw target text as authored, so a dangling edge can name
 	// the state that is missing.
 	Target string
@@ -570,6 +578,9 @@ func edge(resolver *agent.StateResolver, from string, kind EdgeKind, key string,
 	}
 	if t.Cond != nil {
 		e.Guard = t.Cond.Type
+	}
+	for _, a := range t.Actions {
+		e.Actions = append(e.Actions, a.Type)
 	}
 	if t.Target == "" {
 		e.Internal = true

@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/agent/builtins"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
+	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // inspectorFixture selects a state and hands the inspector a catalogue that is
@@ -67,6 +70,125 @@ func TestInspector_ShowsTheTransitionPanelForASelectedEdge(t *testing.T) {
 	}
 	if strings.Contains(html, `data-testid="state-inspector"`) {
 		t.Error("the state inspector filled itself in for a transition")
+	}
+}
+
+// oneBadAction is a machine whose only fault is a named number of unregistered
+// entry actions, so a count assertion is counting what it says it is.
+func problemFixture(t *testing.T, actions ...string) Data {
+	t.Helper()
+	list := ""
+	for i, a := range actions {
+		if i > 0 {
+			list += ", "
+		}
+		list += `"` + a + `"`
+	}
+	data := canvasFixture(t, `{
+	  "id": "wander",
+	  "initial": "idle",
+	  "states": { "idle": { "entry": [`+list+`] } }
+	}`, "state:idle")
+	data.SelectedState = data.Machine.States["idle"]
+	errs := agent.ValidateMachine(data.Machine, builtins.NewRegistry(), schema.DatabaseSchema{})
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+	return data
+}
+
+// The state rail says what is wrong with the state it is showing, for the
+// reason the transition rail says what is wrong with its transition.
+func TestInspector_ShowsTheSelectedStatesProblems(t *testing.T) {
+	html := renderAgents(t, problemFixture(t, "noSuchAction"))
+
+	problems := elementOf(t, html, "state-problems")
+	if !strings.Contains(problems, "noSuchAction") {
+		t.Errorf("the state's own problem is not in its panel: %s", problems)
+	}
+	// And the count is stated where the canvas is, so a problem on a node
+	// scrolled out of view is still known about.
+	summary := elementOf(t, html, "canvas-problem-summary")
+	if !strings.Contains(summary, "1 problem") {
+		t.Errorf("the count is not stated by the canvas: %s", summary)
+	}
+	if !strings.Contains(summary, "marked on the canvas") {
+		t.Errorf("nothing says where to look: %s", summary)
+	}
+}
+
+// A node that is invalid still says what kind of state it is. Replacing the kind
+// with the problem is a fair reading of "say what is wrong" and it loses the one
+// thing about a parallel or history node that its shape does not convey.
+func TestInspector_AnInvalidNodeStillSaysWhatKindItIs(t *testing.T) {
+	// A compound state, because "state" — what an atomic one is called — is a
+	// substring of half the markup on the page and would make this pass on
+	// nothing.
+	data := canvasFixture(t, `{
+	  "id": "wander",
+	  "initial": "outer",
+	  "states": {
+	    "outer": {
+	      "entry": ["noSuchAction"],
+	      "initial": "inner",
+	      "states": { "inner": {} }
+	    }
+	  }
+	}`, "state:outer")
+	errs := agent.ValidateMachine(data.Machine, builtins.NewRegistry(), schema.DatabaseSchema{})
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+
+	// The title attribute specifically. The node also renders each entry action
+	// as a chip, so "is noSuchAction anywhere in this node" is true whatever the
+	// title says.
+	node := nodeSection(t, renderAgents(t, data), "outer")
+	title := attrValue(t, node, "title")
+	if !strings.Contains(title, "is not registered") {
+		t.Errorf("hovering the node does not say what is wrong: %q", title)
+	}
+	if !strings.Contains(title, "compound state") {
+		t.Errorf("the node stopped saying what kind of state it is: %q", title)
+	}
+}
+
+// attrValue is one attribute of the first tag in a fragment.
+func attrValue(t *testing.T, markup, name string) string {
+	t.Helper()
+	i := strings.Index(markup, name+`="`)
+	if i < 0 {
+		t.Fatalf("no %s attribute in %s", name, markup)
+	}
+	rest := markup[i+len(name)+2:]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		t.Fatalf("unterminated %s attribute in %s", name, markup)
+	}
+	return rest[:j]
+}
+
+// Plural and singular are different sentences, and one of them said nothing at
+// all until a mutation asked.
+func TestInspector_CountsSeveralProblemsAsSeveral(t *testing.T) {
+	summary := elementOf(t, renderAgents(t, problemFixture(t, "noSuchAction", "alsoMissing")), "canvas-problem-summary")
+	if !strings.Contains(summary, "2 problems") {
+		t.Errorf("two problems are not reported as two: %s", summary)
+	}
+}
+
+// A machine with nothing wrong says nothing, rather than showing an empty box.
+//
+// Built from a machine that really validates, not from a fixture that never had
+// its Problems filled in — the zero-value Report would pass whatever the
+// template did.
+func TestInspector_SaysNothingAboutAValidMachine(t *testing.T) {
+	data := problemFixture(t, "setPursueTarget")
+	if data.Problems.Count() != 0 {
+		t.Fatalf("the fixture is not valid: %d problems", data.Problems.Count())
+	}
+	html := renderAgents(t, data)
+	if strings.Contains(html, `data-testid="canvas-problem-summary"`) {
+		t.Error("a valid machine is given a problem summary")
+	}
+	if strings.Contains(html, `data-invalid="true"`) {
+		t.Error("a valid machine has something marked on the canvas")
 	}
 }
 

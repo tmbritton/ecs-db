@@ -674,11 +674,44 @@ func TestAgentsPage_ReportsAMachineEditedIntoInvalidity(t *testing.T) {
 	if !strings.Contains(body, `data-testid="manifest-unavailable"`) {
 		t.Errorf("a machine that does not validate still shows a manifest:\n%s", body)
 	}
-	if !strings.Contains(body, `data-testid="machine-problems"`) {
-		t.Error("nothing says why")
+	// Against the edge that carries it, not in a list at the top: a transition
+	// target is a transition's problem, and the canvas is where it is findable.
+	if !strings.Contains(body, `data-testid="edge-idle|on|GO|0"`) {
+		t.Fatal("the edge is not drawn")
+	}
+	if !strings.Contains(body, `data-invalid="true"`) {
+		t.Error("nothing on the canvas is marked as carrying the problem")
 	}
 	if !strings.Contains(body, "nowhere") {
 		t.Error("the problem does not name the broken target")
+	}
+	// And the footer refuses the save, because the save would be refused. The
+	// count comes from the session rather than from the mode's data: the footer
+	// is on screen in every mode and this one is only computed on AGENTS.
+	if !strings.Contains(body, `data-blocked="true"`) {
+		t.Error("the footer offers a save the engine would refuse")
+	}
+	if !strings.Contains(body, "the engine would refuse") {
+		t.Error("the disabled save gives no reason")
+	}
+}
+
+// The footer follows the mode, and the machines' one has to know about machines
+// wherever it is rendered — a save refused on AGENTS is refused from SCHEMA too.
+func TestFooter_BlocksOnAnInvalidMachineFromAnotherMode(t *testing.T) {
+	srv, s, core := machineServerWith(t, canvasMachine)
+	path := filepath.Join(core, "wander.json")
+
+	if err := s.cfg.MachineSession.Edit(path, func(d *agent.MachineDefinition) error {
+		d.States["idle"].On["GO"][0].Target = "nowhere"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, agents := get(t, srv, "/forge/agents")
+	if !strings.Contains(agents, `data-blocked="true"`) {
+		t.Error("AGENTS offers a save the engine would refuse")
 	}
 }
 

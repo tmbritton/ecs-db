@@ -1684,10 +1684,18 @@ option:disabled {
   color: var(--red);
 }
 
+/* A blocked Save is also a dirty one, and the dirty rule paints it amber — the
+ * design's call-to-action colour. Without a background here that rule wins, and
+ * the button that cannot be pressed is the most prominent thing on screen:
+ * exactly the "indistinguishable from broken" the Blocked prop was added to
+ * avoid. The cursor says it too, for anyone who reaches it with a pointer
+ * before reading the reason beside it. */
 .save-footer--blocked .save-footer__save,
 .save-footer--blocked .save-footer__save:hover {
+  background: var(--hover);
   border-color: var(--border);
   color: var(--text-faint);
+  cursor: default;
 }
 
 /* Unsaved work another mode owns. Amber, not red: nothing is wrong, but the
@@ -1881,6 +1889,34 @@ option:disabled {
    line is drawn as one that may not be taken. */
 .chart-edge--guarded {
   stroke-dasharray: 5 4;
+}
+
+/* A node or an edge the engine would refuse. Red is the design's danger colour
+ * and this is the one thing on the canvas that stops a save. The glyph carries
+ * the same meaning for anyone the hue does not reach. */
+
+.chart-node--invalid .chart-node__head {
+  border-color: var(--red);
+}
+
+.chart-node__invalid,
+.chart-label__invalid {
+  margin-left: 4px;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.chart-label--invalid {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.chart__problems {
+  margin: 0 0 6px;
+  padding: 3px 6px;
+  border-left: 3px solid var(--red);
+  font-size: 10.5px;
+  color: var(--text-dim);
 }
 
 .chart-edge--dangling {

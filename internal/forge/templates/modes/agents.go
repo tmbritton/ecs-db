@@ -8,7 +8,6 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
-	"github.com/tmbritton/ecs-db/internal/forge/validation"
 )
 
 // MachineDefinition is aliased for the same reason Component and EntityType
@@ -181,39 +180,20 @@ func validityLine(data Data) string {
 	return fmt.Sprintf("✕ %d problems — the engine will not load this machine", n)
 }
 
-// machineProblems is every reason the engine gives, as the shared problem list
-// renders them.
+// machineProblems is what is wrong with the machine as a whole.
 //
-// Blocking, all of them: Session.Save refuses a machine that does not validate
-// and writes the rest, so the save of this one is genuinely refused — which is
-// what validation.Problem.Blocking means and the only thing it means.
+// Only that. Until Story 8 this was every error the engine gave, flattened into
+// one list with "state <id>: " glued on the front — which was the honest answer
+// while nothing could place them, and is the wrong one now that everything can.
+// An error about a state is rendered against that state, on the canvas and in
+// the rail; what is left here is what belongs to no state, plus anything naming
+// a state the canvas did not draw, because a message with nowhere to go still
+// has to go somewhere.
 //
-// Sorted, which is not cosmetic. ValidateMachine collects context-key errors by
-// ranging def.Context and state errors by ranging def.States, both maps, so the
-// same broken machine produces a different order on every call. The page stream
-// patches an element only when its markup changed, so an unsorted list makes
-// the whole mode content — the id and filename inputs included — get replaced
-// on every tick for as long as a machine is invalid.
-//
-// Story 8 places each of these against the node that caused it. Until it does,
-// a count with no way to see what is wrong would be a worse answer than a list.
-func machineProblems(data Data) []components.Problem {
-	out := make([]components.Problem, 0, len(data.Inspection.Errors))
-	for _, e := range data.Inspection.Errors {
-		message := e.Message
-		if e.StateID != "" {
-			message = "state " + e.StateID + ": " + message
-		}
-		out = append(out, components.Problem{
-			Owner:    validation.Owner{Kind: validation.OwnerMachine, Name: e.MachineID},
-			Field:    e.Field,
-			Message:  message,
-			Blocking: true,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Message < out[j].Message })
-	return out
-}
+// Blocking, all of them: Session.Save refuses a machine that does not validate,
+// so the save of this one is genuinely refused — which is what
+// validation.Problem.Blocking means and the only thing it means.
+func machineProblems(data Data) []components.Problem { return data.Problems.Machine }
 
 // machineSource is the mod and file the selected machine came from.
 //

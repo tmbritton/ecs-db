@@ -24,6 +24,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
+	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -347,6 +348,10 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			data.SelectedStateWarning = s.canvasDeleteWarning(data.SelectedMachine, CanvasMenu{
 				Kind: "state", State: strings.TrimPrefix(data.Chart.Selected, chart.SelState), Open: data.SelectedState != nil,
 			})
+			// From the errors the inspection already produced and the chart it
+			// was built beside — never a second validation, which would be a
+			// second opinion about whether the machine loads.
+			data.Problems = machinevalidation.Check(data.Machine, data.Inspection.Errors, data.Chart)
 			data.CanvasMenu = s.openCanvasMenu()
 			data.CanvasMenuWarning = s.canvasDeleteWarning(data.SelectedMachine, data.CanvasMenu)
 			data.StrandedMachines = strandedSet(s.cfg.MachineSession)
@@ -658,11 +663,21 @@ func (s *Server) unsavedSchema() bool {
 
 // machinesFooter names how many machines are unsaved, and which.
 func (s *Server) machinesFooter(data modes.Data) templates.Component {
+	// Asked here and nowhere else. Invalid() clones and validates each dirty
+	// machine, so the copy this used to also put on Data — where nothing read
+	// it — was that cost paid twice on every tick of a two-second stream.
+	//
+	// This footer renders on AGENTS alone; every other mode gets SchemaFooter.
+	invalid := map[string]int{}
+	if s.cfg.MachineSession != nil {
+		invalid = s.cfg.MachineSession.Invalid()
+	}
 	return templates.MachinesFooter(
 		machinesFooterFile(data.DirtyMachines, data.ReformatMachines),
 		len(data.DirtyMachines) > len(data.ReformatMachines),
 		dirtyNames(data.DirtyMachines),
 		s.unsavedSchema(),
+		invalid,
 	)
 }
 

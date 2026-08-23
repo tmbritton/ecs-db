@@ -99,7 +99,14 @@ func transitionInspector(data Data) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		eventProblems := fieldProblems(data, "event")
+		templ_7745c5c3_Err = components.Problems(components.ProblemsProps{
+			Problems: edgeOtherProblems(data, *e),
+			Testid:   "edge-problems",
+		}).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		eventProblems := edgeFieldProblems(data, *e, "event", e.Event)
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<label class=\"inspector__row\"><span class=\"inspector__label\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -107,7 +114,7 @@ func transitionInspector(data Data) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(eventLabel(*e))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 38, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 46, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -120,7 +127,7 @@ func transitionInspector(data Data) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(e.Event)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 42, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 50, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -148,7 +155,7 @@ func transitionInspector(data Data) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fieldProblemsID("event"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 48, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 56, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -166,7 +173,7 @@ func transitionInspector(data Data) templ.Component {
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(setEventAction(data, *e))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 51, Col: 45}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 59, Col: 45}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 		if templ_7745c5c3_Err != nil {
@@ -184,7 +191,7 @@ func transitionInspector(data Data) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 63, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 71, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 			if templ_7745c5c3_Err != nil {
@@ -223,7 +230,7 @@ func transitionInspector(data Data) templ.Component {
 			Selected:  selectedTarget(*e),
 			Options:   targetOptions(data, *e),
 			Action:    setTargetAction(data, *e),
-			Problems:  fieldProblems(data, "target"),
+			Problems:  edgeFieldProblems(data, *e, "target", selectedTarget(*e)),
 			ProblemID: fieldProblemsID("target"),
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
@@ -239,7 +246,7 @@ func transitionInspector(data Data) templ.Component {
 			Selected:  guardName(t),
 			Options:   guardOptions(data, t),
 			Action:    setGuardAction(data, *e),
-			Problems:  fieldProblems(data, "guard"),
+			Problems:  edgeFieldProblems(data, *e, "guard", guardName(t)),
 			ProblemID: fieldProblemsID("guard"),
 		}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
@@ -270,7 +277,7 @@ func transitionInspector(data Data) templ.Component {
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(deleteTransitionAction(data, *e))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 113, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 121, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
@@ -320,7 +327,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(e.Event)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 128, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 136, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -357,7 +364,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue("order-" + itoa(i))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 138, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 146, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
@@ -370,7 +377,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var15 string
 				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolAttr(i == e.Index))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 139, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 147, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 				if templ_7745c5c3_Err != nil {
@@ -383,7 +390,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(orderLabel(sibling))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 141, Col: 63}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 149, Col: 63}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
@@ -396,7 +403,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue("move-up-" + itoa(i))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 145, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 153, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 				if templ_7745c5c3_Err != nil {
@@ -409,7 +416,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue("Move " + orderLabel(sibling) + " earlier")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 146, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 154, Col: 62}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 				if templ_7745c5c3_Err != nil {
@@ -432,7 +439,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(moveTransitionAction(data, e, i, -1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 148, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 156, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 				if templ_7745c5c3_Err != nil {
@@ -445,7 +452,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("move-down-" + itoa(i))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 153, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 161, Col: 43}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 				if templ_7745c5c3_Err != nil {
@@ -458,7 +465,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue("Move " + orderLabel(sibling) + " later")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 154, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 162, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 				if templ_7745c5c3_Err != nil {
@@ -481,7 +488,7 @@ func transitionOrder(data Data, e ChartEdge) templ.Component {
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(moveTransitionAction(data, e, i, 1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 156, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/forge/templates/modes/transition.templ`, Line: 164, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 				if templ_7745c5c3_Err != nil {

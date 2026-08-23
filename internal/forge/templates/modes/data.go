@@ -4,6 +4,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
+	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
@@ -92,6 +93,13 @@ type Data struct {
 	// SelectedStateWarning is what deleting the selected state would break, in
 	// words — the same sentence the canvas menu uses, from the same place.
 	SelectedStateWarning string
+	// Problems is every reason the engine would refuse the selected machine,
+	// grouped onto the node, the edge or the machine that caused it.
+	//
+	// Grouped rather than listed: a message about a state scrolled out of view
+	// is a message nobody reads, so the canvas marks what carries one and the
+	// rail says what it is.
+	Problems machinevalidation.Report
 	// CanvasMenu is the right-click menu the statechart has open, if any.
 	CanvasMenu CanvasMenu
 	// CanvasMenuWarning is what deleting the state that menu is about would

@@ -479,9 +479,13 @@ Two checks against the code changed the shape (see the epic README for the probe
 - [x] **Transition inspector** — Event, target, `cond` from `Registry.Guards()`, and a param form generated from the registered schema.
   - One generated form, not two: actions and guards both carry `[]ParamSchema`, so Story 6's form took a scope and gained two more callers rather than a twin
   - Transition order is semantics — the interpreter takes the first transition on an event whose guard passes — so reordering is offered, and the panel says what the order means
-  - The chart's edge id is positional, so renaming an event or reordering moves the selection; those two edits answer with an SSE redirect carrying where it went, because only the server knows and selection lives in the URL
+  - The chart's edge id is positional, so renaming an event, reordering and deleting all move the selection; those three answer with an SSE redirect carrying where it went, because only the server knows and selection lives in the URL
 
-- [ ] **Inline validation** — `agent.ValidateMachine` returns every error at once, each already carrying the state and field it is about; render them against the node or edge that caused them.
+- [x] **Inline validation** — `agent.ValidateMachine` returns every error at once, each already carrying the state and field it is about; render them against the node or edge that caused them.
+  - `StateID` cannot name a node — it is the machine id plus the state's *leaf* name, so two states in different branches share one — so `ValidationError` gained a `StatePath` set where the error is made
+  - The validator walked three maps, so the same broken machine reported in a different order each time; it now walks in the file's order, which a two-second stream needs and which sorting in Forge could not have given
+  - Most state-level errors are unreachable through the UI by now: an action is chosen from the registry and a duration is refused by `ParseDurationMs`, so what the browser can still cause is a transition left pointing at a deleted state
+  - `Field` cannot say whether an error is about a state or one of its transitions — an entry action and a transition action are the same action type on the same state — so `ValidationError` gained an `Origin` as well
 
 ---
 

@@ -200,7 +200,9 @@ test("a transition to a state that does not exist still draws", async ({ page })
 
   await expect(edge).toHaveAttribute("data-dangling", "true", { timeout: 10_000 });
   // Naming the state that is missing is what makes it fixable.
-  await expect(edge).toHaveText("RECOVER → e2e-nested.idle?");
+  // The label's own text, not the anchor's: a dangling edge is also an invalid
+  // one, so Story 8 adds a mark beside it.
+  await expect(edge.locator(".chart-label__text")).toHaveText("RECOVER → e2e-nested.idle?");
   await expect(edge).toBeVisible();
 
   // And the machine still draws around it: this is the editor for fixing it.

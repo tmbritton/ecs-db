@@ -9,6 +9,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
+	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 )
 
@@ -115,12 +116,7 @@ func TestAgents_ReportsValidity(t *testing.T) {
 		t.Errorf("a valid machine does not say so:\n%s", section(t, html, `data-testid="machine-validity"`, "</span>"))
 	}
 
-	data := agentsFixture()
-	data.Inspection = machines.Inspection{Errors: []agent.ValidationError{
-		{MachineID: "wander", Message: `transition target "nowhere" is not a known state`},
-		{MachineID: "wander", StateID: "idle", Message: `unknown action "leap"`},
-	}}
-	broken := renderAgents(t, data)
+	broken := renderAgents(t, brokenFixture(t))
 	if !strings.Contains(broken, "2 problems") {
 		t.Errorf("the count of problems is not reported:\n%s",
 			section(t, broken, `data-testid="machine-validity"`, "</span>"))
@@ -128,16 +124,47 @@ func TestAgents_ReportsValidity(t *testing.T) {
 	if !strings.Contains(broken, `data-valid="false"`) {
 		t.Error("a machine that does not validate is not marked invalid in the DOM")
 	}
-	if !strings.Contains(broken, "nowhere") || !strings.Contains(broken, "leap") {
-		t.Error("the problems themselves are not listed")
+}
+
+// brokenFixture is the agents fixture with two errors placed the way the server
+// places them: one belonging to no state, one belonging to a node.
+func brokenFixture(t *testing.T) Data {
+	t.Helper()
+	data := agentsFixture()
+	errs := []agent.ValidationError{
+		{MachineID: "wander", Message: "machine has child states but no initial state"},
+		{
+			MachineID: "wander", StateID: "wander.idle", StatePath: "idle", Field: "leap",
+			Message: `entry action "leap" is not registered`,
+		},
 	}
-	// The state a problem belongs to is part of the problem: "unknown action"
-	// with no idea where is a search, not a report. Asserted as the qualified
-	// phrase, not the bare state name — "idle" is on the page anyway, as the
-	// machine's initial state and as a chip in the states readout.
-	if !strings.Contains(broken, "state idle: unknown action") {
-		t.Error("a state-level problem does not name its state")
+	data.Inspection = machines.Inspection{Errors: errs}
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+	return data
+}
+
+// Story 8's placement: an error about a state is rendered against that state,
+// not glued into one list with "state <id>:" on the front. Only what belongs to
+// no state is left at the top.
+func TestAgents_PlacesEachProblemWhereItBelongs(t *testing.T) {
+	broken := renderAgents(t, brokenFixture(t))
+
+	top := section(t, broken, `data-testid="machine-problems"`, "</ul>")
+	if !strings.Contains(top, "no initial state") {
+		t.Errorf("the machine-level problem is not at the top: %s", top)
 	}
+	if strings.Contains(top, "leap") {
+		t.Errorf("a problem about a state was left in the machine's list: %s", top)
+	}
+	// And the node that carries it is marked, so it is findable without being
+	// selected — the whole reason the message is not simply listed.
+	node := nodeSection(t, broken, "idle")
+	if !strings.Contains(node, `data-invalid="true"`) {
+		t.Errorf("the state carrying the problem is not marked: %s", node)
+	}
+	// Where the message itself renders is TestInspector_ShowsTheSelectedStates-
+	// Problems'. This test is about placement, and asserting "leap is somewhere
+	// on the page" would pass on the node's title attribute alone.
 }
 
 func TestAgents_ManifestMapsKeyToValueToComponent(t *testing.T) {

@@ -67,6 +67,63 @@ func (s *Session) Inspect(path string) (Inspection, error) {
 	return Inspection{Definition: probe, Manifest: probe.ContextManifest, Computed: true}, nil
 }
 
+// Invalid is how many validation errors each machine a Save would write has.
+//
+// The dirty set, minus the reformat-only ones — exactly what Save iterates,
+// because that is exactly what could make it fail. A machine Save does not
+// write cannot make it fail, and blocking the button on one would take the Save
+// away for a file this footer does not touch.
+//
+// Both filters do work, and it is worth being exact about which does what.
+// dirty() iterates s.order — the *resolved* set — while s.files is wider: it
+// also holds machines reload() kept back because they had unsaved work and
+// stopped resolving. So dropping dirty() would start counting a stranded
+// machine's problems, which no Save this footer offers would write. It is also
+// the cheap filter: without it every held machine would be cloned through the
+// emitter and the parser and validated on every tick of a two-second stream.
+//
+// reformatOnly then removes what is dirty in layout only, which is what Save
+// skips for the same reason: nobody edited it.
+func (s *Session) Invalid() map[string]int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dirty, err := s.dirty()
+	if err != nil {
+		// A machine that will not serialise cannot be saved either. Reporting
+		// nothing would leave the footer offering a Save that fails; the
+		// per-machine answer below is unavailable, so say so at the top.
+		return map[string]int{"": 1}
+	}
+	// Both are loop invariants, and Schema() is not cheap: it takes the schema
+	// session's lock and deep-copies the whole schema, so inside the loop it
+	// was one clone and one lock acquisition per dirty machine, per tick, for
+	// the same value.
+	registry := project.BuildRegistry(s.cfg.HasMap)
+	current := s.cfg.Schema()
+	out := map[string]int{}
+	for _, path := range dirty {
+		if s.reformatOnly(path) {
+			continue
+		}
+		f, ok := s.files[path]
+		if !ok {
+			continue
+		}
+		// A copy, for the reason Inspect makes one: ValidateMachine *writes*
+		// ContextManifest onto whatever it is handed, and this runs on a render.
+		probe, err := clone(f.Current)
+		if err != nil {
+			out[path] = 1
+			continue
+		}
+		if n := len(agent.ValidateMachine(probe, registry, current)); n > 0 {
+			out[path] = n
+		}
+	}
+	return out
+}
+
 // Held is every path the session holds an open file for, resolved or not.
 //
 // Paths is the resolved set and is what rename and delete work against; this is

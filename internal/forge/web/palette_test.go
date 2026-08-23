@@ -402,3 +402,22 @@ func TestStylesheets_PaintTheNativeSelectPopup(t *testing.T) {
 		}
 	}
 }
+
+// A blocked Save is also a dirty one, so the dirty rule paints it amber unless
+// the blocked rule says otherwise — leaving the button that cannot be pressed
+// looking like the call to action. Pinned because the two rules are six hundred
+// lines apart and only their cascade says which wins.
+func TestStylesheets_PaintABlockedSaveAsBlocked(t *testing.T) {
+	body := stripComments(cssFiles(t)["css/forge.css"])
+	i := strings.Index(body, ".save-footer--blocked .save-footer__save")
+	if i < 0 {
+		t.Fatal("nothing styles a blocked save")
+	}
+	rule := body[i:]
+	if j := strings.Index(rule, "}"); j >= 0 {
+		rule = rule[:j]
+	}
+	if !strings.Contains(rule, "background:") {
+		t.Errorf("the blocked rule sets no background, so the dirty rule's amber wins: %s", rule)
+	}
+}

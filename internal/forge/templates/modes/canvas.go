@@ -78,6 +78,65 @@ func edgePath(e ChartEdge) string {
 // edgeClass says in the markup what the stroke says in the picture: a guarded
 // transition is dashed because it might not fire, a dangling one is red because
 // it goes nowhere.
+// stateProblems and edgeProblems are what the two rails render.
+func stateProblems(data Data) []components.Problem {
+	return data.Problems.ForState(selectedStatePath(data))
+}
+
+// problemCount is how many problems the whole machine has, for the one line
+// that says so where the canvas can be seen.
+func problemCount(data Data) int { return data.Problems.Count() }
+
+func machineProblemSummary(data Data) string {
+	switch n := problemCount(data); n {
+	case 0:
+		return ""
+	case 1:
+		return "1 problem stops this machine loading. It is marked on the canvas."
+	default:
+		return itoa(n) + " problems stop this machine loading. They are marked on the canvas."
+	}
+}
+
+// stateInvalid and edgeInvalid are what the canvas marks.
+//
+// A mark and not a message: the rail says what is wrong, but a node scrolled
+// out of view has no rail entry anyone will find — the lesson Epic 12 Story 7
+// learned when a problem on an unselected row was invisible behind a disabled
+// Save. The mark is on the canvas so the thing to look at is findable.
+func stateInvalid(data Data, path string) bool { return data.Problems.HasState(path) }
+
+func edgeInvalid(data Data, id string) bool { return data.Problems.HasEdge(id) }
+
+// nodeTitle is what a node says on hover: what kind of state it is, and what is
+// wrong with it.
+//
+// Both, not one or the other. Replacing the kind with the problem stopped an
+// invalid parallel or history node saying what it was — the one thing about it
+// that a glyph alone does not convey.
+func nodeTitle(data Data, n ChartNode) string {
+	kind := stateKindLabel(n)
+	if problems := problemTitle(data.Problems.ForState(n.Path)); problems != "" {
+		return kind + "\n" + problems
+	}
+	return kind
+}
+
+// edgeProblemTitle is the messages as hover text, so the mark says what it is
+// about without a click.
+
+func edgeProblemTitle(data Data, id string) string {
+	return problemTitle(data.Problems.ForEdge(id))
+}
+
+func problemTitle(problems []components.Problem) string {
+	msgs := make([]string, 0, len(problems))
+	for _, p := range problems {
+		msgs = append(msgs, p.Message)
+	}
+	return strings.Join(msgs, "\n")
+}
+
 func edgeClass(e ChartEdge) string {
 	classes := []string{"chart-edge"}
 	switch {
@@ -105,6 +164,14 @@ func edgeMarker(e ChartEdge) templ.SafeURL {
 	default:
 		return templ.SafeURL("url(#chart-arrow)")
 	}
+}
+
+func nodeClassFor(data Data, n ChartNode) string {
+	c := nodeClass(n)
+	if stateInvalid(data, n.Path) {
+		c += " chart-node--invalid"
+	}
+	return c
 }
 
 func nodeClass(n ChartNode) string {

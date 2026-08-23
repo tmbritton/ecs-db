@@ -100,6 +100,9 @@ var nonDatastarAttrs = map[string]bool{
 	// Whether a problem stops the save, which is the difference the badge and
 	// the hue carry and which a test should not have to read off a class.
 	"blocking": true,
+	// Whether a node or an edge carries a validation error. The mark is a hue
+	// and a glyph; this is how a test asks the question without reading either.
+	"invalid": true,
 }
 
 // Plugins reads the plugin names the vendored bundle registers.

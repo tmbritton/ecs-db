@@ -21,6 +21,14 @@ templ statechart(data Data) {
 		data-on:canvasdrop={ dropAction(data) }
 	>
 		<div class="section-heading"><span>Statechart</span></div>
+		if machineProblemSummary(data) != "" {
+			// One line where the canvas can be seen, because the marks are on
+			// the canvas and a count in the header above it is a scroll away
+			// from the thing it is counting.
+			<p class="chart__problems" data-testid="canvas-problem-summary">
+				{ machineProblemSummary(data) }
+			</p>
+		}
 		if canvasEmpty(data) {
 			<p class="chart__empty" data-testid="canvas-empty">
 				This machine declares no states yet.
@@ -62,7 +70,8 @@ templ statechart(data Data) {
 					for _, e := range data.Chart.Edges {
 						<a
 							class={ "chart-label", kv("chart-label--selected", e.Selected),
-								kv("chart-label--dangling", e.Dangling) }
+								kv("chart-label--dangling", e.Dangling),
+								kv("chart-label--invalid", edgeInvalid(data, e.ID)) }
 							style={ labelStyle(e) }
 							href={ URL(selectEdgeHref(data, e.ID)) }
 							data-testid={ "edge-" + e.ID }
@@ -71,11 +80,16 @@ templ statechart(data Data) {
 							data-selected={ boolAttr(e.Selected) }
 							data-guard={ e.Guard }
 							data-dangling={ boolAttr(e.Dangling) }
+							data-invalid={ boolAttr(edgeInvalid(data, e.ID)) }
 							data-to={ e.To }
-							if e.Dangling {
+							if edgeInvalid(data, e.ID) {
+								title={ edgeProblemTitle(data, e.ID) }
+							} else if e.Dangling {
 								title={ "no state named " + e.Target }
 							}
-						>{ e.Label() }</a>
+						><span class="chart-label__text">{ e.Label() }</span>if edgeInvalid(data, e.ID) {
+								<span class="chart-label__invalid" role="img" aria-label="has a problem">!</span>
+							}</a>
 					}
 				</div>
 			</div>
@@ -142,20 +156,21 @@ templ arrowMarker(id string, fill string) {
 // children.
 templ chartNode(data Data, n ChartNode) {
 	<div
-		class={ nodeClass(n) }
+		class={ nodeClassFor(data, n) }
 		style={ nodeStyle(n) }
 		data-testid={ "state-" + n.Path }
 		data-path={ n.Path }
 		data-kind={ string(n.Kind) }
 		data-initial={ boolAttr(n.Initial) }
 		data-selected={ boolAttr(n.Selected) }
+		data-invalid={ boolAttr(stateInvalid(data, n.Path)) }
 	>
 		<a
 			class="chart-node__head"
 			style={ headStyle(n) }
 			href={ URL(selectStateHref(data, n.Path)) }
 			data-testid={ "select-state-" + n.Path }
-			title={ stateKindLabel(n) }
+			title={ nodeTitle(data, n) }
 			data-on:contextmenu={ menuAction(data, "state", "state", n.Path) }
 			if n.Selected {
 				aria-current="true"
@@ -168,6 +183,16 @@ templ chartNode(data Data, n ChartNode) {
 					{ n.Name }
 					if n.Initial {
 						<span class="chart-node__initial" title="initial state">◉</span>
+					}
+					if stateInvalid(data, n.Path) {
+						// Named as well as coloured: a difference that exists
+						// only as a hue is not available to everyone reading.
+						<span
+							class="chart-node__invalid"
+							data-testid={ "state-invalid-" + n.Path }
+							role="img"
+							aria-label="has a problem"
+						>!</span>
 					}
 				</span>
 				for _, entry := range n.Entry {

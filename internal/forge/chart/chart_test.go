@@ -3,6 +3,7 @@ package chart_test
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
@@ -745,5 +746,25 @@ func TestBuild_EdgeCarriesWhichTransitionOnTheKeyItIs(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != 0 || got[1] != 1 {
 		t.Errorf("indexes = %v, want [0 1]", got)
+	}
+}
+
+// An edge carries the actions it runs, so a validation error naming one can be
+// attached to the edge rather than falling back to the state it leaves.
+func TestBuild_EdgeCarriesTheActionsItRuns(t *testing.T) {
+	c := chart.Build(parse(t, `{
+	  "id": "acts",
+	  "initial": "a",
+	  "states": {
+	    "a": { "on": { "GO": [{ "target": "b", "actions": ["log", { "type": "dealDamage" }] }] } },
+	    "b": {}
+	  }
+	}`), "")
+
+	if len(c.Edges) != 1 {
+		t.Fatalf("drew %d edges", len(c.Edges))
+	}
+	if got := strings.Join(c.Edges[0].Actions, ","); got != "log,dealDamage" {
+		t.Errorf("actions = %s, want log,dealDamage", got)
 	}
 }

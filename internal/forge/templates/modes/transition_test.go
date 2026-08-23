@@ -6,6 +6,8 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
+	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // forkMachine has what the transition panel is about: two transitions on one
@@ -516,6 +518,60 @@ func tagName(s string) string {
 		name = name[:i]
 	}
 	return name
+}
+
+// ── validation, placed ────────────────────────────────────────────────────────
+
+// The rail says what is wrong with the transition it is showing — against the
+// control whose value failed, not merely somewhere in the panel. `LOST` targets
+// a state that does not exist, so the target dropdown is what carries it and
+// what points at it.
+func TestTransitionInspector_AssociatesAProblemWithTheControlItIsAbout(t *testing.T) {
+	data := transitionFixture(t, lostSel)
+	errs := agent.ValidateMachine(data.Machine, agent.NewRegistry(), schema.DatabaseSchema{})
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+
+	target := elementOf(t, renderAgents(t, data), "transition-target")
+	if !strings.Contains(target, "not a known state") {
+		t.Errorf("the problem is not under the control it is about: %s", target)
+	}
+	// Pointed at, not merely near: proximity is not association.
+	if !strings.Contains(target, `aria-describedby="`+fieldProblemsID("target")+`"`) {
+		t.Errorf("the control does not point at the message: %s", target)
+	}
+	// Stated as an error, not merely coloured: every one of these is a reason
+	// the save is refused.
+	if !strings.Contains(target, "error") {
+		t.Errorf("the severity is only a hue: %s", target)
+	}
+}
+
+// A guard the engine does not register is the guard control's problem.
+func TestTransitionInspector_AssociatesAGuardProblemWithTheGuardControl(t *testing.T) {
+	data := transitionFixture(t, guardedGo)
+	errs := agent.ValidateMachine(data.Machine, agent.NewRegistry(), schema.DatabaseSchema{})
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+
+	guard := elementOf(t, renderAgents(t, data), "transition-guard")
+	if !strings.Contains(guard, "is not registered") {
+		t.Errorf("the guard problem is not under the guard control: %s", guard)
+	}
+	if !strings.Contains(guard, `aria-describedby="`+fieldProblemsID("guard")+`"`) {
+		t.Errorf("the guard control does not point at the message: %s", guard)
+	}
+}
+
+// An action a transition runs is a row rather than a control, so it has nowhere
+// to be associated to and renders as the panel's own list.
+func TestTransitionInspector_ShowsAnActionProblemInThePanelsOwnList(t *testing.T) {
+	data := transitionFixture(t, pokeSel)
+	errs := agent.ValidateMachine(data.Machine, agent.NewRegistry(), schema.DatabaseSchema{})
+	data.Problems = machinevalidation.Check(data.Machine, errs, data.Chart)
+
+	problems := elementOf(t, renderAgents(t, data), "edge-problems")
+	if !strings.Contains(problems, "transition action") {
+		t.Errorf("the action problem is nowhere in the panel: %s", problems)
+	}
 }
 
 func mustParse(t *testing.T, src string) *agent.MachineDefinition {

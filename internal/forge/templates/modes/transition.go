@@ -342,3 +342,40 @@ func fieldProblems(data Data, field string) []components.Problem {
 func fieldProblemsID(field string) string {
 	return components.ProblemsID("transition", field)
 }
+
+// edgeFieldProblems is everything wrong with one control of the transition
+// panel: the last refusal if it was about this control, and any validation
+// error the engine reported about the value this control holds.
+//
+// The second half is what makes "associated with the field they are about"
+// true rather than "positioned nearby". ValidationError.Field carries the value
+// that failed — the target that resolves to nothing, the guard that is not
+// registered, the duration that will not parse — so an error whose Field is
+// what this control currently shows is an error about this control, and the
+// control can point at it with aria-describedby.
+func edgeFieldProblems(data Data, e ChartEdge, field, value string) []components.Problem {
+	out := fieldProblems(data, field)
+	if value == "" {
+		return out
+	}
+	for _, p := range data.Problems.ForEdge(e.ID) {
+		if p.Field == value {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// edgeOtherProblems is what no control on the panel holds: an action the
+// transition runs, which is a row rather than a field. They render as the
+// panel's own list.
+func edgeOtherProblems(data Data, e ChartEdge) []components.Problem {
+	claimed := map[string]bool{e.Event: true, e.Target: true, e.Guard: true}
+	var out []components.Problem
+	for _, p := range data.Problems.ForEdge(e.ID) {
+		if !claimed[p.Field] {
+			out = append(out, p)
+		}
+	}
+	return out
+}

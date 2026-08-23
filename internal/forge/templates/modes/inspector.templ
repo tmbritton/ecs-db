@@ -19,6 +19,13 @@ templ stateInspector(data Data) {
 		} else {
 			<div class="section-heading"><span>State</span></div>
 
+			// What the engine says about this state, first: it is why the node
+			// is marked on the canvas, and the reason someone selected it.
+			@components.Problems(components.ProblemsProps{
+				Problems: stateProblems(data),
+				Testid:   "state-problems",
+			})
+
 			<label class="inspector__row">
 				<span class="inspector__label">name</span>
 				<input

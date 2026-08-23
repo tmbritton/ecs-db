@@ -30,10 +30,18 @@ templ transitionInspector(data Data) {
 		<div class="section-heading"><span>Transition</span></div>
 		<p class="inspector__route mono" data-testid="transition-route">{ transitionRoute(*e) }</p>
 
+		// What no control on this panel holds — an action the transition runs is
+		// a row, not a field. Everything else is associated with the control
+		// whose value failed.
+		@components.Problems(components.ProblemsProps{
+			Problems: edgeOtherProblems(data, *e),
+			Testid:   "edge-problems",
+		})
+
 		// Pointed at only when there is a message to point at: an
 		// aria-describedby naming an id nothing carries is the same as none at
 		// all and looks identical, which is the failure it exists to prevent.
-		{{ eventProblems := fieldProblems(data, "event") }}
+		{{ eventProblems := edgeFieldProblems(data, *e, "event", e.Event) }}
 		<label class="inspector__row">
 			<span class="inspector__label">{ eventLabel(*e) }</span>
 			<input
@@ -82,7 +90,7 @@ templ transitionInspector(data Data) {
 				Selected:  selectedTarget(*e),
 				Options:   targetOptions(data, *e),
 				Action:    setTargetAction(data, *e),
-				Problems:  fieldProblems(data, "target"),
+				Problems:  edgeFieldProblems(data, *e, "target", selectedTarget(*e)),
 				ProblemID: fieldProblemsID("target"),
 			})
 		</div>
@@ -94,7 +102,7 @@ templ transitionInspector(data Data) {
 				Selected:  guardName(t),
 				Options:   guardOptions(data, t),
 				Action:    setGuardAction(data, *e),
-				Problems:  fieldProblems(data, "guard"),
+				Problems:  edgeFieldProblems(data, *e, "guard", guardName(t)),
 				ProblemID: fieldProblemsID("guard"),
 			})
 		</div>

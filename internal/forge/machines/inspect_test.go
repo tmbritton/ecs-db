@@ -8,6 +8,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 // A machine whose context key matches no component field. The engine refuses
@@ -336,5 +337,139 @@ func shadow(t *testing.T, core, mod, name, body string) {
 	dir := filepath.Join(filepath.Dir(filepath.Dir(core)), mod, "behaviors")
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A machine can become invalid without being edited: schema.json is what its
+// context keys are checked against, and SCHEMA can take the field away while
+// AGENTS is open. That machine is still not something Save writes, so it must
+// not take the button away — the footer's job is to predict the save it offers,
+// not to grade every file in the project.
+//
+// This is also the only shape that can tell "the dirty set" from "everything
+// held" apart: the session refuses to open a machine that is invalid on disk,
+// so a held machine is valid until either it or the schema changes.
+func TestInvalid_IgnoresAMachineOnlyTheSchemaBroke(t *testing.T) {
+	s, current := openWithSchema(t, map[string]string{"wander.json": wander})
+	path := machinePathNamed(t, s, "wander.json")
+	// Saved once so the file is byte-for-byte what the emitter writes: the
+	// machine is then neither dirty nor reformat-only, which is the only state
+	// in which "the dirty set" and "everything held" give different answers.
+	if result := s.SaveOne(path); result.Err != nil {
+		t.Fatalf("SaveOne: %v", result.Err)
+	}
+	if got := s.Invalid(); len(got) != 0 {
+		t.Fatalf("a valid project reports %v", got)
+	}
+	// Take away the field the machine's context key matched.
+	*current = schema.DatabaseSchema{SchemaVersion: current.SchemaVersion}
+
+	if got := s.Invalid(); len(got) != 0 {
+		t.Errorf("a machine nobody edited blocks a save that would not write it: %v", got)
+	}
+	// And it is genuinely invalid now, so the fixture is testing what it says.
+	inspection, err := s.Inspect(path)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if len(inspection.Errors) == 0 {
+		t.Fatal("the schema change did not break the machine")
+	}
+}
+
+// A reformat-only machine is dirty and is not written, so it cannot make the
+// save fail either — the same rule Save itself applies.
+func TestInvalid_IgnoresAReformatOnlyMachine(t *testing.T) {
+	// Authored on one line: its content matches the file and its layout does not.
+	compact := `{"id": "wander", "initial": "idle", "context": {"hp": 0}, "states": {"idle": {}}}`
+	s, current := openWithSchema(t, map[string]string{"wander.json": compact})
+	path := machinePathNamed(t, s, "wander.json")
+
+	dirty, err := s.Dirty()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirty) != 1 || dirty[0] != path {
+		t.Fatalf("the fixture is not reformat-dirty: %v", dirty)
+	}
+	*current = schema.DatabaseSchema{SchemaVersion: current.SchemaVersion}
+
+	if got := s.Invalid(); len(got) != 0 {
+		t.Errorf("a machine Save skips blocks the save: %v", got)
+	}
+}
+
+// machinePathNamed is the held path ending in one filename.
+func machinePathNamed(t *testing.T, s *machines.Session, name string) string {
+	t.Helper()
+	for _, p := range s.Held() {
+		if filepath.Base(p) == name {
+			return p
+		}
+	}
+	t.Fatalf("no held machine called %s in %v", name, s.Held())
+	return ""
+}
+
+// Invalid is what the AGENTS footer blocks on, and it is the set a Save would
+// actually attempt: dirty machines, minus the ones whose only difference from
+// their file is layout. A machine nobody edited is not written, so it cannot
+// make the save fail — and validating every held machine on every render of a
+// two-second stream would be a walk of every state tree in the project.
+func TestInvalid_CountsOnlyWhatASaveWouldWrite(t *testing.T) {
+	s, dir := open(t, map[string]string{
+		"nested.json": nestedMachine,
+		// Written the way Forge writes it, so it is not "reformat only" — which
+		// Invalid skips, and which would make this fixture agree with a version
+		// that skipped nothing.
+		"other.json": `{
+  "id": "other",
+  "initial": "a",
+  "states": {
+    "a": {
+      "entry": [
+        "noSuchAction"
+      ]
+    }
+  }
+}
+`,
+	})
+	path := machinePath(t, dir)
+
+	// other.json is invalid on disk and nobody has touched it: not a reason the
+	// save the footer offers would be refused.
+	if got := s.Invalid(); len(got) != 0 {
+		t.Errorf("a machine nobody edited blocks the save: %v", got)
+	}
+
+	// Break the one being edited.
+	if err := s.AddAction(path, "idle", "entry", "dealDamage"); err != nil {
+		t.Fatalf("AddAction: %v", err)
+	}
+	if err := s.SetTransitionTarget(path, ref("idle", "on", "POKE", 0), "combat.fleeing"); err != nil {
+		t.Fatalf("SetTransitionTarget: %v", err)
+	}
+	if got := s.Invalid(); len(got) != 0 {
+		t.Errorf("a valid edit blocks the save: %v", got)
+	}
+
+	if err := s.RenameState(path, "combat.fleeing", "gone"); err != nil {
+		t.Fatalf("RenameState: %v", err)
+	}
+	// Renaming carries its targets, so that alone is still valid. Point one at
+	// nothing by hand.
+	if err := s.Edit(path, func(def *agent.MachineDefinition) error {
+		def.States["idle"].On["POKE"][0].Target = "nowhere"
+		return nil
+	}); err != nil {
+		t.Fatalf("Edit: %v", err)
+	}
+	got := s.Invalid()
+	if got[path] == 0 {
+		t.Fatalf("a machine the engine would refuse does not block the save: %v", got)
+	}
+	if len(got) != 1 {
+		t.Errorf("Invalid names %d machines, want only the edited one: %v", len(got), got)
 	}
 }

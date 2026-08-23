@@ -52,22 +52,63 @@ func blockedReason(report validation.Report) string {
 
 // MachinesFooter builds the save footer for AGENTS mode.
 //
-// Not blocked by validity, unlike SchemaFooter, and that difference is the
-// story's central decision rather than an oversight. An invalid schema.json
-// stops the engine starting, so blocking its save protects the project; an
-// invalid *machine* is rejected by the loader on its own, so the blast radius
-// is one file. Save writes what it can and reports what it could not, and a
-// half-built machine on the canvas cannot hold finished work hostage.
-func MachinesFooter(file string, dirty bool, title string, unsavedSchema bool) templ.Component {
+// Blocked by validity as of Epic 13 Story 8, which reverses what Story 2 chose
+// and what this comment used to say. The reversal is recorded rather than
+// erased, because the argument against it has not gone away.
+//
+// Story 2's reasoning: an invalid schema.json stops the engine starting, so
+// blocking its save protects the project; an invalid *machine* is rejected by
+// the loader on its own, so the blast radius is one file. Session.Save is still
+// built that way — it writes every dirty machine it can and reports the ones it
+// could not, per file.
+//
+// Story 8 asks for the opposite in as many words ("an error blocks the save;
+// the footer says how many"), and the case for it is that a Save which silently
+// declines one of five files is a save someone believes happened. The cost is
+// real and worth naming: with one machine half-built, a *different* machine's
+// finished work cannot be written, and the only way out is to fix it or to
+// Discard — which discards every machine, not the broken one. Per-machine
+// discard exists only for stranded files.
+//
+// If that trade turns out to be wrong, the fix is a per-machine save or a
+// per-machine discard, not a return to a Save that half-works in silence.
+func MachinesFooter(file string, dirty bool, title string, unsavedSchema bool, invalid map[string]int) templ.Component {
 	return components.SaveFooter(components.SaveFooterProps{
-		Dirty:      dirty,
-		File:       file,
-		Title:      title,
-		Elsewhere:  schemaElsewhere(unsavedSchema),
-		SaveAction: "@post('/forge/agents/save')",
+		Dirty:         dirty,
+		File:          file,
+		Title:         title,
+		Elsewhere:     schemaElsewhere(unsavedSchema),
+		Blocked:       len(invalid) > 0,
+		BlockedReason: machinesBlockedReason(invalid),
+		SaveAction:    "@post('/forge/agents/save')",
 		DiscardAction: "confirm('Discard unsaved changes to every machine?') && " +
 			"@post('/forge/agents/discard')",
 	})
+}
+
+// machinesBlockedReason is the one line beside a disabled Save.
+//
+// Across every machine the save would write, not just the one on screen: the
+// button saves all of them, so a footer reporting only the selected machine
+// would offer a Save that fails on a file in another tab of the same list. The
+// problems themselves render against what caused them, on the canvas of the
+// machine they belong to.
+func machinesBlockedReason(invalid map[string]int) string {
+	if len(invalid) == 0 {
+		return ""
+	}
+	problems := 0
+	for _, n := range invalid {
+		problems += n
+	}
+	where := "1 machine"
+	if len(invalid) > 1 {
+		where = strconv.Itoa(len(invalid)) + " machines"
+	}
+	if problems == 1 {
+		return "1 problem in " + where + " — the engine would refuse it"
+	}
+	return strconv.Itoa(problems) + " problems in " + where + " — the engine would refuse them"
 }
 
 // machinesElsewhere and schemaElsewhere say that there is unsaved work this
