@@ -2,6 +2,7 @@ package modes
 
 import (
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -55,6 +56,16 @@ type Data struct {
 	// manifest, nor off the resolved Machines, which describe the files as last
 	// read rather than what is being edited.
 	Inspection machines.Inspection
+	// Chart is the selected machine drawn: a node per state, an edge per
+	// transition, positioned, with the URL's selection already resolved
+	// against what it drew.
+	//
+	// Built from Machine and from nothing else. The canvas never consults the
+	// inspection: a machine that does not validate is precisely the one
+	// someone opened the editor to fix, and a chart that refused to draw it
+	// would send them back to a text editor at the moment the tool is most
+	// use.
+	Chart chart.Chart
 	// StrandedMachines are held with unsaved work but no longer resolve, so
 	// they are in no list and nothing can reach them except the problem panel.
 	StrandedMachines map[string]bool

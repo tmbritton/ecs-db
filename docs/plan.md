@@ -464,7 +464,9 @@ Two checks against the code changed the shape (see the epic README for the probe
   - The manifest's two absences are different sentences: a machine that seeds nothing and one whose seeds are unknown are the same empty map, and the panel must not give the first answer when the truth is the second
   - Stranded work — held with unsaved changes but no longer resolving — could be reached by nothing, because every route validated its path against the resolved set
 
-- [ ] **Statechart canvas: rendering** — Nodes, edges, nesting and selection, server-rendered and patched down the page stream. No JS.
+- [x] **Statechart canvas: rendering** — Nodes, edges, nesting and selection, server-rendered and patched down the page stream. No JS.
+  - A dotted-path target was resolvable by the interpreter and refused by the validator, so a machine with a transition into a nested state could neither run nor be opened to be fixed; both now use one exported `FindState`, which also stopped resolving ambiguous targets in map order
+  - The node layer covered the whole canvas and swallowed every click meant for the ground — invisible to `go test`, and the reason the browser suite exists
 
 - [ ] **Statechart canvas: direct manipulation** — Drag nodes, drag-port-to-connect, double-click to add, right-click menu. The JS owns pointer state and nothing else.
 

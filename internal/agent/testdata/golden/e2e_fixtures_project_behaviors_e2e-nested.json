@@ -1,0 +1,43 @@
+{
+  "id": "e2e-nested",
+  "initial": "idle",
+  "states": {
+    "idle": {
+      "entry": [
+        "pickRandomTarget"
+      ],
+      "on": {
+        "SPOTTED": [{ "target": "combat" }],
+        "POKED": [{ "target": "combat.attacking", "cond": "inRange" }],
+        "NUDGED": [{ "actions": ["log"] }]
+      },
+      "after": {
+        "500": [{ "target": "resting" }]
+      },
+      "meta": { "forge": { "x": 40, "y": 40 } }
+    },
+    "combat": {
+      "initial": "attacking",
+      "states": {
+        "attacking": {
+          "on": {
+            "LOST": [{ "target": "idle" }]
+          }
+        },
+        "fleeing": {
+          "on": {
+            "RECOVER": [{ "target": "e2e-nested.idle" }]
+          }
+        },
+        "back": {
+          "type": "history",
+          "history": "deep"
+        }
+      },
+      "meta": { "forge": { "x": 400, "y": 30 } }
+    },
+    "resting": {
+      "meta": { "forge": { "x": 40, "y": 230 } }
+    }
+  }
+}

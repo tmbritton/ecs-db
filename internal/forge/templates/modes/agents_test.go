@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 )
@@ -44,6 +45,7 @@ func agentsFixture() Data {
 		Manifest: map[string]string{"hp": "Health", "speed": "Motion"},
 	}
 	data.NewMachineID = "NewMachine"
+	data.Chart = chart.Build(data.Machine, "")
 	return data
 }
 

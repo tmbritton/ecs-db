@@ -529,3 +529,67 @@ func TestSendEvent_TargetlessTransition_PreservesConfiguration(t *testing.T) {
 		t.Errorf("Configuration[0].ID = %q, want m.active", a.Configuration[0].ID)
 	}
 }
+
+// A target naming a state that exists in two different subtrees used to resolve
+// to whichever one Go's map iteration reached first, so the same machine ran
+// differently between two launches. The canvas made that visible — it draws the
+// edge the interpreter would take — but the bug was always in the game.
+func TestFindState_AmbiguousTargetResolvesInAuthoredOrder(t *testing.T) {
+	const src = `{
+	  "id": "amb",
+	  "initial": "patrol",
+	  "states": {
+	    "patrol": {
+	      "initial": "alert",
+	      "states": { "alert": {}, "calm": {} }
+	    },
+	    "combat": {
+	      "initial": "alert",
+	      "states": { "alert": {}, "flee": {} }
+	    }
+	  }
+	}`
+	def, err := ParseMachine([]byte(src))
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		node, path := FindState(def, "alert")
+		if path != "patrol.alert" {
+			t.Fatalf("call %d resolved %q, want patrol.alert", i, path)
+		}
+		if node == nil || node.Parent == nil || node.Parent.ID != "amb.patrol" {
+			t.Fatalf("call %d resolved a node under %v", i, node.Parent)
+		}
+	}
+}
+
+// The path is what the canvas keys a node on, because StateNode.ID cannot: it
+// is machineID + "." + name at every depth, so both "alert" states above carry
+// the id "amb.alert".
+func TestFindState_PathIsRootedAndDotted(t *testing.T) {
+	const src = `{
+	  "id": "deep",
+	  "initial": "a",
+	  "states": {
+	    "a": { "initial": "b", "states": { "b": { "initial": "c", "states": { "c": {} } } } }
+	  }
+	}`
+	def, err := ParseMachine([]byte(src))
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	cases := map[string]string{
+		"a":       "a",
+		"a.b":     "a.b",
+		"a.b.c":   "a.b.c",
+		"c":       "a.b.c",
+		"deep.c":  "a.b.c",
+		"missing": "",
+	}
+	for target, want := range cases {
+		if _, got := FindState(def, target); got != want {
+			t.Errorf("FindState(%q) path = %q, want %q", target, got, want)
+		}
+	}
+}

@@ -1,0 +1,161 @@
+package modes
+
+// statechart draws the selected machine.
+//
+// Server-rendered, and not a line of JavaScript: a chart that draws the wrong
+// edges and a chart you cannot drag fail in completely different ways, and only
+// the second needs pointer handling. Story 5 adds that to something already
+// known to be correct.
+//
+// Positioned HTML for the nodes rather than a <canvas>, because the suite
+// selects by test id and a painted canvas is opaque to every assertion in it —
+// and because the design system's borders, fonts and hover states come free.
+// SVG for the edges, where routing and arrowheads come free instead.
+templ statechart(data Data) {
+	<div class="chart-wrap" data-testid="statechart" data-selection={ data.Chart.Selected }>
+		<div class="section-heading"><span>Statechart</span></div>
+		if canvasEmpty(data) {
+			<p class="chart__empty" data-testid="canvas-empty">
+				This machine declares no states yet.
+			</p>
+		} else {
+			<div class="chart__scroll">
+				<div class="chart" style={ canvasStyle(data.Chart) }>
+					if data.Chart.Selected != "" {
+						// The ground, under everything, so clicking off a node
+						// lets go of it. Rendered only when there is something
+						// to let go of: a link that does nothing is still a
+						// link to everything that reads the page aloud.
+						<a
+							class="chart__ground"
+							href={ URL(clearSelectionHref(data)) }
+							data-testid="canvas-ground"
+							aria-label="Clear selection"
+						></a>
+					}
+					@chartEdges(data)
+					<div class="chart__nodes">
+						for _, n := range data.Chart.Nodes {
+							@chartNode(data, n)
+						}
+					</div>
+					// Labels last so they sit above the nodes: an edge whose
+					// midpoint falls over a state — every self-transition — is
+					// still the thing you click.
+					for _, e := range data.Chart.Edges {
+						<a
+							class={ "chart-label", kv("chart-label--selected", e.Selected),
+								kv("chart-label--dangling", e.Dangling) }
+							style={ labelStyle(e) }
+							href={ URL(selectEdgeHref(data, e.ID)) }
+							data-testid={ "edge-" + e.ID }
+							data-selected={ boolAttr(e.Selected) }
+							data-guard={ e.Guard }
+							data-dangling={ boolAttr(e.Dangling) }
+							data-to={ e.To }
+							if e.Dangling {
+								title={ "no state named " + e.Target }
+							}
+						>{ e.Label() }</a>
+					}
+				</div>
+			</div>
+			<p class="chart__foot mono" data-testid="canvas-selection">{ selectionLabel(data) }</p>
+		}
+	</div>
+}
+
+// chartEdges is the line layer, under the nodes.
+templ chartEdges(data Data) {
+	<svg
+		class="chart__edges"
+		width={ num(data.Chart.W) }
+		height={ num(data.Chart.H) }
+		aria-hidden="true"
+		focusable="false"
+	>
+		<defs>
+			// The prototype's dot grid, as an SVG pattern rather than the
+			// radial-gradient it uses there: gradients are not part of this
+			// design language, and the stylesheet test says so. Purely a
+			// backdrop — nothing snaps to it and nothing is positioned
+			// against it.
+			<pattern id="chart-grid" width="22" height="22" patternUnits="userSpaceOnUse">
+				<circle cx="1.5" cy="1.5" r="1.5" fill="var(--border)"></circle>
+			</pattern>
+			@arrowMarker("chart-arrow", "var(--text-dim)")
+			@arrowMarker("chart-arrow-selected", "var(--amber)")
+			@arrowMarker("chart-arrow-dangling", "var(--red)")
+		</defs>
+		<rect width="100%" height="100%" fill="url(#chart-grid)"></rect>
+		for _, e := range data.Chart.Edges {
+			<path
+				class={ edgeClass(e) }
+				d={ edgePath(e) }
+				marker-end={ edgeMarker(e) }
+				data-testid={ "edge-line-" + e.ID }
+			></path>
+		}
+	</svg>
+}
+
+templ arrowMarker(id string, fill string) {
+	<marker
+		id={ id }
+		viewBox="0 0 8 8"
+		refX="7"
+		refY="4"
+		markerWidth="7"
+		markerHeight="7"
+		orient="auto-start-reverse"
+	>
+		<path d="M 0 0 L 8 4 L 0 8 z" fill={ fill }></path>
+	</marker>
+}
+
+// chartNode draws one state, and its children inside it.
+//
+// The box is a div and the clickable part is the header inside it, because a
+// compound state contains its children in the DOM and an anchor inside an
+// anchor is not markup a browser will keep. It also happens to be the right
+// hit area: the header is the part of a compound state that is not one of its
+// children.
+templ chartNode(data Data, n ChartNode) {
+	<div
+		class={ nodeClass(n) }
+		style={ nodeStyle(n) }
+		data-testid={ "state-" + n.Path }
+		data-path={ n.Path }
+		data-kind={ string(n.Kind) }
+		data-initial={ boolAttr(n.Initial) }
+		data-selected={ boolAttr(n.Selected) }
+	>
+		<a
+			class="chart-node__head"
+			style={ headStyle(n) }
+			href={ URL(selectStateHref(data, n.Path)) }
+			data-testid={ "select-state-" + n.Path }
+			title={ stateKindLabel(n) }
+			if n.Selected {
+				aria-current="true"
+			}
+		>
+			if n.Kind == "history" {
+				<span class="chart-node__history mono">{ historyMark(n) }</span>
+			} else {
+				<span class="chart-node__name">
+					{ n.Name }
+					if n.Initial {
+						<span class="chart-node__initial" title="initial state">◉</span>
+					}
+				</span>
+				for _, entry := range n.Entry {
+					<span class="chart-node__entry mono">{ entry }</span>
+				}
+			}
+		</a>
+		for _, child := range n.Children {
+			@chartNode(data, child)
+		}
+	</div>
+}

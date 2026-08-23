@@ -34,33 +34,6 @@ func machineID(def *MachineDefinition) string {
 	return def.ID
 }
 
-// stateNames lists a machine's top-level states in authored order.
-func stateNames(def *MachineDefinition) []string {
-	if def == nil {
-		return nil
-	}
-	seen := map[string]bool{}
-	out := make([]string, 0, len(def.States))
-	for _, name := range def.StateOrder {
-		if _, ok := def.States[name]; ok && !seen[name] {
-			out = append(out, name)
-			seen[name] = true
-		}
-	}
-	var rest []string
-	for name := range def.States {
-		if !seen[name] {
-			rest = append(rest, name)
-		}
-	}
-	sort.Strings(rest)
-	return append(out, rest...)
-}
-
-func isInitial(def *MachineDefinition, name string) bool {
-	return def != nil && def.Initial == name
-}
-
 func modOptions(mods []project.Mod) []components.Option {
 	out := make([]components.Option, 0, len(mods)+1)
 	out = append(out, components.Option{Value: "", Label: "choose a mod…"})

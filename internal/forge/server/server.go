@@ -22,6 +22,7 @@ import (
 	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
@@ -254,6 +255,13 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)
 	}
+	// The resolved selection, not the raw parameter, for the same reason as
+	// above: a ?sel= naming a state that has since been renamed resolves to
+	// nothing, and a stream that kept asking for it would re-render a canvas
+	// with a selection the page does not have.
+	if slug == "agents" && data.Chart.Selected != "" {
+		q.Set("sel", data.Chart.Selected)
+	}
 	return q.Encode()
 }
 
@@ -305,6 +313,10 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			// beside it.
 			data.Inspection = s.machineInspection(data.SelectedMachine)
 			data.Machine = data.Inspection.Definition
+			// From the definition, never from the inspection: the canvas has
+			// to draw a machine that does not validate, because that is the
+			// one someone opened the editor to fix.
+			data.Chart = chart.Build(data.Machine, r.URL.Query().Get("sel"))
 			data.StrandedMachines = strandedSet(s.cfg.MachineSession)
 			data.NewMachineID = s.cfg.MachineSession.FreeID("NewMachine")
 		}

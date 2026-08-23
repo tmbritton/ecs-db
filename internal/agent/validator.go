@@ -36,7 +36,6 @@ func (e ValidationError) Error() string {
 func ValidateMachine(def *MachineDefinition, registry *Registry, s schema.DatabaseSchema) []ValidationError {
 	var errs []ValidationError
 
-	knownStates := collectStateIDs(def.States)
 	fieldIndex := buildFieldIndex(s)
 
 	for key := range def.Context {
@@ -68,8 +67,9 @@ func ValidateMachine(def *MachineDefinition, registry *Registry, s schema.Databa
 	}
 	errs = append(errs, validateInitial(def.ID, "", def.Initial, def.States)...)
 
+	resolver := NewStateResolver(def)
 	for _, node := range def.States {
-		errs = append(errs, validateStateNode(def.ID, node, registry, knownStates)...)
+		errs = append(errs, validateStateNode(def, node, registry, resolver)...)
 	}
 
 	if len(errs) == 0 {
@@ -147,7 +147,18 @@ func buildFieldIndex(s schema.DatabaseSchema) map[string][]string {
 	return index
 }
 
-func validateStateNode(machineID string, node *StateNode, registry *Registry, knownStates map[string]bool) []ValidationError {
+// validateStateNode checks one state and everything under it.
+//
+// Targets are resolved with FindState — the interpreter's own resolver — rather
+// than checked against a set of names. They used to be checked against
+// collectStateIDs, which holds every bare state key and every StateNode.ID and
+// so contains no dotted path at all. "combat.attacking" is XState v4's own
+// notation and the interpreter traverses it segment by segment, so a machine
+// with a transition into a nested state was resolvable at runtime and refused
+// at load: it could not run, and it could not be opened in Forge to be fixed,
+// because the loader validates before it registers anything.
+func validateStateNode(def *MachineDefinition, node *StateNode, registry *Registry, resolver *StateResolver) []ValidationError {
+	machineID := def.ID
 	var errs []ValidationError
 
 	for _, action := range node.Entry {
@@ -168,7 +179,7 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 	}
 	for _, transitions := range node.On {
 		for _, t := range transitions {
-			errs = append(errs, validateTransition(machineID, node.ID, t, registry, knownStates)...)
+			errs = append(errs, validateTransition(def, node.ID, t, registry, resolver)...)
 		}
 	}
 	for duration, transitions := range node.After {
@@ -179,7 +190,7 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 			})
 		}
 		for _, t := range transitions {
-			errs = append(errs, validateTransition(machineID, node.ID, t, registry, knownStates)...)
+			errs = append(errs, validateTransition(def, node.ID, t, registry, resolver)...)
 		}
 	}
 	if node.Initial == "" && requiresInitial(node) {
@@ -191,7 +202,7 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 	errs = append(errs, validateInitial(machineID, node.ID, node.Initial, node.Children)...)
 
 	if node.Type == StateTypeHistory && node.Target != "" {
-		if !knownStates[node.Target] {
+		if n, _ := resolver.Resolve(node.Target); n == nil {
 			errs = append(errs, ValidationError{
 				MachineID: machineID, StateID: node.ID, Field: node.Target,
 				Message: fmt.Sprintf("history default target %q is not a known state", node.Target),
@@ -199,7 +210,7 @@ func validateStateNode(machineID string, node *StateNode, registry *Registry, kn
 		}
 	}
 	for _, child := range node.Children {
-		errs = append(errs, validateStateNode(machineID, child, registry, knownStates)...)
+		errs = append(errs, validateStateNode(def, child, registry, resolver)...)
 	}
 
 	return errs
@@ -244,10 +255,11 @@ func requiresInitial(node *StateNode) bool {
 	return len(node.Children) > 0 && node.Type != StateTypeParallel
 }
 
-func validateTransition(machineID, stateID string, t Transition, registry *Registry, knownStates map[string]bool) []ValidationError {
+func validateTransition(def *MachineDefinition, stateID string, t Transition, registry *Registry, resolver *StateResolver) []ValidationError {
+	machineID := def.ID
 	var errs []ValidationError
 
-	if t.Target != "" && !knownStates[t.Target] {
+	if node, _ := resolver.Resolve(t.Target); node == nil && t.Target != "" {
 		errs = append(errs, ValidationError{
 			MachineID: machineID, StateID: stateID, Field: t.Target,
 			Message: fmt.Sprintf("transition target %q is not a known state", t.Target),

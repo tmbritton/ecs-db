@@ -560,6 +560,37 @@ func TestStreamQuery_UsesTheNamespaceModeDataResolved(t *testing.T) {
 	}
 }
 
+// The page's stream has to carry the canvas selection, or its first frame
+// re-renders the mode content with nothing selected and silently clears it.
+//
+// Asserted on the subscription the page actually writes, not on the address
+// bar. A test that rebuilt the stream URL from the address bar — which the
+// browser spec was doing — passes whether this branch exists or not, because
+// the address bar carries ?sel= either way.
+func TestStreamQuery_CarriesTheCanvasSelection(t *testing.T) {
+	srv, _, dir := machineServer(t)
+	path := filepath.Join(dir, "core", "behaviors", "wander.json")
+
+	_, body := get(t, srv, "/forge/agents?machine="+url.QueryEscape(path)+"&sel=state:idle")
+	if init := dataInit(t, body); !strings.Contains(init, "sel=state%3Aidle") {
+		t.Errorf("the subscription does not carry the selection:\n%s", init)
+	}
+
+	// And only what resolved. A selection naming a state that is not there is
+	// dropped by the chart, and a stream that went on asking for it would
+	// re-render a canvas with a selection the page does not have.
+	_, body = get(t, srv, "/forge/agents?machine="+url.QueryEscape(path)+"&sel=state:gone")
+	if init := dataInit(t, body); strings.Contains(init, "sel=") {
+		t.Errorf("the subscription carries a selection that resolved to nothing:\n%s", init)
+	}
+
+	// Only on AGENTS, on the same terms as the machine path itself.
+	_, body = get(t, srv, "/forge/schema?sel=state:idle")
+	if init := dataInit(t, body); strings.Contains(init, "sel=") {
+		t.Errorf("a mode with no canvas subscribes with a canvas selection:\n%s", init)
+	}
+}
+
 // The SSE loop suppresses a patch by comparing the rendered string, so anything
 // that renders differently for one unchanged state is re-sent on a random
 // fraction of ticks, forever.

@@ -376,3 +376,80 @@ func TestValidateMachine_AfterDuration_Invalid(t *testing.T) {
 		t.Error("expected validation error for duration 'bad', got none")
 	}
 }
+
+// A dotted-path target is XState v4's own notation and the interpreter resolves
+// it — findState traverses the path segment by segment before anything else. It
+// was rejected here, because the check was set membership over bare names and
+// ids and no path is either of those. The consequence was not a warning: a
+// machine with a transition into a nested state failed validation, which means
+// the loader refused it, which means it could not run and could not be opened
+// in Forge to be fixed.
+func TestValidateMachine_AcceptsADottedPathIntoACompoundState(t *testing.T) {
+	def, err := ParseMachine([]byte(`{
+	  "id": "nest",
+	  "initial": "idle",
+	  "states": {
+	    "idle": { "on": { "POKED": [{ "target": "combat.attacking" }] } },
+	    "combat": {
+	      "initial": "attacking",
+	      "states": { "attacking": {}, "fleeing": {} }
+	    }
+	  }
+	}`))
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	if errs := ValidateMachine(def, NewRegistry(), schema.DatabaseSchema{}); len(errs) != 0 {
+		t.Errorf("rejected a machine the interpreter runs: %v", errs)
+	}
+	// And the interpreter agrees, which is the whole point of the two using one
+	// resolver rather than each having a rule.
+	if _, path := FindState(def, "combat.attacking"); path != "combat.attacking" {
+		t.Errorf("the interpreter resolves it to %q", path)
+	}
+}
+
+// A history node's default target is the same notation and had the same bug.
+func TestValidateMachine_AcceptsADottedPathAsAHistoryDefault(t *testing.T) {
+	def, err := ParseMachine([]byte(`{
+	  "id": "hist",
+	  "initial": "combat",
+	  "states": {
+	    "combat": {
+	      "initial": "attacking",
+	      "states": {
+	        "attacking": {},
+	        "back": { "type": "history", "history": "shallow", "target": "combat.attacking" }
+	      }
+	    }
+	  }
+	}`))
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	if errs := ValidateMachine(def, NewRegistry(), schema.DatabaseSchema{}); len(errs) != 0 {
+		t.Errorf("rejected a history default the interpreter resolves: %v", errs)
+	}
+}
+
+// Loosening the check must not stop it refusing what is genuinely missing.
+func TestValidateMachine_StillRefusesATargetThatIsNotThere(t *testing.T) {
+	def, err := ParseMachine([]byte(`{
+	  "id": "gone",
+	  "initial": "idle",
+	  "states": {
+	    "idle": { "on": { "GO": [{ "target": "combat.ghost" }] } },
+	    "combat": { "initial": "attacking", "states": { "attacking": {} } }
+	  }
+	}`))
+	if err != nil {
+		t.Fatalf("ParseMachine: %v", err)
+	}
+	errs := ValidateMachine(def, NewRegistry(), schema.DatabaseSchema{})
+	if len(errs) != 1 {
+		t.Fatalf("got %d errors, want 1: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Message, `"combat.ghost"`) {
+		t.Errorf("the error does not name the target: %v", errs[0])
+	}
+}

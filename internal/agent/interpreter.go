@@ -287,35 +287,149 @@ func computeEntrySet(def *MachineDefinition, transitions []selectedTransition, h
 }
 
 func resolveTarget(target string, def *MachineDefinition) *StateNode {
-	if target == "" {
-		return nil
-	}
-	return findState(def.States, target)
+	node, _ := FindState(def, target)
+	return node
 }
 
-// findState resolves a target string to a StateNode.
-// Dot-separated paths ("c.h") are traversed segment-by-segment before falling
-// back to full-tree name/ID search, matching XState v4 target notation.
-func findState(states map[string]*StateNode, target string) *StateNode {
+// FindState resolves a transition target to a state and to that state's dotted
+// path from the machine root — "combat.attacking" — or to (nil, "") if nothing
+// matches. Dot-separated paths are traversed segment-by-segment before falling
+// back to a full-tree name/ID search, matching XState v4 target notation.
+//
+// The path is returned because StateNode.ID cannot identify a node: parsing
+// passes the machine id down unchanged at every depth, so a state named
+// "alert" is "goblin.alert" whether it sits at the root or three levels in, and
+// two compound states with a same-named child collide on one ID. Forge's canvas
+// keys a node on the path for that reason, and takes it from here rather than
+// resolving targets itself — a chart that disagreed with the interpreter about
+// where an edge goes would be drawing a different machine from the one running.
+func FindState(def *MachineDefinition, target string) (*StateNode, string) {
+	return NewStateResolver(def).Resolve(target)
+}
+
+// StateResolver answers "where does this target go" for one machine.
+//
+// It exists for cost, not for behaviour: Resolve is FindState and gives the
+// same answers. FindState walks the tree, a machine's transitions name the same
+// handful of states over and over, and every target that resolves to nothing —
+// which is every target being typed, half-typed or just renamed — walks the
+// whole tree before giving up. Forge revalidates and redraws on every render
+// and every tick of a two-second stream, which is what turned an unremarkable
+// cost into a measurable one. The resolver remembers two things across those
+// searches: what each distinct target resolved to, and the authored order of
+// each level, which is otherwise rebuilt at every level of every search.
+//
+// It holds the definition it was built for. Anything that edits the machine
+// must build a new one; there is no invalidation, deliberately, because a
+// resolver that quietly answered for a previous version of the machine is
+// exactly the disagreement this type exists to prevent.
+type StateResolver struct {
+	def    *MachineDefinition
+	cache  map[string]resolved
+	orders map[*StateNode][]string // keyed by the parent; nil is the machine root
+}
+
+type resolved struct {
+	node *StateNode
+	path string
+}
+
+func NewStateResolver(def *MachineDefinition) *StateResolver {
+	return &StateResolver{
+		def:    def,
+		cache:  map[string]resolved{},
+		orders: map[*StateNode][]string{},
+	}
+}
+
+// Resolve is FindState, remembered.
+func (r *StateResolver) Resolve(target string) (*StateNode, string) {
+	if r.def == nil || target == "" {
+		return nil, ""
+	}
+	if hit, ok := r.cache[target]; ok {
+		return hit.node, hit.path
+	}
+	node, path := r.find(r.def.States, r.def.StateOrder, nil, target, "")
+	r.cache[target] = resolved{node, path}
+	return node, path
+}
+
+// namesFor is the authored order of one level, worked out once.
+func (r *StateResolver) namesFor(parent *StateNode, states map[string]*StateNode, order []string) []string {
+	if got, ok := r.orders[parent]; ok {
+		return got
+	}
+	names := orderedNames(states, order)
+	r.orders[parent] = names
+	return names
+}
+
+// find searches one level and then descends, in authored order.
+//
+// Authored order and not map order, which is what this did until the canvas
+// needed two renders of a machine to agree. A target naming a state that exists
+// in two subtrees — "alert" under both "patrol" and "combat" — resolved to
+// whichever one Go's randomised map iteration reached first, so the same file
+// made the running game behave differently between two launches. Ambiguity in
+// the file is the author's to fix; picking a different answer each time is not
+// a way to tell them about it.
+func (r *StateResolver) find(states map[string]*StateNode, order []string, parent *StateNode, target, prefix string) (*StateNode, string) {
+	// The dotted branch first, and before the level's order is worked out: a
+	// machine whose targets are all dotted paths never reaches the two loops
+	// below, and ordering a level the search walks straight past was pure cost.
 	if idx := strings.Index(target, "."); idx >= 0 {
 		head, tail := target[:idx], target[idx+1:]
-		if parent, ok := states[head]; ok {
-			if found := findState(parent.Children, tail); found != nil {
-				return found
+		if child, ok := states[head]; ok {
+			if found, path := r.find(child.Children, child.StateOrder, child, tail, prefix+head+"."); found != nil {
+				return found, path
 			}
 		}
 	}
-	for name, node := range states {
-		if name == target || node.ID == target {
-			return node
+	names := r.namesFor(parent, states, order)
+	for _, name := range names {
+		if node := states[name]; name == target || node.ID == target {
+			return node, prefix + name
 		}
 	}
-	for _, node := range states {
-		if found := findState(node.Children, target); found != nil {
-			return found
+	for _, name := range names {
+		node := states[name]
+		if len(node.Children) == 0 {
+			// Nothing to descend into, and skipping it before building the
+			// prefix matters: on a flat machine every miss was allocating one
+			// string per state, per target, per search.
+			continue
+		}
+		if found, path := r.find(node.Children, node.StateOrder, node, target, prefix+name+"."); found != nil {
+			return found, path
 		}
 	}
-	return nil
+	return nil, ""
+}
+
+// orderedNames is the authored order of a state map, with anything the order
+// does not mention appended alphabetically.
+//
+// The remainder is not hypothetical: a machine built in code — a state added on
+// the canvas — records no order at all, and a state added to a file by hand
+// after Forge read it would be missing from one taken earlier.
+func orderedNames(states map[string]*StateNode, order []string) []string {
+	names := make([]string, 0, len(states))
+	seen := make(map[string]bool, len(states))
+	for _, name := range order {
+		if _, ok := states[name]; ok && !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+	}
+	rest := make([]string, 0, len(states)-len(names))
+	for name := range states {
+		if !seen[name] {
+			rest = append(rest, name)
+		}
+	}
+	sort.Strings(rest)
+	return append(names, rest...)
 }
 
 func expandEntryWithHistory(node *StateNode, history map[string][]*StateNode, def *MachineDefinition) []*StateNode {

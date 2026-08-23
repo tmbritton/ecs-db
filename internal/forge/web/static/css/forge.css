@@ -1804,3 +1804,211 @@ button.list-row:not(.list-row--active):hover {
   font-size: 11px;
   cursor: pointer;
 }
+
+/* ── Statechart canvas ─────────────────────────────────────────────────────
+   Positioned HTML for the nodes and one SVG layer for the edges. The nodes
+   are real elements because the suite selects by test id and a painted
+   <canvas> is opaque to every assertion in it; the edges are SVG because
+   routing and arrowheads come free there and nowhere else. */
+
+.chart-wrap {
+  margin-top: 14px;
+}
+
+.chart__scroll {
+  position: relative;
+  overflow: auto;
+  max-height: 60vh;
+  background: var(--canvas);
+  border: var(--border-w) solid var(--border);
+}
+
+.chart {
+  position: relative;
+  /* width and height are written inline: they come from what the chart holds,
+     which is the one thing a stylesheet cannot know. */
+  min-width: 100%;
+  /* The breathing room at the top and left lives here rather than in the
+     coordinates. The chart shifts its contents only far enough to bring
+     anything negative back onto the canvas — an inset baked into the geometry
+     would make every node's rendered position depend on where the others are. */
+  margin: 14px 0 0 14px;
+}
+
+.chart__ground {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.chart__edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.chart-edge {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 2;
+}
+
+/* A guard is the difference between "this happens" and "this might", so the
+   line is drawn as one that may not be taken. */
+.chart-edge--guarded {
+  stroke-dasharray: 5 4;
+}
+
+.chart-edge--dangling {
+  stroke: var(--red);
+  stroke-dasharray: 2 4;
+}
+
+.chart-edge--selected {
+  stroke: var(--amber);
+  stroke-width: 3;
+}
+
+/* The node layer spans the whole canvas, so without this it swallows every
+   click meant for the ground beneath it and clicking empty space does nothing.
+   Only the part of a node that is a control takes the pointer back: the empty
+   area inside a compound state is empty space, and behaves like it. */
+.chart__nodes {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.chart-node {
+  position: absolute;
+  border: var(--border-w) solid var(--border-hi);
+  background: var(--panel);
+  box-shadow: var(--shadow-node);
+}
+
+.chart-node--compound,
+.chart-node--parallel {
+  background: var(--raised);
+}
+
+/* A parallel state's regions all run at once, which the dashed border says
+   without a legend. */
+.chart-node--parallel {
+  border-style: dashed;
+}
+
+/* Final states carry the double border statecharts have always drawn them
+   with. */
+.chart-node--final {
+  box-shadow:
+    inset 0 0 0 2px var(--panel),
+    inset 0 0 0 4px var(--border-hi),
+    var(--shadow-node);
+}
+
+.chart-node--history {
+  border-radius: 50%;
+  border-color: var(--violet);
+}
+
+.chart-node--selected {
+  border-color: var(--amber);
+}
+
+.chart-node__head {
+  /* The one part of a node that takes the pointer back from the layer above.
+     See .chart__nodes. */
+  pointer-events: auto;
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 11px;
+  box-sizing: border-box;
+  text-decoration: none;
+  color: inherit;
+}
+
+.chart-node__head:hover {
+  background: var(--active);
+}
+
+.chart-node__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-hi);
+}
+
+.chart-node__initial {
+  margin-left: 5px;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--amber);
+}
+
+.chart-node__entry {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.chart-node__history {
+  display: block;
+  padding-top: 4px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--violet);
+}
+
+/* Labels above the nodes, because an edge whose midpoint falls over a state —
+   every self-transition — is still the thing being clicked. */
+.chart-label {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  background: var(--canvas);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  text-decoration: none;
+  color: var(--text-dim);
+}
+
+.chart-label:hover {
+  color: var(--text-hi);
+  border-color: var(--border-hi);
+}
+
+.chart-label--dangling {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.chart-label--selected {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.chart__foot {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.chart__empty {
+  margin: 6px 0 0;
+  padding: 18px 12px;
+  background: var(--canvas);
+  border: var(--border-w) dashed var(--border-dashed);
+  font-size: 12px;
+  color: var(--text-dim);
+}

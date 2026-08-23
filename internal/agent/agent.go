@@ -96,7 +96,7 @@ func StartAgent(agent *Agent, registry *Registry, tick int64, world WorldWriter,
 func LoadAgent(def *MachineDefinition, entityID int64, stateIDs []string, tickDurationMs int64) *Agent {
 	a := NewAgent(def, entityID, "", tickDurationMs)
 	for _, id := range stateIDs {
-		if node := findState(def.States, id); node != nil {
+		if node, _ := FindState(def, id); node != nil {
 			a.Configuration = append(a.Configuration, node)
 		}
 	}
