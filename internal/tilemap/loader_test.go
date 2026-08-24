@@ -243,6 +243,9 @@ func TestLoadMap_RowsAreRowsAndColumnsAreColumns(t *testing.T) {
 		t.Fatalf("LoadMap: %v", err)
 	}
 
+	if grid.Width != 3 || grid.Height != 2 {
+		t.Errorf("grid = %d×%d, want 3×2 — width is the row length", grid.Width, grid.Height)
+	}
 	if !grid.IsPassable(1, 0) {
 		t.Error("(1,0) should be floor — the second character of the first row")
 	}

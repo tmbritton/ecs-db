@@ -513,7 +513,12 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - A misspelled `rows` key would have deleted the whole map — under a bootstrap that was harmless, under a diff it is 300 tiles and no error
   - `PRAGMA foreign_keys` is set once on a pooled `*sql.DB`, so `ON DELETE CASCADE` is enforced on one connection and no other — measured, reported, and worked around rather than relied on
 
-- [ ] **The loader writes tiles from a parsed map** — `LoadMap` takes a Tiled map; `passable` comes from a tileset property rather than a character, and which layer decides a cell is stated.
+- [x] **The loader writes tiles from a parsed map** — `LoadMap` takes a Tiled map; `passable` comes from a tileset property rather than a character, and the topmost non-empty tile decides its cell.
+  - Recorded: the topmost non-empty tile in a cell *is* the cell's tile, and it decides both `passable` and `tile_type` — `comp_tile` holds one row per cell, so the choice is forced
+  - A hidden layer still counts; a tile whose tileset says nothing is passable, with a tileset-level property as the per-set default
+  - Story 1's XML reader hoisted `<group>` folders to the end, so the two serialisations of one map disagreed about which tile was on top — fixed here, because this story's rule is a layer-order rule
+  - A Tiled map with no declared size imported as zero cells and deleted every tile: the `rowz` bug again, in the format that replaces it
+  - A collection tileset's ids are not consecutive, so judging membership by `tilecount` refused its last tile and accepted its holes
 
 - [ ] **Tileset rendering** — Draw tile layers from tileset images rather than colouring by `tile_type` string.
 

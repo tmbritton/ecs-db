@@ -1001,3 +1001,96 @@ func TestParse_RefusesALayerThatIsNotTheShapeOfItsMap(t *testing.T) {
 		t.Errorf("refusal %q does not say which disagrees with which", err)
 	}
 }
+
+// Layer order is draw order, and Story 4 decides a cell's passability from the
+// topmost layer that has a tile in it. So the order has to be the file's order
+// — and it has to be the same order whichever serialisation the file is in,
+// which is this package's whole claim about the two of them.
+//
+// A layer folder written above a plain layer is what tells them apart: reading
+// every direct layer first and only then descending into folders puts the
+// folder's contents last, which is the opposite of where the editor drew them.
+func TestParse_LayerOrderIsTheFilesOrderInBothSerialisations(t *testing.T) {
+	const tmx = `<?xml version="1.0"?>
+<map version="1.10" orientation="orthogonal" width="1" height="1" tilewidth="8" tileheight="8">
+ <layer name="floor" width="1" height="1"><data encoding="csv">1</data></layer>
+ <group name="scenery">
+  <layer name="rug" width="1" height="1"><data encoding="csv">2</data></layer>
+ </group>
+ <layer name="roof" width="1" height="1"><data encoding="csv">3</data></layer>
+</map>`
+	const tmj = `{"width":1,"height":1,"tilewidth":8,"tileheight":8,"layers":[
+ {"type":"tilelayer","name":"floor","width":1,"height":1,"data":[1]},
+ {"type":"group","name":"scenery","layers":[
+   {"type":"tilelayer","name":"rug","width":1,"height":1,"data":[2]}]},
+ {"type":"tilelayer","name":"roof","width":1,"height":1,"data":[3]}]}`
+
+	want := []string{"floor", "rug", "roof"}
+	for _, c := range []struct{ kind, src string }{{"tmx", tmx}, {"tmj", tmj}} {
+		m := parse(t, c.src)
+		var got []string
+		for _, l := range m.Layers {
+			got = append(got, l.Name)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s layer order = %v, want %v", c.kind, got, want)
+		}
+	}
+}
+
+// The same argument for object layers, which Story 6 reads: a spawn layer
+// inside a folder that sits between two others has a place in the file, and a
+// reader that hoisted every folder to the end would report them out of it.
+func TestParse_ObjectLayerOrderIsTheFilesOrder(t *testing.T) {
+	const tmx = `<?xml version="1.0"?>
+<map version="1.10" orientation="orthogonal" width="1" height="1" tilewidth="8" tileheight="8">
+ <objectgroup name="first"/>
+ <group name="folder">
+  <objectgroup name="second"/>
+ </group>
+ <objectgroup name="third"/>
+</map>`
+	const tmj = `{"width":1,"height":1,"tilewidth":8,"tileheight":8,"layers":[
+ {"type":"objectgroup","name":"first"},
+ {"type":"group","name":"folder","layers":[{"type":"objectgroup","name":"second"}]},
+ {"type":"objectgroup","name":"third"}]}`
+
+	want := []string{"first", "second", "third"}
+	for _, c := range []struct{ kind, src string }{{"tmx", tmx}, {"tmj", tmj}} {
+		m := parse(t, c.src)
+		var got []string
+		for _, g := range m.ObjectGroups {
+			got = append(got, g.Name)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s object layer order = %v, want %v", c.kind, got, want)
+		}
+	}
+}
+
+// LooksLike exists so a caller choosing between formats does not keep its own
+// copy of what a Tiled file starts with. It answers on the shape of the file,
+// not on whether it parses — that is Parse's job.
+func TestLooksLike(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{"a tmx map", `<?xml version="1.0"?><map/>`, true},
+		{"a tmj map", `{"width":1}`, true},
+		{"leading whitespace", "\n\n  <map/>", true},
+		{"a byte-order mark somebody's editor added", "\xef\xbb\xbf<map/>", true},
+		{"markup that is not a map", `<tileset/>`, true},
+		{"the character format it replaces", "width = 3\nheight = 3\n", false},
+		{"nothing at all", "", false},
+		{"whitespace and nothing else", "  \n\t", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := tiled.LooksLike([]byte(c.data)); got != c.want {
+				t.Errorf("LooksLike = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

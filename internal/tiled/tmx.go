@@ -12,34 +12,61 @@ import (
 // exported Map stay the same shape for both serialisations.
 
 type xmlMap struct {
-	XMLName      xml.Name      `xml:"map"`
-	Version      string        `xml:"version,attr"`
-	Orientation  string        `xml:"orientation,attr"`
-	RenderOrder  string        `xml:"renderorder,attr"`
-	Width        int           `xml:"width,attr"`
-	Height       int           `xml:"height,attr"`
-	TileWidth    int           `xml:"tilewidth,attr"`
-	TileHeight   int           `xml:"tileheight,attr"`
-	Infinite     int           `xml:"infinite,attr"`
-	Properties   xmlProperties `xml:"properties"`
-	Tilesets     []xmlTileset  `xml:"tileset"`
-	Layers       []xmlLayer    `xml:"layer"`
-	ObjectGroups []xmlObjGroup `xml:"objectgroup"`
-	Groups       []xmlGroup    `xml:"group"`
+	XMLName     xml.Name      `xml:"map"`
+	Version     string        `xml:"version,attr"`
+	Orientation string        `xml:"orientation,attr"`
+	RenderOrder string        `xml:"renderorder,attr"`
+	Width       int           `xml:"width,attr"`
+	Height      int           `xml:"height,attr"`
+	TileWidth   int           `xml:"tilewidth,attr"`
+	TileHeight  int           `xml:"tileheight,attr"`
+	Infinite    int           `xml:"infinite,attr"`
+	Properties  xmlProperties `xml:"properties"`
+	Tilesets    []xmlTileset  `xml:"tileset"`
+	Children    []xmlNode     `xml:",any"`
 }
 
-// xmlGroup is a layer folder. Tiled's manual calls it "used to organize the
-// layers of the map in a hierarchy" — which means it holds the real layers, and
-// dragging two layers into a folder is a routine editor action. A reader that
+// xmlNode is one of the things a map or a layer folder holds: a tile layer, an
+// object layer, or another folder. One union struct rather than three slices,
+// because three slices are three passes and the order between them is the
+// file's layer order — which is draw order, and which Story 4 reads a cell's
+// passability from.
+//
+// encoding/xml fills a ",any" field with every child element no other field
+// claimed, in the order it read them, and that is the only place the order
+// survives. With a slice per element type, a <group> written above a <layer>
+// came out below it while the JSON reader — one pass over one list — put it
+// above: the same map, two answers, depending on which serialisation someone
+// had saved it as.
+//
+// A layer folder is Tiled's "organize the layers of the map in a hierarchy",
+// and dragging two layers into one is a routine editor action. A reader that
 // skipped it would load a map with every tile and every spawn in it as empty,
 // silently, which is the exact failure this package argues against.
-type xmlGroup struct {
-	ID           int           `xml:"id,attr"`
-	Name         string        `xml:"name,attr"`
-	Visible      *int          `xml:"visible,attr"`
-	Layers       []xmlLayer    `xml:"layer"`
-	ObjectGroups []xmlObjGroup `xml:"objectgroup"`
-	Groups       []xmlGroup    `xml:"group"`
+type xmlNode struct {
+	XMLName xml.Name
+
+	// Common to all three.
+	ID         int           `xml:"id,attr"`
+	Name       string        `xml:"name,attr"`
+	Visible    *int          `xml:"visible,attr"`
+	Properties xmlProperties `xml:"properties"`
+
+	// A tile layer's.
+	Width   int      `xml:"width,attr"`
+	Height  int      `xml:"height,attr"`
+	Opacity *float64 `xml:"opacity,attr"`
+	Data    xmlData  `xml:"data"`
+
+	// An object layer's.
+	Objects []xmlObject `xml:"object"`
+
+	// A folder's layers — and, for an element this reader does not model, that
+	// element's children: an <imagelayer>'s <image> lands here too, because
+	// ",any" catches whatever no named field above claimed. collectXML only
+	// descends where the element is a folder, so the rest are read and dropped
+	// together with the element that held them.
+	Children []xmlNode `xml:",any"`
 }
 
 type xmlProperties struct {
@@ -117,17 +144,6 @@ func (t *xmlTileset) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error 
 	return nil
 }
 
-type xmlLayer struct {
-	ID         int           `xml:"id,attr"`
-	Name       string        `xml:"name,attr"`
-	Width      int           `xml:"width,attr"`
-	Height     int           `xml:"height,attr"`
-	Opacity    *float64      `xml:"opacity,attr"`
-	Visible    *int          `xml:"visible,attr"`
-	Properties xmlProperties `xml:"properties"`
-	Data       xmlData       `xml:"data"`
-}
-
 type xmlData struct {
 	Encoding    string    `xml:"encoding,attr"`
 	Compression string    `xml:"compression,attr"`
@@ -137,14 +153,6 @@ type xmlData struct {
 
 type xmlTile struct {
 	GID uint32 `xml:"gid,attr"`
-}
-
-type xmlObjGroup struct {
-	ID         int           `xml:"id,attr"`
-	Name       string        `xml:"name,attr"`
-	Visible    *int          `xml:"visible,attr"`
-	Properties xmlProperties `xml:"properties"`
-	Objects    []xmlObject   `xml:"object"`
 }
 
 type xmlObject struct {
@@ -202,83 +210,88 @@ func parseTMX(data []byte, name string) (*Map, error) {
 		}
 		m.Tilesets = append(m.Tilesets, ref)
 	}
-	if err := collectXML(m, wire.Layers, wire.ObjectGroups, wire.Groups, true, name); err != nil {
+	if err := collectXML(m, wire.Children, true, name); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
 // collectXML flattens a map's layers and its layer folders into one list each,
-// in traversal order.
+// in document order — see xmlNode for why the order is the point.
 //
 // visible is folded down rather than kept on a folder nothing models: a layer
 // inside a hidden group is hidden, and a renderer that drew it would be showing
 // what the editor does not.
-func collectXML(m *Map, layers []xmlLayer, groups []xmlObjGroup, folders []xmlGroup, visible bool, name string) error {
-	for _, l := range layers {
-		layer, err := l.convert(name)
-		if err != nil {
-			return err
-		}
-		layer.Visible = layer.Visible && visible
-		if err := checkLayerSize(layer.Width, layer.Height, m.Width, m.Height, name, layer.Name); err != nil {
-			return err
-		}
-		m.Layers = append(m.Layers, layer)
-	}
-	for _, g := range groups {
-		group := g.convert()
-		group.Visible = group.Visible && visible
-		m.ObjectGroups = append(m.ObjectGroups, group)
-	}
-	for _, f := range folders {
-		shown := visible && (f.Visible == nil || *f.Visible != 0)
-		if err := collectXML(m, f.Layers, f.ObjectGroups, f.Groups, shown, name); err != nil {
-			return err
+func collectXML(m *Map, nodes []xmlNode, visible bool, name string) error {
+	for _, n := range nodes {
+		shown := visible && (n.Visible == nil || *n.Visible != 0)
+		switch n.XMLName.Local {
+		case "layer":
+			layer, err := n.convertTileLayer(name)
+			if err != nil {
+				return err
+			}
+			layer.Visible = shown
+			if err := checkLayerSize(layer.Width, layer.Height, m.Width, m.Height, name, layer.Name); err != nil {
+				return err
+			}
+			m.Layers = append(m.Layers, layer)
+		case "objectgroup":
+			group := n.convertObjectGroup()
+			group.Visible = shown
+			m.ObjectGroups = append(m.ObjectGroups, group)
+		case "group":
+			if err := collectXML(m, n.Children, shown, name); err != nil {
+				return err
+			}
+		default:
+			// An <imagelayer>, an <editorsettings>, or an element a later Tiled
+			// adds: not modelled, and — unlike a folder — holding no layer that
+			// would go missing with it.
 		}
 	}
 	return nil
 }
 
-func (l xmlLayer) convert(name string) (Layer, error) {
+func (n xmlNode) convertTileLayer(name string) (Layer, error) {
 	out := Layer{
-		ID:         l.ID,
-		Name:       l.Name,
-		Width:      l.Width,
-		Height:     l.Height,
-		Visible:    l.Visible == nil || *l.Visible != 0,
+		ID:     n.ID,
+		Name:   n.Name,
+		Width:  n.Width,
+		Height: n.Height,
+		// Visible is collectXML's: it has to fold in the folders this layer sits
+		// in, so a value set here would only be one it overwrites.
 		Opacity:    1,
-		Properties: l.Properties.convert(),
+		Properties: n.Properties.convert(),
 	}
-	if l.Opacity != nil {
-		out.Opacity = *l.Opacity
+	if n.Opacity != nil {
+		out.Opacity = *n.Opacity
 	}
 
-	cells := l.Width * l.Height
+	cells := n.Width * n.Height
 	var err error
-	if l.Data.Encoding == "" {
+	if n.Data.Encoding == "" {
 		// No encoding attribute means one <tile> element per cell, in order.
-		out.Data = make([]uint32, 0, len(l.Data.Tiles))
-		for _, t := range l.Data.Tiles {
+		out.Data = make([]uint32, 0, len(n.Data.Tiles))
+		for _, t := range n.Data.Tiles {
 			out.Data = append(out.Data, t.GID)
 		}
 	} else {
-		out.Data, err = decodeLayerData(l.Data.Encoding, l.Data.Compression, l.Data.Text, cells, name, l.Name)
+		out.Data, err = decodeLayerData(n.Data.Encoding, n.Data.Compression, n.Data.Text, cells, name, n.Name)
 		if err != nil {
 			return Layer{}, err
 		}
 	}
-	return out, checkCells(len(out.Data), cells, name, l.Name)
+	return out, checkCells(len(out.Data), cells, name, n.Name)
 }
 
-func (g xmlObjGroup) convert() ObjectGroup {
+func (n xmlNode) convertObjectGroup() ObjectGroup {
 	out := ObjectGroup{
-		ID:         g.ID,
-		Name:       g.Name,
-		Visible:    g.Visible == nil || *g.Visible != 0,
-		Properties: g.Properties.convert(),
+		ID:         n.ID,
+		Name:       n.Name,
+		Properties: n.Properties.convert(),
 	}
-	for _, o := range g.Objects {
+	for _, o := range n.Objects {
 		kind := o.Type
 		if kind == "" {
 			// Tiled 1.9 renamed the attribute from "type" to "class", and

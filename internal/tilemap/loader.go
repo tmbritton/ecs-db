@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 	"github.com/tmbritton/ecs-db/internal/world"
 )
 
@@ -16,8 +17,8 @@ type mapDef struct {
 	Rows   []string `toml:"rows"`
 }
 
-// LoadMap reads a TOML map file, brings the Tile entities in the database in
-// line with it, and returns a populated TileGrid.
+// LoadMap reads a map file, brings the Tile entities in the database in line
+// with it, and returns a populated TileGrid.
 //
 // It used to be a one-time bootstrap: it counted Tile entities and created none
 // if any existed, which made the database the source of truth after the first
@@ -29,23 +30,52 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 	if err != nil {
 		return nil, fmt.Errorf("LoadMap: reading %q: %w", path, err)
 	}
-	var def mapDef
-	if err := toml.Unmarshal(data, &def); err != nil {
-		return nil, fmt.Errorf("LoadMap: parsing %q: %w", path, err)
-	}
-	if err := def.check(path); err != nil {
+	want, width, height, err := readMap(path, data)
+	if err != nil {
 		return nil, err
 	}
 
-	if _, err := SyncTiles(ctx, svc, db, tilesOf(def)); err != nil {
+	if _, err := SyncTiles(ctx, svc, db, want); err != nil {
 		return nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
 	}
 
-	grid := NewTileGrid(def.Width, def.Height)
+	grid := NewTileGrid(width, height)
 	if err := grid.Rebuild(ctx, db); err != nil {
 		return nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
 	}
 	return grid, nil
+}
+
+// readMap turns a map file into the cells it describes and the size of the grid
+// they sit in, whichever of the two formats it holds.
+//
+// Dispatched on the first thing in the file rather than on its extension, which
+// is what tiled.Parse does to tell its own two serialisations apart, and which
+// makes a renamed file load as what it is. There is no third format to be
+// ambiguous with: a Tiled map opens with an element or an object, and the
+// character format opens with a key. What a Tiled file opens with is tiled's to
+// know, not this package's.
+//
+// The character format is here until Story 7 migrates the one map that uses it.
+// It is not a second way to write a map — it is the way the old map is written,
+// and it goes with the file.
+func readMap(path string, data []byte) (map[Point]TileState, int, int, error) {
+	if tiled.LooksLike(data) {
+		return readTiled(path, data)
+	}
+	return readTOML(path, data)
+}
+
+// readTOML reads the bespoke character format this engine started with.
+func readTOML(path string, data []byte) (map[Point]TileState, int, int, error) {
+	var def mapDef
+	if err := toml.Unmarshal(data, &def); err != nil {
+		return nil, 0, 0, fmt.Errorf("LoadMap: parsing %q: %w", path, err)
+	}
+	if err := def.check(path); err != nil {
+		return nil, 0, 0, err
+	}
+	return tilesOf(def), def.Width, def.Height, nil
 }
 
 // check refuses a file that parsed but does not describe a map.
