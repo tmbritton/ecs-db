@@ -385,10 +385,10 @@ func TestDeleteEntity_TakesEveryComponentRowWithIt(t *testing.T) {
 	}
 }
 
-// The cascade in the DDL is not what does the work: PRAGMA foreign_keys is
-// per-connection and the store sets it once against a pool, so a connection
-// that never received it enforces nothing. DeleteEntity has to be correct on
-// that connection too.
+// The store now puts foreign_keys on every pooled connection, so the cascade is
+// real. This test turns it off anyway, because the explicit deletes have to be
+// what does the work: a database opened by another tool, or by a driver whose
+// DSN parameters are spelled differently, may not have it on.
 func TestDeleteEntity_DoesNotNeedForeignKeysEnforced(t *testing.T) {
 	store := makeStore(t, everyKindSchema())
 	var id int64
@@ -403,6 +403,14 @@ func TestDeleteEntity_DoesNotNeedForeignKeysEnforced(t *testing.T) {
 		t.Fatalf("Conn: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
+	// Put back before the connection returns to the pool, the way migration.go
+	// does. It is a shared connection, and one left with enforcement off is one
+	// that quietly agrees with whatever the next caller writes.
+	defer func() {
+		if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+			t.Errorf("re-enabling foreign keys: %v", err)
+		}
+	}()
 	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
 		t.Fatalf("disabling foreign keys: %v", err)
 	}
@@ -474,6 +482,14 @@ func TestDeleteEntity_ReportsAComponentRowItCouldNotRemove(t *testing.T) {
 		t.Fatalf("Conn: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
+	// Put back before the connection returns to the pool, the way migration.go
+	// does. It is a shared connection, and one left with enforcement off is one
+	// that quietly agrees with whatever the next caller writes.
+	defer func() {
+		if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
+			t.Errorf("re-enabling foreign keys: %v", err)
+		}
+	}()
 	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys = OFF"); err != nil {
 		t.Fatalf("disabling foreign keys: %v", err)
 	}
@@ -569,4 +585,119 @@ func TestDeleteEntity_WorksWithoutTheInterpreterTables(t *testing.T) {
 			t.Fatalf("DeleteEntity: %v", err)
 		}
 	})
+}
+
+// The behaviour change that came with enforcing foreign keys for real, pinned
+// here because nothing else in the suite constructs it.
+//
+// comp_*.entity_id cascades, so an entity's own rows go with it. An *inbound*
+// reference does not: an entity-ref component's target_entity_id is declared
+// REFERENCES entities(id) with no ON DELETE clause, which SQLite treats as a
+// restrict. DeleteEntity clears rows WHERE entity_id = ?, and the holder's row
+// is not one of those — it is another entity's.
+//
+// So deleting an entity something points at is refused. Before foreign keys
+// were enforced on every connection this silently succeeded and left a dangling
+// reference, which is worse; a loud refusal is the better failure. What it is
+// not is a decision — what should happen to a component whose target is deleted
+// wants its own story, and until then this test says what happens today.
+func TestDeleteEntity_RefusesWhileAnotherEntityPointsAtIt(t *testing.T) {
+	store := makeStore(t, everyKindSchema())
+	ctx := context.Background()
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	target, err := tx.InsertEntity(ctx, "Thing", 0)
+	if err != nil {
+		t.Fatalf("InsertEntity: %v", err)
+	}
+	mustInsert(t, ctx, tx, target, "Position", world.ComponentValues{"x": 0.0, "y": 0.0, "label": "target"})
+
+	holder, err := tx.InsertEntity(ctx, "Thing", 0)
+	if err != nil {
+		t.Fatalf("InsertEntity: %v", err)
+	}
+	mustInsert(t, ctx, tx, holder, "Position", world.ComponentValues{"x": 1.0, "y": 1.0, "label": "holder"})
+	mustInsert(t, ctx, tx, holder, "Carrier", world.ComponentValues{"target_entity_id": target})
+
+	err = tx.DeleteEntity(ctx, target)
+	if err == nil {
+		t.Fatal("deleted an entity that another entity's entity-ref points at, leaving the reference dangling")
+	}
+	// Raw, this is "FOREIGN KEY constraint failed (787)", which tells a caller
+	// nothing it can act on — and the callers are a map re-import and Forge.
+	for _, want := range []string{"Carrier", "entity 2"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %q, want it to name %q as what is in the way", err, want)
+		}
+	}
+
+	// The other direction is unaffected: the holder carries the reference, so
+	// deleting it takes the reference with it.
+	if err := tx.DeleteEntity(ctx, holder); err != nil {
+		t.Errorf("deleting the entity that holds the reference: %v", err)
+	}
+}
+
+// And the entity-ref itself is enforced on the way in, which is the other half
+// of what turning foreign keys on bought: a component cannot point at an entity
+// that was never there.
+func TestInsertComponent_RefusesAnEntityRefToNothing(t *testing.T) {
+	store := makeStore(t, everyKindSchema())
+	ctx := context.Background()
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	id, err := tx.InsertEntity(ctx, "Thing", 0)
+	if err != nil {
+		t.Fatalf("InsertEntity: %v", err)
+	}
+	mustInsert(t, ctx, tx, id, "Position", world.ComponentValues{"x": 0.0, "y": 0.0, "label": "l"})
+
+	if err := tx.InsertComponent(ctx, id, "Carrier", world.ComponentValues{"target_entity_id": int64(9999)}); err == nil {
+		t.Fatal("a component pointed at an entity that does not exist and was accepted")
+	}
+}
+
+// The explanation is for foreign keys and only for foreign keys. A delete that
+// fails for some other reason has to arrive as itself: telling someone their
+// entity "is still referenced by" something, when the real cause was a trigger
+// or a locked database, sends them looking for a reference that is not there.
+func TestDeleteEntity_ExplainsOnlyWhatItCanExplain(t *testing.T) {
+	store := makeStore(t, everyKindSchema())
+	ctx := context.Background()
+
+	var id int64
+	withTx(t, store, func(ctx context.Context, tx world.Tx) {
+		id, _ = tx.InsertEntity(ctx, "Thing", 0)
+		mustInsert(t, ctx, tx, id, "Position", world.ComponentValues{"x": 0.0, "y": 0.0, "label": "l"})
+	})
+
+	if _, err := store.DB().Exec(`CREATE TRIGGER no_deletes BEFORE DELETE ON entities
+		BEGIN SELECT RAISE(ABORT, 'the trigger said no'); END`); err != nil {
+		t.Fatalf("installing the refusal: %v", err)
+	}
+
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	err = tx.DeleteEntity(ctx, id)
+	if err == nil {
+		t.Fatal("the trigger refused the delete and DeleteEntity reported success")
+	}
+	if !strings.Contains(err.Error(), "the trigger said no") {
+		t.Errorf("error = %q, want the reason the database gave", err)
+	}
+	if strings.Contains(err.Error(), "referenced by") || strings.Contains(err.Error(), "references it") {
+		t.Errorf("error = %q — a failure that was not a foreign key was explained as one", err)
+	}
 }

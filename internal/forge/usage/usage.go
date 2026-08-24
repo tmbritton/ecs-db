@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
@@ -145,7 +144,7 @@ func Read(dbPath, component string) Counts {
 
 	// Read-only, through the one DSN the tool defines. Forge never writes to
 	// the game's database.
-	db, err := sql.Open("sqlite", status.ReadOnlyDSN(dbPath))
+	db, err := storage.OpenReadOnly(dbPath)
 	if err != nil {
 		return Counts{Reason: "the database cannot be opened; the log has the details"}
 	}

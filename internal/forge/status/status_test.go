@@ -3,11 +3,12 @@ package status
 import (
 	"bytes"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -186,34 +187,6 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-// Read-only is a correctness requirement, not a nicety: the architecture makes
-// the interpreter the sole writer of world state, and Forge attaching
-// read-write would be the exact bug the one-writer-per-table contract exists to
-// prevent. Check opens the connection, so this pins the DSN it opens with.
-func TestCheck_OpensTheDatabaseReadOnly(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "ro.db")
-	bootstrapDB(t, path, 3)
-
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatalf("opening with Check's DSN: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	if _, err := db.Exec("CREATE TABLE forge_should_not_be_able_to_do_this (id INTEGER)"); err == nil {
-		t.Fatal("a write through Check's connection succeeded; the DSN is not read-only")
-	}
-	if _, err := db.Exec("INSERT INTO meta (key, value) VALUES ('forge', 'nope')"); err == nil {
-		t.Fatal("an insert through Check's connection succeeded; the DSN is not read-only")
-	}
-
-	// And it must still be able to read, or the check is useless.
-	var v string
-	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'schema_version'").Scan(&v); err != nil {
-		t.Fatalf("reading through the read-only connection: %v", err)
-	}
-}
-
 // Forge is an authoring tool pointed at someone's project directory, so what it
 // leaves there matters. What it must never do is change the database itself.
 //
@@ -376,47 +349,6 @@ func TestCheck_PicksUpSchemaEditsWithoutARestart(t *testing.T) {
 	}
 }
 
-// The DSN embeds a user-supplied path. A project directory containing a
-// character with meaning in a URI would otherwise truncate or corrupt it, and
-// the readout would report offline for a database that is sitting right there.
-func TestDSN_EscapesAwkwardPaths(t *testing.T) {
-	for _, path := range []string{
-		"/tmp/plain/ecs.db",
-		"/tmp/a b/ecs.db",
-		"/tmp/what?/ecs.db",
-		"/tmp/hash#tag/ecs.db",
-		"/tmp/perc%20ent/ecs.db",
-		"/tmp/amp&and/ecs.db",
-		"/tmp/plus+x/ecs.db",
-		"/tmp/semi;colon/ecs.db",
-	} {
-		t.Run(path, func(t *testing.T) {
-			got := dsn(path)
-
-			// The driver splits the DSN at the first literal '?', so exactly
-			// one may survive escaping: the one introducing the parameters.
-			if n := strings.Count(got, "?"); n != 1 {
-				t.Errorf("dsn(%q) = %q has %d '?', want exactly 1", path, got, n)
-			}
-			if !strings.HasSuffix(got, "?mode=ro&_pragma=busy_timeout(5000)") {
-				t.Errorf("dsn(%q) = %q lost its parameters", path, got)
-			}
-
-			// And it must round-trip back to the path we asked for.
-			u, err := url.Parse(got)
-			if err != nil {
-				t.Fatalf("dsn(%q) = %q is not a valid URI: %v", path, got, err)
-			}
-			if u.Path != path {
-				t.Errorf("dsn(%q) decodes to %q", path, u.Path)
-			}
-			if u.Query().Get("mode") != "ro" {
-				t.Errorf("dsn(%q) is not read-only: %q", path, got)
-			}
-		})
-	}
-}
-
 // End to end, on the paths the engine can actually put a database in.
 //
 // '?' is deliberately absent: storage.NewSQLiteStore passes a bare path to
@@ -443,5 +375,52 @@ func TestCheck_WorksUnderAwkwardDirectoryNames(t *testing.T) {
 				t.Errorf("State = %v for a database under %q, want StateConnected", got.State, dirName)
 			}
 		})
+	}
+}
+
+// recordingDriver captures the connection string it is opened with and then
+// refuses, which Check treats as "offline" — the status it reports is not what
+// this is about.
+// recorderSeq names each registration uniquely; see the call site.
+var recorderSeq atomic.Int64
+
+type recordingDriver struct{ dsn string }
+
+func (d *recordingDriver) Open(name string) (driver.Conn, error) {
+	d.dsn = name
+	return nil, errors.New("recording driver does not connect")
+}
+
+// The read-only claim is about Check, not about the DSN function. A read of the
+// game database succeeds just as well through a read-write connection, so
+// nothing Check reports would change if mode=ro went missing — which makes the
+// connection string the only observable, and this the only way to observe it.
+//
+// Forge attaching read-write would be the exact bug the one-writer-per-table
+// contract exists to prevent, so it is worth reaching for.
+func TestCheck_OpensThroughTheSharedReadOnlyDSN(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ro.db")
+	bootstrapDB(t, path, 3)
+
+	rec := &recordingDriver{}
+	// A unique name per registration. sql.Register panics on a duplicate and
+	// the registry is process-global, so a name built from t.Name() blows up
+	// the whole package under `go test -count=2` — which is the standard way
+	// to hunt a flake.
+	name := fmt.Sprintf("status-recorder-%d", recorderSeq.Add(1))
+	sql.Register(name, rec)
+
+	Check(Config{
+		DBPath:     path,
+		SchemaPath: writeSchema(t, dir, 3),
+		driver:     name,
+	})
+
+	if rec.dsn == "" {
+		t.Fatal("Check never opened a connection")
+	}
+	if want := storage.ReadOnlyDSN(path); rec.dsn != want {
+		t.Errorf("Check opened with\n  %q\nwant the shared read-only DSN\n  %q", rec.dsn, want)
 	}
 }

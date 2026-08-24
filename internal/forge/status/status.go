@@ -8,7 +8,6 @@ package status
 import (
 	"database/sql"
 	"log/slog"
-	"net/url"
 	"os"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -69,6 +68,16 @@ type Config struct {
 	DBPath     string
 	SchemaPath string
 	ModName    string
+
+	// driver names the SQL driver Check opens with. Empty is "sqlite", the
+	// real one.
+	//
+	// Unexported because it is a test seam and not configuration. It is the
+	// only way to assert what connection string Check actually opens with —
+	// and that assertion matters here more than most, because a read of the
+	// game database works perfectly well through a read-write connection, so
+	// nothing else about Check's behaviour would notice mode=ro going missing.
+	driver string
 }
 
 // Status is the result of one check.
@@ -83,24 +92,6 @@ type Status struct {
 	SchemaVersion int    // from schema.json
 	DBVersion     int    // from meta.schema_version; 0 when offline
 	ModName       string // first configured mod
-}
-
-// ReadOnlyDSN is the connection string every read of the game database uses.
-//
-// Exported because the migration preview opens the same database for the same
-// reason, and a second DSN written elsewhere is a second chance to forget
-// mode=ro — which is the one thing that must never be wrong here.
-func ReadOnlyDSN(path string) string { return dsn(path) }
-
-// dsn is the connection string Check opens with. Read-only is a correctness
-// requirement, not a nicety: the architecture makes the interpreter the sole
-// writer of world state, so an authoring tool attaching read-write would be the
-// exact bug the one-writer-per-table contract exists to prevent.
-//
-// The path is URL-escaped because it is user-supplied config; a project
-// directory containing '?' or '#' would otherwise truncate or corrupt the DSN.
-func dsn(path string) string {
-	return "file:" + (&url.URL{Path: path}).EscapedPath() + "?mode=ro&_pragma=busy_timeout(5000)"
 }
 
 // Check reports whether the game database is present and compatible. It never
@@ -132,7 +123,7 @@ func Check(cfg Config) Status {
 		return s
 	}
 
-	db, err := sql.Open(cfg.driverName(), dsn(cfg.DBPath))
+	db, err := sql.Open(cfg.driverName(), storage.ReadOnlyDSN(cfg.DBPath))
 	if err != nil {
 		slog.Debug("engine status: opening database", "path", cfg.DBPath, "err", err)
 		return s
@@ -162,9 +153,13 @@ func Check(cfg Config) Status {
 	return s
 }
 
-// driverName exists so a test can point Check at a different driver
-// registration without the production path taking a parameter it never varies.
-func (Config) driverName() string { return "sqlite" }
+// driverName is the driver Check opens with, defaulting to the real one.
+func (c Config) driverName() string {
+	if c.driver != "" {
+		return c.driver
+	}
+	return "sqlite"
+}
 
 // readSchemaVersion parses schema.json through the engine's own loader rather
 // than pulling one field out with encoding/json. If the engine cannot load the

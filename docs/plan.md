@@ -25,7 +25,7 @@ Establish `schema.json` as the declarative source of truth for components and en
 - [x] **SQL DDL generation from schema.json** — One source of truth, two representations.
   - Fixed tables: `meta`, `world`, `entities`, `event_queue`, `input_events`, `transitions`
   - One `comp_*` table per declared component with typed columns
-  - Pragmas at init: WAL, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`
+  - Pragmas at init: WAL, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON` — "at init" was built as four `db.Exec` calls against the pool, which reached one connection out of it; corrected in Story 7
   - `ON DELETE CASCADE` from `entities(id)` to all `comp_*.entity_id`
 
 - [x] **Entity creation with type validation** — Enforce contracts at attachment time, not query time.
@@ -53,6 +53,13 @@ Establish `schema.json` as the declarative source of truth for components and en
   - Coverage: `storage` 80.5%
 
 ---
+
+- [x] **Pragmas on every connection** — `foreign_keys`, `busy_timeout` and `synchronous` move into the DSN so the pool cannot hand out a connection without them.
+  - Measured: `foreign_keys` 1/0/0 and `busy_timeout` 5000/0/0 across three simultaneous connections, so `ON DELETE CASCADE` was enforced on one connection and no other
+  - `journal_mode` stays a single statement, because WAL lives in the database file rather than on the connection
+  - The path is percent-encoded into a `file:` URI: a `?` in it used to truncate the filename and silently bootstrap a second database somewhere else
+  - One builder and one `OpenReadOnly`, so "Forge never writes to the game database" is a property of a function rather than of every caller
+  - Enforcing foreign keys for real means deleting an entity another entity's entity-ref points at is now refused — an improvement over the dangling reference it used to leave, and a schema question that wants its own story
 
 ## Epic 2: Schema versioning & migrations
 

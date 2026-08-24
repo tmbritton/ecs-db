@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
 
@@ -111,7 +110,7 @@ func (p Preview) DestructiveStatements() []storage.Statement {
 // It is its own function so a test can attempt a write through exactly the
 // connection Check uses, rather than through a second one built to match.
 func open(dbPath string) (*sql.DB, error) {
-	return sql.Open("sqlite", status.ReadOnlyDSN(dbPath))
+	return storage.OpenReadOnly(dbPath)
 }
 
 // partition splits the generator's output into statements the author can read

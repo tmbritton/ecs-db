@@ -42,10 +42,20 @@ type Tx interface {
 	// behavior_components and event_queue, both of which the tick reads with no
 	// join to entities.
 	//
-	// The component rows go explicitly rather than by ON DELETE CASCADE. The
-	// cascade is declared, but PRAGMA foreign_keys is per-connection and the
-	// engine sets it once on a pooled *sql.DB, so it is enforced on whichever
-	// connection happened to be idle at open time and on no other.
+	// The component rows go explicitly rather than by ON DELETE CASCADE, which
+	// is belt and braces now rather than the only mechanism: the cascade used
+	// to be unenforced on every connection but one, because the engine set
+	// PRAGMA foreign_keys once against a pooled *sql.DB. storage.DSN fixed
+	// that. The explicit deletes stay because they also work on a database
+	// opened by something that did not set it.
+	//
+	// **What the cascade does not cover, and this does not either:** an
+	// entity-ref component in another entity declares
+	// `REFERENCES entities(id)` with no ON DELETE clause, which SQLite treats
+	// as a restrict. Deleting an entity that another entity points at is
+	// therefore refused by the database, and this method reports that rather
+	// than tidying up the pointer — what should happen to a component whose
+	// target is deleted is a schema question nobody has answered yet.
 	//
 	// Rows in transitions are left: it is the audit log, it declares no foreign
 	// key, and it is meant to outlive what it describes.

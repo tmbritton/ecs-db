@@ -71,6 +71,11 @@ nothing in this epic depends on the cascade. The fix is a DSN `_pragma=` so
 every pooled connection carries the setting, it changes behaviour for every
 database the engine opens, and it wants its own story with its own tests.
 
+**Fixed in Epic 1 Story 7**, which is where it belonged: Story 3's own
+acceptance list already claimed "pragmas at init". The explicit deletes stay,
+because they are also what makes `DeleteEntity` correct on a database opened by
+something that did not set the pragma.
+
 ## Stories
 
 1. TMX/TMJ parser

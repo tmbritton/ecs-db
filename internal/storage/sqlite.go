@@ -76,8 +76,9 @@ func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, err
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database connection
-	db, err := sql.Open("sqlite", dbPath)
+	// Open database connection. The connection settings ride in the DSN — see
+	// DSN for why they cannot be statements run after this.
+	db, err := sql.Open("sqlite", DSN(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -88,17 +89,14 @@ func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, err
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Apply pragmas
-	for _, pragma := range []string{
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-		"PRAGMA busy_timeout = 5000",
-		"PRAGMA foreign_keys = ON",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("applying pragma: %s: %w", pragma, err)
-		}
+	// journal_mode is the one that is not a connection setting: WAL is recorded
+	// in the database file, so it is set once here and every connection opened
+	// afterwards — by this process or another — reads it back. In the DSN it
+	// would be a redundant statement on every connection, and a read-only
+	// connection cannot set it at all.
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("applying pragma: PRAGMA journal_mode = WAL: %w", err)
 	}
 
 	// Detect fresh vs existing database by checking if the meta table exists.

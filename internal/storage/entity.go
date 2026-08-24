@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -364,9 +365,13 @@ func (t *sqliteTx) exactlyOneRow(ctx context.Context, tableName string, entityID
 // entity is known to hold: an entity type with allowExtraComponents can carry
 // any declared component, and a DELETE that matches nothing costs nothing.
 //
-// It does not rely on ON DELETE CASCADE. The cascade is in the DDL, but
-// PRAGMA foreign_keys is per-connection and the store issues it once against a
-// pooled *sql.DB — see world.Tx for the measurement.
+// It does not rely on ON DELETE CASCADE, even though the cascade is now really
+// enforced — storage.DSN puts foreign_keys on every pooled connection, which it
+// once did not. Explicit deletes are kept because they are what makes this
+// correct on a database opened by something that did not set the pragma, and
+// because the cascade covers comp_*.entity_id and not the inbound direction:
+// another entity's entity-ref column REFERENCES entities(id) with no ON DELETE
+// clause, which is a restrict. See DeleteEntity's own comment.
 //
 // behavior_components and event_queue are live state, not history, and neither
 // is a comp_ table so neither is reached by the loop above. tick.go reads
@@ -411,9 +416,83 @@ func (t *sqliteTx) DeleteEntity(ctx context.Context, entityID int64) error {
 	}
 
 	if _, err := t.tx.ExecContext(ctx, "DELETE FROM entities WHERE id = ?", entityID); err != nil {
-		return fmt.Errorf("deleting entity %d: %w", entityID, err)
+		return fmt.Errorf("deleting entity %d: %w", entityID, t.explainDelete(ctx, entityID, err))
 	}
 	return nil
+}
+
+// explainDelete turns SQLite's "FOREIGN KEY constraint failed" into a sentence
+// naming what is actually in the way.
+//
+// The loop above cleared every row belonging to this entity, so the only
+// reference left is an inbound one: another entity's entity-ref component,
+// whose column is declared REFERENCES entities(id) with no ON DELETE clause —
+// which SQLite treats as a restrict. Unlike comp_*.entity_id there is no
+// cascade to fall back on, and there could not sensibly be a blanket one: what
+// should happen to a component whose target is deleted is a schema question,
+// and deleting the pointing entity is only one of three defensible answers.
+//
+// Raw, the refusal is "constraint failed: FOREIGN KEY constraint failed (787)",
+// which says nothing a caller could act on — and the callers are a map
+// re-import and, later, Forge. Naming the holders is worth the extra query on a
+// path that has already failed.
+func (t *sqliteTx) explainDelete(ctx context.Context, entityID int64, cause error) error {
+	if !strings.Contains(cause.Error(), "FOREIGN KEY constraint failed") {
+		return cause
+	}
+	holders := t.referencesTo(ctx, entityID)
+	if len(holders) == 0 {
+		// The constraint fired and nothing obvious points here. Say so rather
+		// than inventing a cause: a wrong explanation is worse than none.
+		return fmt.Errorf("%w — something still references it", cause)
+	}
+	return fmt.Errorf("%w — it is still referenced by %s", cause, strings.Join(holders, ", "))
+}
+
+// referencesTo names the entity-ref components pointing at an entity, best
+// effort: this runs on a failed path, and a query that will not answer must not
+// replace the refusal with its own.
+//
+// The entity-ref filter is about not issuing queries that cannot succeed, not
+// about the answer — a comp_ table with no target_entity_id column would fail
+// and be skipped, reaching the same result more slowly. So there is no test
+// that can tell the filter from its absence, and that is the reason rather than
+// an oversight.
+func (t *sqliteTx) referencesTo(ctx context.Context, entityID int64) []string {
+	names := make([]string, 0, len(t.schema.Components))
+	for name := range t.schema.Components {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var out []string
+	for _, name := range names {
+		if t.schema.Components[name].Type != schema.ComponentTypeEntityRef {
+			continue
+		}
+		table := "comp_" + strings.ToLower(name)
+		if err := validateIdentifier(strings.TrimPrefix(table, "comp_"), "DeleteEntity component"); err != nil {
+			continue
+		}
+		rows, err := t.tx.QueryContext(ctx,
+			fmt.Sprintf("SELECT entity_id FROM %s WHERE target_entity_id = ? ORDER BY entity_id", table), entityID)
+		if err != nil {
+			continue
+		}
+		var ids []string
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				break
+			}
+			ids = append(ids, strconv.FormatInt(id, 10))
+		}
+		_ = rows.Close()
+		if len(ids) > 0 {
+			out = append(out, fmt.Sprintf("%s of entity %s", name, strings.Join(ids, ", ")))
+		}
+	}
+	return out
 }
 
 func (t *sqliteTx) tableExists(ctx context.Context, name string) (bool, error) {
