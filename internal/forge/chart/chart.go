@@ -199,9 +199,18 @@ const (
 	SelEdge  = "edge:"
 )
 
-// Geometry. The node width is the prototype's; the rest follows from it.
+// Geometry. The node width is the prototype's, widened once; the rest follows
+// from it.
+//
+// The prototype drew "setAnimation · walk" and 168px held it. This project's
+// animations are named goblin_idle and goblin_walk, so the real entry is
+// "setAnimation · goblin_walk" — 178px of text in a 164px line box, which
+// truncated to "setAnimation · goblin_…" in every state that had one. Two
+// different states rendering the same string is a node that has stopped saying
+// what its state does, so the box grew to hold what this project actually
+// writes rather than what the mock did.
 const (
-	nodeW   = 168
+	nodeW   = 184
 	titleH  = 26 // the name line
 	lineH   = 14 // and one entry action
 	bodyPad = 10
@@ -357,6 +366,13 @@ func cellSize(nodes []Node) (w, h float64) {
 }
 
 // headHeight is the name line plus one line per entry action.
+//
+// One line per entry is a promise the stylesheet has to keep: .chart-node__entry
+// sets white-space:nowrap and a 14px line box for exactly this reason. It once
+// did neither, and an entry too wide for the node wrapped — so a state with
+// three entry actions drew four lines in a box built for three, and the last
+// one hung out below the border. titleH and lineH are the two numbers that have
+// to match the CSS; nothing else here does.
 func headHeight(n Node) float64 {
 	if n.Kind == agent.StateTypeHistory {
 		return histH

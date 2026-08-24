@@ -444,7 +444,10 @@ func TestCanvas_CoordinatesArePrintedShort(t *testing.T) {
 	if !strings.Contains(html, "left:0.1px") {
 		t.Error("the recorded fractional position did not reach the page at all")
 	}
-	if !strings.Contains(html, "width:224.3px") {
+	// The literal moves with chart.nodeW, which this sum is built from — it is
+	// in another package and unexported, so there is nothing to reference. What
+	// is being asserted is the ".3", not the 240.
+	if !strings.Contains(html, "width:240.3px") {
 		t.Errorf("the canvas is not sized from the fractional sum; check what this asserts")
 	}
 }

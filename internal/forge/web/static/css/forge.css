@@ -1986,19 +1986,34 @@ option:disabled {
   right: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
   padding: 5px 11px;
   box-sizing: border-box;
   text-decoration: none;
   color: inherit;
+  /* Nothing escapes a node. The server owns node geometry — it routes the SVG
+     edges to these coordinates — so the box cannot grow to fit its text, and a
+     line that does not fit has to be cut rather than allowed to hang out over
+     the canvas. The rules below are meant to make this unreachable; it is here
+     because "unreachable" was the state of affairs when computePath was
+     hanging out of the bottom of idle. */
+  overflow: hidden;
+
+  /* No gap. chart.headHeight is titleH + len(entry)*lineH and has no term for
+     one, so every gap here is a line the server did not budget for. Spacing is
+     the line boxes' job instead — see .chart-node__name and __entry. */
+  gap: 0;
 }
 
 .chart-node__head:hover {
   background: var(--active);
 }
 
+/* 16px plus the head's 5px of padding top and bottom is 26, which is
+   chart.titleH. The two have to agree: the server sizes the box from titleH and
+   the browser fills it from this. */
 .chart-node__name {
   font-size: 12px;
+  line-height: 16px;
   font-weight: 600;
   color: var(--text-hi);
 }
@@ -2010,9 +2025,26 @@ option:disabled {
   color: var(--amber);
 }
 
+/* One entry action, one line, 14px of it — which is chart.lineH, the height the
+   server reserved for it.
+
+   The nowrap is the load-bearing half. "setAnimation · goblin_idle" is wider
+   than a 168px node and used to wrap, so a state with three entry actions drew
+   four lines in a box built for three: the last one hung out through the bottom
+   border, over the canvas and over whatever edge label was behind it. Wrapping
+   also read as two actions where there was one, which is worse than the
+   overflow — the node was lying about the machine.
+
+   Cut with an ellipsis rather than shrunk to fit: a node is a fixed size
+   because the edges are routed to it, and the full text is on the title
+   attribute for anyone who needs the rest of it. */
 .chart-node__entry {
   font-size: 10px;
+  line-height: 14px;
   color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chart-node__history {

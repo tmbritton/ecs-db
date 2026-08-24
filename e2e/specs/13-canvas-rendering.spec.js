@@ -297,3 +297,87 @@ test("accessibility", async ({ page }) => {
   // The labels are not — they are the transitions, and they are links.
   await expect(byTestId(page, "edge-idle|on|SPOTTED|0")).toHaveRole("link");
 });
+
+// A node's box is sized by the server — chart.headHeight is titleH plus one
+// line per entry action, and the SVG edges are routed to those coordinates. So
+// the box cannot grow to fit its text, and the stylesheet has to keep the
+// one-line-per-entry promise the arithmetic is built on.
+//
+// It did not. `.chart-node__entry` had no white-space rule, so an action wider
+// than the node wrapped: a state with three entry actions drew four lines in a
+// box built for three and the last one hung out through the bottom border, over
+// the canvas and over whatever edge label was behind it. The head's `gap: 2px`
+// was the same bug in miniature — a per-entry 2px the server never budgeted.
+//
+// Only a browser can see this. The markup is correct either way, every Go test
+// passes, and the geometry is right in the style attribute; what is wrong is
+// what the text does inside it.
+test("a node's entry actions stay inside the node", async ({ page, baseURL }) => {
+  // Long enough to have wrapped at the old width, which is the whole point: the
+  // fixture's own "pickRandomTarget" fits, and a test that used it would pass
+  // against the bug.
+  fs.writeFileSync(
+    path.join(BEHAVIORS, "e2e-long-entry.json"),
+    JSON.stringify(
+      {
+        id: "e2e-long-entry",
+        initial: "wandering",
+        states: {
+          wandering: {
+            // The real shape, and the real names: these render as
+            // "setAnimation · goblin_walk", which is what did not fit.
+            entry: [
+              { type: "setAnimation", params: { animation: "goblin_walk" } },
+              { type: "pickRandomTarget", params: { radius: 5 } },
+              // Not computePath: pathfinding registers only when the project
+              // has a grid, and the fixture project has no map.
+              { type: "log" },
+            ],
+            meta: { forge: { x: 40, y: 40 } },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  const resp = await fetch(`${baseURL}/forge/agents/reload`, { method: "POST" });
+  if (resp.status !== 204) throw new Error(`could not pick up the new machine: ${resp.status}`);
+  await openMachine(page, "e2e-long-entry");
+
+  const report = await page.evaluate(() => {
+    const out = [];
+    for (const node of document.querySelectorAll(".chart-node")) {
+      const head = node.querySelector(".chart-node__head");
+      const nodeBox = node.getBoundingClientRect();
+      out.push({
+        node: node.dataset.testid,
+        // What the server reserved, against what the browser needed for it.
+        reserved: parseFloat(head.style.height),
+        used: head.scrollHeight,
+        entries: [...head.querySelectorAll(".chart-node__entry")].map((e) => ({
+          text: e.textContent.trim(),
+          height: Math.round(e.getBoundingClientRect().height),
+          escapesBy: Math.round(e.getBoundingClientRect().bottom - nodeBox.bottom),
+        })),
+      });
+    }
+    return out;
+  });
+
+  expect(report.length).toBeGreaterThan(0);
+  for (const node of report) {
+    expect(node.entries.length).toBeGreaterThan(0);
+    // The box the server sized holds what the browser put in it. This is the
+    // assertion the bug fails: 86 used against 68 reserved.
+    expect(node.used, `${node.node} overflows the height the server reserved`)
+      .toBeLessThanOrEqual(node.reserved);
+    for (const entry of node.entries) {
+      // One line each. chart.lineH is 14, and an entry that wrapped measured 29.
+      expect(entry.height, `"${entry.text}" is not one line`).toBe(14);
+      // And inside the border, which is what anyone actually sees.
+      expect(entry.escapesBy, `"${entry.text}" hangs out of ${node.node}`)
+        .toBeLessThan(0);
+    }
+  }
+});

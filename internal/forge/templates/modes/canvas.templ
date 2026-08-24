@@ -196,7 +196,10 @@ templ chartNode(data Data, n ChartNode) {
 					}
 				</span>
 				for _, entry := range n.Entry {
-					<span class="chart-node__entry mono">{ entry }</span>
+					// The title carries what the ellipsis takes away: an entry
+					// wider than the node is cut rather than wrapped, because
+					// the server sized this box and routed edges to it.
+					<span class="chart-node__entry mono" title={ entry }>{ entry }</span>
 				}
 			}
 		</a>
