@@ -130,7 +130,7 @@ func (g *Generator) genAddComponent(c schema.Change) []Statement {
 		Kind:        "create_table",
 		Destructive: false,
 		Component:   c.Component,
-		Description: "Create component table comp_" + c.Component,
+		Description: describe("Create component table comp_"+c.Component, c.Reason),
 	}}
 }
 
@@ -189,7 +189,7 @@ func (g *Generator) genRemoveComponent(c schema.Change) []Statement {
 		Kind:        "drop_table",
 		Destructive: true,
 		Component:   c.Component,
-		Description: "Drop component table comp_" + c.Component,
+		Description: describe("Drop component table comp_"+c.Component, c.Reason),
 	}}
 }
 
@@ -333,11 +333,11 @@ func buildNewColumns(comp schema.Component) []string {
 		}
 
 	case schema.ComponentTypeEntityRef:
-		// Reached when a *scalar* component is retyped to an entity-ref:
-		// schema.Diff reports that as a changed property named "value"
-		// (diff.go's diffScalarComponent), and genChangePropertyType sends a
-		// changed property here. Not only for object components, which is what
-		// "genRebuild is for property changes" would suggest.
+		// Reached when an entity-ref component's stored column type is not
+		// INTEGER — a hand-edited table, or one built before entity-ref had a
+		// settled shape. A change *between* entity-ref and another layout no
+		// longer arrives here: schema.Diff makes that remove-and-add, because
+		// no ALTER renames value into target_entity_id.
 		cols = append(cols, "target_entity_id "+entityRefColumnType)
 	case schema.ComponentTypeArray:
 		cols = append(cols, "value TEXT NOT NULL DEFAULT '[]'")
@@ -389,8 +389,11 @@ func defaultValueForProperty(p schema.Property) string {
 
 // reorderStructuralChanges ensures that for the same component, any
 // DROP TABLE comes before CREATE TABLE. This handles the case where
-// schema.Diff() emits a structural incompatibility (object↔scalar) as
-// remove+add but phase ordering puts add before remove.
+// schema.Diff() emits a shape change as remove+add but phase ordering puts add
+// before remove. A shape change is one the columns cannot be altered through:
+// object → a single fixed column, or between "value" and "target_entity_id".
+// Not the reverse — a scalar becoming an object keeps its table, because any
+// columns can be added and dropped into an object's.
 //
 // The algorithm handles multiple simultaneous structural incompatibilities
 // correctly by collecting which DROPs need to move, then doing a single
@@ -446,4 +449,14 @@ func filterNonDestructive(stmts []Statement) []Statement {
 		}
 	}
 	return result
+}
+
+// describe appends a change's reason to a statement description, when it has
+// one. A drop reads the same whether somebody deleted a component or changed
+// its shape, and only one of those is a surprise worth explaining.
+func describe(what, reason string) string {
+	if reason == "" {
+		return what
+	}
+	return what + " — " + reason
 }

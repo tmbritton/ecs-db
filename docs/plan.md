@@ -74,6 +74,13 @@ Establish `schema.json` as the declarative source of truth for components and en
   - The three paths now agree that a property reference is nullable: declaring it `NOT NULL` on create and rebuild wedged any database where the property had been added to a populated component
   - An existing database is not migrated — constraints are not in the shape the diff introspects — and the gap is pinned as a test rather than left as prose
 
+- [x] **A component that changes shape is rebuilt, not patched** — the diff asks whether the columns a table has can be altered into the ones the file wants, rather than comparing a type the database does not record.
+  - Changing a component between `entity-ref` and any other scalar type used to fail the migration and then fail every subsequent open
+  - An object whose one property is called `value` builds a table a string component would; the old comparison guessed "number" and dropped it — on an unchanged schema, and it is the shape Forge gives every new component
+  - A scalar becoming an object now keeps its rows; the reverse still cannot
+  - A statement the generator refused was committed around, because its SQL was empty and `tx.Exec("")` succeeds
+  - Destructive statements are warnings, and the confirmation says the shape changed rather than just naming a drop
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.

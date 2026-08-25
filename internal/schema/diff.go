@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -44,13 +45,20 @@ const (
 // schema and the file schema.
 type Change struct {
 	Kind      ChangeKind
-	Component string      // lowercase component name
-	Property  string      // lowercase property name (for property-level changes)
-	OldType   string      // old SQL type (for type changes)
-	NewType   string      // new SQL type (for type changes)
-	ETName    string      // entity type name (for entity-type changes)
-	OldET     *EntityType // previous entity type spec (for changed_entity_type)
-	NewET     *EntityType // new entity type spec (for changed_entity_type)
+	Component string // lowercase component name
+	Property  string // lowercase property name (for property-level changes)
+	OldType   string // old SQL type (for type changes)
+	NewType   string // new SQL type (for type changes)
+	ETName    string // entity type name (for entity-type changes)
+	// Reason says why a change is what it is, for the cases where the kind
+	// alone is misleading. A component whose shape changed comes out as
+	// remove+add, which is indistinguishable from a component somebody
+	// deleted — and the person being asked to confirm the drop is entitled to
+	// know that their data cannot come across rather than that they appear to
+	// have deleted something they did not.
+	Reason string
+	OldET  *EntityType // previous entity type spec (for changed_entity_type)
+	NewET  *EntityType // new entity type spec (for changed_entity_type)
 }
 
 // phase returns a numeric priority used for deterministic ordering.
@@ -157,23 +165,39 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 			}
 		}
 
-		dbIsObject := dbComp.Type == "object"
-		fileIsObject := fileComp.Type == ComponentTypeObject
+		// Can the table that is there become the table the file wants?
+		//
+		// Not "is the db the same type as the file". The db has no record of a
+		// component's declared type — storage.InferComponentType guesses it
+		// from the columns, and an object component whose one property happens
+		// to be called "value" builds a table indistinguishable from a string
+		// component's. Comparing the guess against the file dropped that
+		// table, with its data, on any version bump. It is the shape Forge
+		// gives every new object component.
+		//
+		// So the question is about columns, which the db does record.
+		fileLayout := StorageLayout(fileComp.Type)
 
-		if dbIsObject != fileIsObject {
-			// Structural incompatibility → treat as remove + add.
+		if !canBecome(dbComp.Columns, fileLayout) {
+			// No column can be altered into the other shape's column, so the
+			// table goes and a new one is built. Remove is destructive, which
+			// is what lets MigrationConfirm refuse it: the data cannot come
+			// across, and that is a thing to be told rather than to discover.
+			reason := fmt.Sprintf("its shape changed to %q, and no column can be altered into that", fileLayout)
 			changes = append(changes, Change{
 				Kind:      ChangeRemovedComponent,
 				Component: name,
+				Reason:    reason,
 			})
 			changes = append(changes, Change{
 				Kind:      ChangeAddedComponent,
 				Component: name,
+				Reason:    reason,
 			})
 			continue
 		}
 
-		if dbIsObject && fileIsObject {
+		if fileLayout == LayoutColumns {
 			diffObjectProperties(name, dbComp.Columns, fileComp.Properties, &changes)
 		} else {
 			diffScalarComponent(name, dbComp.Columns, fileComp, &changes)
@@ -302,7 +326,11 @@ func diffScalarComponent(compName string, dbCols []DomainColumn, fileComp Compon
 		if c.IsPK {
 			continue
 		}
-		// For scalar components there's exactly one data column (named "value").
+		// One data column, whose name is the layout's — "value" for the scalar
+		// types and "target_entity_id" for an entity-ref. Which one it is does
+		// not matter here, because the caller only reaches this when both sides
+		// have the *same* layout, so the column is the same column and only its
+		// type can have changed.
 		if strings.ToUpper(c.SQLType) != fileSQLType {
 			*changes = append(*changes, Change{
 				Kind:      ChangedPropertyType,
@@ -387,4 +415,32 @@ func PropertyByName(props map[string]Property, name string) (Property, bool) {
 		}
 	}
 	return Property{}, false
+}
+
+// canBecome reports whether the columns a table already has can be altered into
+// the ones a component of this layout needs.
+//
+// An object's columns can: properties are added, dropped and retyped one at a
+// time, and the generator orders additions before rebuilds, so by the time a
+// rebuild copies the surviving columns they all exist in the old table. Whatever
+// is there now, an object can be reached from it.
+//
+// The other two layouts have one fixed column each, and no ALTER renames a
+// column into it. A table holding "value" cannot become one holding
+// "target_entity_id": the data would have to be an entity id and it is a string.
+// That is a table to drop and rebuild, and the drop is destructive so the
+// confirm policy can refuse it.
+func canBecome(dbCols []DomainColumn, fileLayout string) bool {
+	if fileLayout == LayoutColumns {
+		return true
+	}
+	want := LayoutColumnName(fileLayout)
+	data := make([]DomainColumn, 0, len(dbCols))
+	for _, c := range dbCols {
+		if c.IsPK && c.Name == "entity_id" {
+			continue
+		}
+		data = append(data, c)
+	}
+	return len(data) == 1 && data[0].Name == want
 }

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -653,5 +654,189 @@ func TestDeleteEntity_SaysWhyALegacyDatabaseRefuses(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error = %q, want it to say %q", err, want)
 		}
+	}
+}
+
+// The two migrations that used to fail, and then fail on every open afterwards.
+//
+// entity-ref's column is target_entity_id and every other scalar's is value, so
+// changing a component between them is a change of shape. It was reported as a
+// changed property called "value", the generator answered with a rebuild, and
+// the rebuild's copy read a column the old table did not have. Nothing was
+// lost — the transaction rolled back — but NewSQLiteStore returned the error,
+// so the only way forward was to edit schema.json back to what the database
+// already had.
+func TestMigration_AComponentCanChangeBetweenAReferenceAndAValue(t *testing.T) {
+	mk := func(v int, comp schema.Component) schema.DatabaseSchema {
+		return schema.DatabaseSchema{
+			SchemaVersion: v,
+			Components:    map[string]schema.Component{"X": comp},
+			EntityTypes: map[string]schema.EntityType{
+				"T": {RequiredComponents: []string{"X"}, ValidationLevel: "strict"},
+			},
+		}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		from, to   schema.Component
+		seed       string
+		wantColumn string
+	}{
+		{
+			"a string becomes a reference",
+			schema.Component{Type: schema.ComponentTypeString},
+			schema.Component{Type: schema.ComponentTypeEntityRef},
+			`INSERT INTO comp_x (entity_id, value) VALUES (1, 'anything')`,
+			"target_entity_id",
+		},
+		{
+			"a reference becomes a string",
+			schema.Component{Type: schema.ComponentTypeEntityRef},
+			schema.Component{Type: schema.ComponentTypeString},
+			`INSERT INTO comp_x (entity_id, target_entity_id) VALUES (1, 1)`,
+			"value",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "w.sqlite")
+			s1, err := NewSQLiteStore(path, mk(1, tc.from), "")
+			if err != nil {
+				t.Fatalf("v1: %v", err)
+			}
+			if _, err := s1.DB().Exec(
+				`INSERT INTO entities (id, entity_type, created_tick) VALUES (1, 'T', 0)`); err != nil {
+				t.Fatalf("seeding an entity: %v", err)
+			}
+			if _, err := s1.DB().Exec(tc.seed); err != nil {
+				t.Fatalf("seeding a row: %v", err)
+			}
+			_ = s1.Close()
+
+			s2, err := NewSQLiteStore(path, mk(2, tc.to), "")
+			if err != nil {
+				t.Fatalf("the migration failed: %v", err)
+			}
+			defer func() { _ = s2.Close() }()
+
+			// The table has the new shape.
+			var n int
+			if err := s2.DB().QueryRow(
+				`SELECT COUNT(*) FROM pragma_table_info('comp_x') WHERE name = ?`, tc.wantColumn).Scan(&n); err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			if n != 1 {
+				t.Errorf("comp_x has no %s column after the change", tc.wantColumn)
+			}
+
+			// And the row is gone, which is the deliberate half. Neither
+			// direction has a conversion — a string is not an entity id — so
+			// the table is dropped and rebuilt empty. Asserted rather than
+			// assumed, because a later change that silently started keeping
+			// rows would be keeping values that mean nothing.
+			var rows int
+			if err := s2.DB().QueryRow(`SELECT COUNT(*) FROM comp_x`).Scan(&rows); err != nil {
+				t.Fatalf("counting rows: %v", err)
+			}
+			if rows != 0 {
+				t.Errorf("%d rows survived a change with no conversion behind it", rows)
+			}
+
+			// And it opens again, which is the part that used to be false.
+			_ = s2.Close()
+			again, err := NewSQLiteStore(path, mk(2, tc.to), "")
+			if err != nil {
+				t.Fatalf("reopening: %v", err)
+			}
+			_ = again.Close()
+		})
+	}
+}
+
+// A shape change cannot carry its data — there is no conversion from a string
+// to an entity id — so it has to be refusable rather than silent. The confirm
+// policy is what refuses it, and it can only do that if the statements are
+// marked destructive.
+func TestMigration_AShapeChangeIsOfferedForConfirmation(t *testing.T) {
+	mk := func(v int, comp schema.Component) schema.DatabaseSchema {
+		return schema.DatabaseSchema{
+			SchemaVersion: v,
+			Components:    map[string]schema.Component{"X": comp},
+			EntityTypes: map[string]schema.EntityType{
+				"T": {RequiredComponents: []string{"X"}, ValidationLevel: "strict"},
+			},
+		}
+	}
+	path := filepath.Join(t.TempDir(), "w.sqlite")
+	s1, err := NewSQLiteStore(path, mk(1, schema.Component{Type: schema.ComponentTypeString}), "")
+	if err != nil {
+		t.Fatalf("v1: %v", err)
+	}
+	_ = s1.Close()
+
+	_, err = NewSQLiteStoreWithConfig(path, StoreConfig{
+		Schema:          mk(2, schema.Component{Type: schema.ComponentTypeEntityRef}),
+		MigrationPolicy: MigrationConfirm,
+		Logger:          NopLogger(),
+	})
+	if err == nil {
+		t.Fatal("a change that throws a table away ran without being offered for confirmation")
+	}
+	var confirm *MigrationRequiresConfirmation
+	if !errors.As(err, &confirm) {
+		t.Fatalf("error = %v (%T), want MigrationRequiresConfirmation", err, err)
+	}
+	var sawDrop bool
+	for _, stmt := range confirm.DestructiveStatements {
+		if strings.Contains(stmt.SQL, "DROP TABLE") && strings.Contains(stmt.SQL, "comp_x") {
+			sawDrop = true
+		}
+	}
+	if !sawDrop {
+		t.Errorf("destructive statements = %v, want the drop of comp_x among them", confirm.DestructiveStatements)
+	}
+}
+
+// A drop reads the same whether somebody deleted a component or changed its
+// shape, and only one of those is a surprise. The person being asked to confirm
+// is entitled to know which.
+func TestMigration_TheConfirmationSaysWhyTheTableIsGoing(t *testing.T) {
+	mk := func(v int, comp schema.Component) schema.DatabaseSchema {
+		return schema.DatabaseSchema{
+			SchemaVersion: v,
+			Components:    map[string]schema.Component{"X": comp},
+			EntityTypes: map[string]schema.EntityType{
+				"T": {RequiredComponents: []string{"X"}, ValidationLevel: "strict"},
+			},
+		}
+	}
+	path := filepath.Join(t.TempDir(), "w.sqlite")
+	s1, err := NewSQLiteStore(path, mk(1, schema.Component{Type: schema.ComponentTypeString}), "")
+	if err != nil {
+		t.Fatalf("v1: %v", err)
+	}
+	_ = s1.Close()
+
+	_, err = NewSQLiteStoreWithConfig(path, StoreConfig{
+		Schema:          mk(2, schema.Component{Type: schema.ComponentTypeEntityRef}),
+		MigrationPolicy: MigrationConfirm,
+		Logger:          NopLogger(),
+	})
+	var confirm *MigrationRequiresConfirmation
+	if !errors.As(err, &confirm) {
+		t.Fatalf("error = %v, want MigrationRequiresConfirmation", err)
+	}
+	var explained bool
+	for _, stmt := range confirm.DestructiveStatements {
+		if strings.Contains(stmt.Description, "shape changed") {
+			explained = true
+		}
+	}
+	if !explained {
+		var got []string
+		for _, stmt := range confirm.DestructiveStatements {
+			got = append(got, stmt.Description)
+		}
+		t.Errorf("descriptions = %v, want one saying the component's shape changed", got)
 	}
 }

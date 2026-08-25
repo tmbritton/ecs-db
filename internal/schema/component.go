@@ -3,6 +3,7 @@ package schema
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // Supported component type values.
@@ -15,6 +16,21 @@ const (
 	ComponentTypeNumber    = "number"
 	ComponentTypeBoolean   = "boolean"
 )
+
+// ComponentTypes is every component type a schema may declare, sorted.
+//
+// Exported so that a caller which has to handle all of them can enumerate them
+// rather than keep a second list — storage's layout-agreement test builds a
+// real table for each, and a type added here fails that test until the layout
+// knows what shape it is.
+func ComponentTypes() []string {
+	out := make([]string, 0, len(supportedComponentTypes))
+	for t := range supportedComponentTypes {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
 
 var supportedComponentTypes = map[string]bool{
 	ComponentTypeObject:    true,

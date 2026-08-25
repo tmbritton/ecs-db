@@ -396,7 +396,15 @@ func TestDiff_ObjectToScalar_RemoveAdd(t *testing.T) {
 	})
 }
 
-func TestDiff_ScalarToObject_RemoveAdd(t *testing.T) {
+// A scalar becoming an object keeps its table.
+//
+// It used to be remove-and-add, which dropped every row — and with them the
+// record that those entities had the component at all. An object can be reached
+// from any set of columns: the new properties are added, the old column is
+// dropped by a rebuild, and additions are ordered first so the rebuild's copy
+// always finds what it reads. The scalar's data is lost either way, because
+// nothing turns a string into a number; what survives now is the row.
+func TestDiff_ScalarToObject_KeepsTheTable(t *testing.T) {
 	domain := &DomainSchema{
 		Components: map[string]DomainComponent{
 			"marker": {
@@ -413,11 +421,69 @@ func TestDiff_ScalarToObject_RemoveAdd(t *testing.T) {
 		EntityTypes: map[string]EntityType{},
 	}
 
-	changes := Diff(domain, file, nil)
-	assertChanges(t, changes, []Change{
+	assertChanges(t, Diff(domain, file, nil), []Change{
+		{Kind: ChangeAddedProperty, Component: "marker", Property: "x", NewType: "REAL"},
+		{Kind: ChangeRemovedProperty, Component: "marker", Property: "value"},
+	})
+}
+
+// The reverse is not symmetrical, and cannot be. An object's columns can be
+// altered into any other object's; they cannot be altered into a single column
+// with a fixed name, because no ALTER renames a column. So this direction is
+// still a drop.
+func TestDiff_ObjectToScalar_IsStillRemoveAndAdd(t *testing.T) {
+	domain := &DomainSchema{
+		Components: map[string]DomainComponent{
+			"marker": {
+				Type:    "object",
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "x", SQLType: "REAL"}},
+			},
+		},
+		EntityTypeNames: make(map[string]bool),
+	}
+	file := &DatabaseSchema{
+		Components:  map[string]Component{"Marker": {Type: ComponentTypeString}},
+		EntityTypes: map[string]EntityType{},
+	}
+
+	assertChanges(t, Diff(domain, file, nil), []Change{
 		{Kind: ChangeAddedComponent, Component: "marker"},
 		{Kind: ChangeRemovedComponent, Component: "marker"},
 	})
+}
+
+// The case that used to drop a table for no reason at all: an object whose one
+// property happens to be called "value" builds a table a string component would
+// build, so the db side's inferred type came back "number" and the diff
+// compared it against "object" and dropped everything. It is the shape Forge
+// gives every new object component.
+func TestDiff_AnObjectWhoseOnlyPropertyIsCalledValueIsLeftAlone(t *testing.T) {
+	for _, name := range []string{"value", "target_entity_id"} {
+		t.Run(name, func(t *testing.T) {
+			domain := &DomainSchema{
+				Components: map[string]DomainComponent{
+					"probe": {
+						Type: "number", // what InferComponentType guesses, and it is wrong
+						Columns: []DomainColumn{
+							{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+							{Name: name, SQLType: "REAL"},
+						},
+					},
+				},
+				EntityTypeNames: make(map[string]bool),
+			}
+			file := &DatabaseSchema{
+				Components: map[string]Component{
+					"Probe": {Type: ComponentTypeObject, Properties: map[string]Property{
+						name: {Type: PropertyTypeNumber},
+					}},
+				},
+				EntityTypes: map[string]EntityType{},
+			}
+
+			assertChanges(t, Diff(domain, file, nil), nil)
+		})
+	}
 }
 
 // ── Ordering ────────────────────────────────────────────────────────
@@ -816,6 +882,17 @@ func assertChanges(t *testing.T, got, want []Change) {
 		if g.ETName != w.ETName {
 			t.Errorf("changes[%d].ETName = %q, want %q", i, g.ETName, w.ETName)
 		}
+		// The SQL types, which this used to skip — so every OldType and
+		// NewType a caller wrote down was decoration, and the tests named for
+		// "every scalar type maps to the expected SQL type" asserted no such
+		// thing. Compared only when the caller asked for one, so the many
+		// cases that do not care about types need not fill them in.
+		if w.OldType != "" && g.OldType != w.OldType {
+			t.Errorf("changes[%d].OldType = %q, want %q", i, g.OldType, w.OldType)
+		}
+		if w.NewType != "" && g.NewType != w.NewType {
+			t.Errorf("changes[%d].NewType = %q, want %q", i, g.NewType, w.NewType)
+		}
 	}
 }
 
@@ -840,10 +917,12 @@ func TestChange_SortKey_UnknownKind(t *testing.T) {
 // ── propertySQLTypeForComponent coverage ────────────────────────────
 
 func TestDiff_ScalarTypes_AllCovered(t *testing.T) {
-	// Tests that every scalar type maps to the expected SQL type via the
-	// diff's internal propertySQLTypeForComponent. Each subtest passes a
-	// domain component with a different type and verifies the generated
-	// change uses the correct SQL type.
+	// Every scalar type that shares the "value" layout maps to the expected SQL
+	// type, and a change between two of them is a change to that one column.
+	//
+	// entity-ref is not in this list any more. It is a scalar in the sense that
+	// it has one data column, and its column is called target_entity_id rather
+	// than value — a different shape, which is TestDiff_AShapeChangeIsRemoveAndAdd.
 	tests := []struct {
 		name     string
 		dbType   string
@@ -855,8 +934,9 @@ func TestDiff_ScalarTypes_AllCovered(t *testing.T) {
 		{"integer→string", "integer", "INTEGER", ComponentTypeString, "TEXT", "INTEGER"},
 		{"number→integer", "number", "REAL", ComponentTypeInteger, "INTEGER", "REAL"},
 		{"boolean→number", "boolean", "INTEGER", ComponentTypeNumber, "REAL", "INTEGER"},
-		{"entity-ref→array", "entity-ref", "INTEGER", ComponentTypeArray, "TEXT", "INTEGER"},
-		{"string→entity-ref", "string", "TEXT", ComponentTypeEntityRef, "INTEGER", "TEXT"},
+		{"string→array", "string", "TEXT", ComponentTypeArray, "TEXT", "TEXT"},
+		{"integer→boolean", "integer", "INTEGER", ComponentTypeBoolean, "INTEGER", "INTEGER"},
+		{"string→boolean", "string", "TEXT", ComponentTypeBoolean, "INTEGER", "TEXT"},
 	}
 
 	for _, tt := range tests {
@@ -878,11 +958,89 @@ func TestDiff_ScalarTypes_AllCovered(t *testing.T) {
 			}
 
 			changes := Diff(domain, file, nil)
+			if tt.wantOld == tt.wantNew {
+				// Same SQL type on both sides: nothing to alter.
+				assertChanges(t, changes, nil)
+				return
+			}
 			assertChanges(t, changes, []Change{
 				{Kind: ChangedPropertyType, Component: "val", Property: "value", OldType: tt.wantOld, NewType: tt.wantNew},
 			})
 		})
 	}
+}
+
+// A component moving between shapes cannot have its column altered into the
+// other shape's column, so the table goes and a new one is built.
+//
+// This used to be reported as a changed property named "value", which the
+// generator answered with a rebuild whose copy read a column that did not
+// exist — a migration that failed and then failed on every subsequent open.
+func TestDiff_AShapeChangeIsRemoveAndAdd(t *testing.T) {
+	entityRefCols := []DomainColumn{
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "target_entity_id", SQLType: "INTEGER"},
+	}
+	valueCols := []DomainColumn{
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "value", SQLType: "TEXT"},
+	}
+	objectCols := []DomainColumn{
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "x", SQLType: "INTEGER"},
+	}
+
+	for _, tt := range []struct {
+		name     string
+		dbType   string
+		dbCols   []DomainColumn
+		fileComp Component
+	}{
+		{"entity-ref → array", "entity-ref", entityRefCols, Component{Type: ComponentTypeArray}},
+		{"entity-ref → string", "entity-ref", entityRefCols, Component{Type: ComponentTypeString}},
+		{"string → entity-ref", "string", valueCols, Component{Type: ComponentTypeEntityRef}},
+		{"object → entity-ref", "object", objectCols, Component{Type: ComponentTypeEntityRef}},
+		{"object → string", "object", objectCols, Component{Type: ComponentTypeString}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			domain := &DomainSchema{
+				Components:      map[string]DomainComponent{"val": {Type: tt.dbType, Columns: tt.dbCols}},
+				EntityTypeNames: make(map[string]bool),
+			}
+			file := &DatabaseSchema{
+				Components:  map[string]Component{"Val": tt.fileComp},
+				EntityTypes: map[string]EntityType{},
+			}
+
+			changes := Diff(domain, file, nil)
+			assertChanges(t, changes, []Change{
+				{Kind: ChangeAddedComponent, Component: "val"},
+				{Kind: ChangeRemovedComponent, Component: "val"},
+			})
+		})
+	}
+}
+
+// The other half: two types sharing a shape stay a column change, so an
+// ordinary retype does not throw the data away.
+func TestDiff_AChangeWithinAShapeStaysAColumnChange(t *testing.T) {
+	domain := &DomainSchema{
+		Components: map[string]DomainComponent{
+			"val": {Type: "string", Columns: []DomainColumn{
+				{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+				{Name: "value", SQLType: "TEXT"},
+			}},
+		},
+		EntityTypeNames: make(map[string]bool),
+	}
+	file := &DatabaseSchema{
+		Components:  map[string]Component{"Val": {Type: ComponentTypeInteger}},
+		EntityTypes: map[string]EntityType{},
+	}
+
+	assertChanges(t, Diff(domain, file, nil), []Change{
+		{Kind: ChangedPropertyType, Component: "val", Property: "value", OldType: "TEXT", NewType: "INTEGER"},
+	})
 }
 
 // ── equalStringSliceSets coverage ──────────────────────────────────
@@ -1178,4 +1336,33 @@ func TestPropertyByName_EmptyMap(t *testing.T) {
 	if ok {
 		t.Error("PropertyByName returned true on empty map")
 	}
+}
+
+// A fixed-column layout needs exactly its one column, not merely to have it
+// somewhere. An object with properties "value" and "extra" becoming a string
+// component has the right column and two too many: the extra one cannot be
+// dropped by any ALTER, so the table goes.
+func TestDiff_AFixedColumnLayoutNeedsExactlyItsOneColumn(t *testing.T) {
+	domain := &DomainSchema{
+		Components: map[string]DomainComponent{
+			"probe": {
+				Type: "object",
+				Columns: []DomainColumn{
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "value", SQLType: "TEXT"},
+					{Name: "extra", SQLType: "TEXT"},
+				},
+			},
+		},
+		EntityTypeNames: make(map[string]bool),
+	}
+	file := &DatabaseSchema{
+		Components:  map[string]Component{"Probe": {Type: ComponentTypeString}},
+		EntityTypes: map[string]EntityType{},
+	}
+
+	assertChanges(t, Diff(domain, file, nil), []Change{
+		{Kind: ChangeAddedComponent, Component: "probe"},
+		{Kind: ChangeRemovedComponent, Component: "probe"},
+	})
 }

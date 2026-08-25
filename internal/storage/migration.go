@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -184,6 +185,28 @@ func (r *MigrationRunner) Run() error {
 
 	// 7. Execute each DDL statement.
 	for i, stmt := range stmts {
+		// A statement the generator could not build carries Kind "error" and
+		// no SQL, and tx.Exec("") succeeds — so the migration used to run every
+		// other statement, commit, and report success. When the generator
+		// cannot express half a change, the half it could express is the
+		// dangerous half: a DROP with no CREATE behind it.
+		if stmt.Kind == "error" {
+			_ = tx.Rollback()
+			return &SchemaMigrationError{
+				Change:       stmt.Component,
+				ChangeKind:   stmt.Kind,
+				SQL:          stmt.SQL,
+				Underlying:   errors.New(stmt.Description),
+				StatementIdx: i,
+				TotalStmts:   len(stmts),
+			}
+		}
+		// Destructive statements are logged as warnings, because under
+		// MigrationAuto — the default, and what the engine runs — this is the
+		// only notice anybody gets that a table went.
+		if stmt.Destructive {
+			r.logger.Warnf("migration: %s on %s is destructive: %s", stmt.Kind, stmt.Component, stmt.Description)
+		}
 		if _, err := tx.Exec(stmt.SQL); err != nil {
 			_ = tx.Rollback()
 			return &SchemaMigrationError{
