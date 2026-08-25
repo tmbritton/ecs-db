@@ -60,10 +60,14 @@ var supportedComponentTypes = map[string]bool{
 // Component represents one entry in the top-level "components" map of
 // schema.json. It is unmarshalled polymorphically based on the "type" field.
 type Component struct {
-	Type       string              `json:"type"`
-	Behavior   string              `json:"behavior,omitempty"`
-	Properties map[string]Property `json:"properties,omitempty"`
-	Items      *Property           `json:"items,omitempty"`
+	Type     string `json:"type"`
+	Behavior string `json:"behavior,omitempty"`
+	// RenamedFrom is the name this component had in the database, so a rename
+	// migrates the table instead of dropping it and building an empty one. See
+	// applyRenames.
+	RenamedFrom string              `json:"renamedFrom,omitempty"`
+	Properties  map[string]Property `json:"properties,omitempty"`
+	Items       *Property           `json:"items,omitempty"`
 
 	// PropertyOrder records the authored order of Properties, on the same terms
 	// as DatabaseSchema.ComponentOrder. See that field for why.

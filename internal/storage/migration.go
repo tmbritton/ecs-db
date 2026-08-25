@@ -14,7 +14,7 @@ import (
 // SchemaMigrationError is returned when a migration fails at a specific DDL statement.
 type SchemaMigrationError struct {
 	Change       string // component or property name affected
-	ChangeKind   string // "create_table", "alter_add_column", "rebuild_table", "drop_table"
+	ChangeKind   string // the failing Statement's Kind
 	SQL          string // the statement that failed
 	Underlying   error  // driver error
 	StatementIdx int    // zero-based index within the statement batch
@@ -209,6 +209,22 @@ func (r *MigrationRunner) Plan() (*MigrationPlan, error) {
 		return nil, fmt.Errorf("introspecting db: %w", err)
 	}
 	changes := schema.Diff(domain.ToDiffSchema(), &r.file, nil)
+
+	// The generator has to see the database as the renames leave it, not as
+	// introspection found it.
+	//
+	// Diff renames a copy — ToDiffSchema's — and this one was handed the
+	// original. So a component renamed *and* rebuilt in one migration had the
+	// rebuild look for a table under its new name in a snapshot that still held
+	// the old one, and produce an error statement; and a renamed column's copy
+	// looked for its nullable source under the new name, found nothing, and
+	// emitted no COALESCE. Both fail the migration, which the store then returns
+	// from every subsequent open.
+	//
+	// Replayed from the changes rather than worked out again, so there is one
+	// statement of what a rename does and this cannot drift from it.
+	domain = domain.withRenames(changes)
+
 	stmts := NewGenerator(&r.file, domain, Config{StrictDrop: true}).Generate(changes)
 	return &MigrationPlan{
 		Domain:      domain,

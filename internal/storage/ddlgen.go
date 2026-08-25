@@ -12,8 +12,11 @@ import (
 // Statement represents a single DDL operation or a line within a
 // multi-statement operation (e.g. table rebuild).
 type Statement struct {
-	SQL         string // The raw SQL to execute
-	Kind        string // "create_table", "alter_add_column", "rebuild_table", "drop_table"
+	SQL string // The raw SQL to execute
+	// Kind is one of "create_table", "alter_add_column", "rebuild_table",
+	// "drop_table", "rename_table", "rename_column", "rename_entity_type", or
+	// "error" for a change the generator could not express.
+	Kind        string
 	Destructive bool   // true for DROP TABLE, column removal, type change
 	Component   string // affected component (lowercase)
 	Description string // human-readable summary
@@ -127,6 +130,12 @@ func (g *Generator) genChange(c schema.Change) []Statement {
 		return g.genAddComponent(c)
 	case schema.ChangeAddedProperty:
 		return g.genAddProperty(c)
+	case schema.ChangeRenamedComponent:
+		return g.genRenameComponent(c)
+	case schema.ChangeRenamedProperty:
+		return g.genRenameProperty(c)
+	case schema.ChangeRenamedEntityType:
+		return g.genRenameEntityType(c)
 	case schema.ChangeRemovedComponent:
 		return g.genRemoveComponent(c)
 	// Entity type changes produce no DDL.
@@ -214,6 +223,60 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 		Component:   c.Component,
 		Description: fmt.Sprintf("Add column %q to comp_%s", c.Property, c.Component),
 	}}
+}
+
+// genRenameComponent moves a table rather than dropping it and building an
+// empty one.
+//
+// Not destructive: ALTER TABLE ... RENAME TO keeps every row, every column type
+// and every foreign key, including the ones other tables hold on this one. The
+// whole point of the change is that nothing is lost, so MigrationConfirm has
+// nothing to stop.
+func (g *Generator) genRenameComponent(c schema.Change) []Statement {
+	return []Statement{{
+		SQL:         fmt.Sprintf("ALTER TABLE comp_%s RENAME TO comp_%s", c.OldName, c.Component),
+		Kind:        "rename_table",
+		Destructive: false,
+		Component:   c.Component,
+		Description: describe(
+			fmt.Sprintf("Rename comp_%s to comp_%s", c.OldName, c.Component), c.Reason),
+	}}
+}
+
+// genRenameProperty moves a column. RENAME COLUMN keeps the data, the type, the
+// NOT NULL and the foreign key — and a foreign key follows the column it is on,
+// so a renamed entity-ref property still cascades.
+func (g *Generator) genRenameProperty(c schema.Change) []Statement {
+	return []Statement{{
+		SQL: fmt.Sprintf("ALTER TABLE comp_%s RENAME COLUMN %s TO %s",
+			c.Component, c.OldName, c.Property),
+		Kind:        "rename_column",
+		Destructive: false,
+		Component:   c.Component,
+		Description: describe(
+			fmt.Sprintf("Rename comp_%s.%s to %s", c.Component, c.OldName, c.Property), c.Reason),
+	}}
+}
+
+// genRenameEntityType is the one rename that is not DDL. An entity's type is a
+// string in a column, so the entities filed under the old name have to be moved
+// to the new one or they stop matching any type the schema declares.
+func (g *Generator) genRenameEntityType(c schema.Change) []Statement {
+	return []Statement{{
+		SQL: fmt.Sprintf("UPDATE entities SET entity_type = %s WHERE entity_type = %s",
+			sqlQuote(c.ETName), sqlQuote(c.OldName)),
+		Kind:        "rename_entity_type",
+		Destructive: false,
+		Description: describe(
+			fmt.Sprintf("Refile entities of type %q as %q", c.OldName, c.ETName), c.Reason),
+	}}
+}
+
+// sqlQuote renders a string literal. Entity type names are not identifiers and
+// are not validated as such — they are values in a column, and may contain
+// anything a JSON string can.
+func sqlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // genRemoveComponent produces a DROP TABLE IF EXISTS statement.

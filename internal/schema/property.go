@@ -35,9 +35,15 @@ var supportedPropertyTypes = map[string]bool{
 // the type of each element. Primitive types (string, integer, number,
 // boolean) and entity-ref have no children.
 type Property struct {
-	Type       string              `json:"type"`
-	Properties map[string]Property `json:"properties,omitempty"`
-	Items      *Property           `json:"items,omitempty"`
+	Type string `json:"type"`
+	// RenamedFrom is the name this property had in the database, so a rename
+	// migrates the column instead of dropping it and adding an empty one. Only
+	// meaningful on a top-level property of an object component: nested
+	// properties and array items are stored inside a JSON column, which has no
+	// columns of its own to rename.
+	RenamedFrom string              `json:"renamedFrom,omitempty"`
+	Properties  map[string]Property `json:"properties,omitempty"`
+	Items       *Property           `json:"items,omitempty"`
 
 	// PropertyOrder records the authored order of Properties, on the same
 	// terms as Component.PropertyOrder — see DatabaseSchema.ComponentOrder for

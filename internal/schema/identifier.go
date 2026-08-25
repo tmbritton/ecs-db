@@ -176,7 +176,211 @@ func validateIdentifiers(s DatabaseSchema) error {
 			columns[col] = prop
 		}
 	}
+	if err := validateRenames(s, compNames); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateRenames checks that every renamedFrom names something that could have
+// been a table, a column or a type, and that it is not still in use.
+//
+// The name has to be a usable identifier for the same reason the new one does:
+// it is interpolated into an ALTER TABLE. And a renamedFrom that names something
+// the file *still declares* is the case worth refusing loudly — "rename x to
+// col_x" while x is also declared is either a mistake or a swap, and the
+// migration would have to both rename a column and keep it.
+func validateRenames(s DatabaseSchema, compNames []string) error {
+	for _, name := range compNames {
+		comp := s.Components[name]
+		if from := comp.RenamedFrom; from != "" {
+			if !ValidIdentifier(from) {
+				return fmt.Errorf("component %q: renamedFrom %q cannot be a table name: %s",
+					name, from, identifierRule)
+			}
+			if strings.EqualFold(from, name) {
+				return fmt.Errorf("component %q is renamed from itself; drop the renamedFrom", name)
+			}
+			if _, still := lookupFold(s.Components, from); still {
+				return fmt.Errorf("component %q is renamed from %q, which the schema still declares",
+					name, from)
+			}
+		}
+
+		props := make([]string, 0, len(comp.Properties))
+		for prop := range comp.Properties {
+			props = append(props, prop)
+		}
+		sort.Strings(props)
+		for _, prop := range props {
+			from := comp.Properties[prop].RenamedFrom
+			if from == "" {
+				continue
+			}
+			if !ValidIdentifier(from) {
+				return fmt.Errorf("component %q: property %q: renamedFrom %q cannot be a column name: %s",
+					name, prop, from, identifierRule)
+			}
+			if why, unusable := unusableAsColumn[strings.ToLower(from)]; unusable {
+				return fmt.Errorf("component %q: property %q: renamedFrom %q cannot be a column name: %q is %s",
+					name, prop, from, strings.ToLower(from), why)
+			}
+			if strings.EqualFold(from, prop) {
+				return fmt.Errorf("component %q: property %q is renamed from itself; drop the renamedFrom",
+					name, prop)
+			}
+			if _, still := lookupFold(comp.Properties, from); still {
+				return fmt.Errorf("component %q: property %q is renamed from %q, which the component still declares",
+					name, prop, from)
+			}
+		}
+
+		// Below the top level there are no columns to rename: a nested object
+		// and an array's items live inside one JSON column, so a renamedFrom
+		// there does nothing at all. Refused rather than ignored, because a
+		// data-preservation field that silently does nothing is the exact
+		// failure this whole story is about.
+		for _, prop := range props {
+			if err := noNestedRename(name, prop, comp.Properties[prop]); err != nil {
+				return err
+			}
+		}
+		if comp.Items != nil {
+			// The items themselves as well as anything under them: an array
+			// component's items are the one nested position reachable without
+			// going through a property, so the recursion below never sees it.
+			if comp.Items.RenamedFrom != "" {
+				return fmt.Errorf("component %q: items has a renamedFrom, which does nothing: "+
+					"an array's items are stored inside one JSON column and have no column to rename", name)
+			}
+			if err := noNestedRename(name, "items", *comp.Items); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Two things renamed from one name. Whichever were applied first would take
+	// the table and the other would silently become a plain addition — an empty
+	// table where the author expected their data. Chains and cycles are already
+	// refused by the "still declares" checks above: renaming A→B and B→C means
+	// the file declares B, which B→C is renamed from.
+	if err := noSharedRenameSource(s, compNames); err != nil {
+		return err
+	}
+
+	etNames := make([]string, 0, len(s.EntityTypes))
+	for name := range s.EntityTypes {
+		etNames = append(etNames, name)
+	}
+	sort.Strings(etNames)
+	for _, name := range etNames {
+		from := s.EntityTypes[name].RenamedFrom
+		if from == "" {
+			continue
+		}
+		if from == name {
+			return fmt.Errorf("entity type %q is renamed from itself; drop the renamedFrom", name)
+		}
+		if _, still := s.EntityTypes[from]; still {
+			return fmt.Errorf("entity type %q is renamed from %q, which the schema still declares", name, from)
+		}
+	}
+	return nil
+}
+
+// noNestedRename refuses a renamedFrom anywhere below a component's top-level
+// properties, where it could not be acted on.
+func noNestedRename(comp, path string, p Property) error {
+	names := make([]string, 0, len(p.Properties))
+	for n := range p.Properties {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		child := p.Properties[n]
+		if child.RenamedFrom != "" {
+			return fmt.Errorf("component %q: %s.%s has a renamedFrom, which does nothing: "+
+				"a nested property is stored inside its parent's JSON column and has no column to rename",
+				comp, path, n)
+		}
+		if err := noNestedRename(comp, path+"."+n, child); err != nil {
+			return err
+		}
+	}
+	if p.Items != nil {
+		if p.Items.RenamedFrom != "" {
+			return fmt.Errorf("component %q: %s.items has a renamedFrom, which does nothing: "+
+				"an array's items are stored inside one JSON column and have no column to rename",
+				comp, path)
+		}
+		return noNestedRename(comp, path+".items", *p.Items)
+	}
+	return nil
+}
+
+// noSharedRenameSource refuses two things claiming to have been the same thing.
+func noSharedRenameSource(s DatabaseSchema, compNames []string) error {
+	claimed := map[string]string{}
+	for _, name := range compNames {
+		// The component's own renamedFrom, when it has one. Not a `continue`:
+		// the properties below have to be checked whether or not the component
+		// they are in was renamed, and skipping them was this function's first
+		// bug.
+		if from := strings.ToLower(s.Components[name].RenamedFrom); from != "" {
+			if first, taken := claimed[from]; taken {
+				return fmt.Errorf("components %q and %q are both renamed from %q", first, name, from)
+			}
+			claimed[from] = name
+		}
+
+		props := make([]string, 0, len(s.Components[name].Properties))
+		for prop := range s.Components[name].Properties {
+			props = append(props, prop)
+		}
+		sort.Strings(props)
+		inComp := map[string]string{}
+		for _, prop := range props {
+			pf := strings.ToLower(s.Components[name].Properties[prop].RenamedFrom)
+			if pf == "" {
+				continue
+			}
+			if first, taken := inComp[pf]; taken {
+				return fmt.Errorf("component %q: properties %q and %q are both renamed from %q",
+					name, first, prop, pf)
+			}
+			inComp[pf] = prop
+		}
+	}
+
+	etClaimed := map[string]string{}
+	etNames := make([]string, 0, len(s.EntityTypes))
+	for name := range s.EntityTypes {
+		etNames = append(etNames, name)
+	}
+	sort.Strings(etNames)
+	for _, name := range etNames {
+		from := s.EntityTypes[name].RenamedFrom
+		if from == "" {
+			continue
+		}
+		if first, taken := etClaimed[from]; taken {
+			return fmt.Errorf("entity types %q and %q are both renamed from %q", first, name, from)
+		}
+		etClaimed[from] = name
+	}
+	return nil
+}
+
+// lookupFold finds a key ignoring case, which is how the generator treats
+// component and column names.
+func lookupFold[V any](m map[string]V, key string) (V, bool) {
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v, true
+		}
+	}
+	var zero V
+	return zero, false
 }
 
 // identifierRule is the same sentence everywhere, because someone reading it is

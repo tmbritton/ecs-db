@@ -897,6 +897,23 @@ func assertChanges(t *testing.T, got, want []Change) {
 		// "Only when the caller filled it in" cannot work here: the value that
 		// says a column references nothing is the empty string, which is the
 		// half of a constraint change most worth asserting.
+		// The old name, for the kinds that have one. Its zero value is
+		// meaningful for every other kind, so it is compared by kind rather
+		// than "when the caller filled it in" — which left every OldName in the
+		// rename tests as decoration, provable by setting them all to a
+		// constant and watching the schema suite pass.
+		switch w.Kind {
+		case ChangeRenamedComponent, ChangeRenamedProperty, ChangeRenamedEntityType:
+			if g.OldName != w.OldName {
+				t.Errorf("changes[%d].OldName = %q, want %q", i, g.OldName, w.OldName)
+			}
+		}
+		// The reason, when the caller wrote one down. Unlike the fields above
+		// this is prose and most cases do not care, so an empty want means "not
+		// checked" rather than "must be empty".
+		if w.Reason != "" && g.Reason != w.Reason {
+			t.Errorf("changes[%d].Reason = %q, want %q", i, g.Reason, w.Reason)
+		}
 		if w.Kind == ChangeChangedNullability {
 			if g.OldNullable != w.OldNullable {
 				t.Errorf("changes[%d].OldNullable = %v, want %v", i, g.OldNullable, w.OldNullable)

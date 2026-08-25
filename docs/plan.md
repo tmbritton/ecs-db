@@ -97,6 +97,14 @@ Establish `schema.json` as the declarative source of truth for components and en
   - Found by review: the one case documented as needing a hand-edited database was reachable in one save, because a component's *type* can change into the shape whose column it collides with — `target_entity_id` is now a reserved property name
   - Found by review: the nullability rule was written out in five places and derived in none, so the rebuild's belief about a column could contradict the DDL it emitted for it with no test failing
 
+- [x] **A rename keeps its data** — `renamedFrom` on a component, a property or an entity type migrates the table, the column or the rows instead of dropping them.
+  - Renaming a component dropped its table and built an empty one; renaming a property dropped the column; renaming an entity type produced no statements at all and stranded every existing row under the old string. All three reported success
+  - A rename cannot be inferred — `x → col_x` and "delete x, add col_x" are the same diff — so the author says it, and the format had nowhere to. Unknown property keys already parse, so the field breaks no existing file
+  - The diff *applies* the declared renames to the introspected schema before comparing anything, so types, foreign keys and nullability all compare like for like rather than against a column believed dropped
+  - A rename nobody declared is still reported: every dropped table and column says what it takes, and an unambiguous one-for-one swap names `renamedFrom` as the fix
+  - Found by review: the generator was handed the pre-rename snapshot, so a rename plus any rebuild on the same thing failed the migration and made the database unopenable — reopening the wedge story 12 closed
+  - Found by review: an entity-type rename was skipped when the new name already had rows, which is a guard that belongs to tables and not to an `UPDATE`; and a declared rename that could not be applied dropped the table without saying the declaration had been ignored
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.

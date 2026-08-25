@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -49,6 +50,9 @@ const (
 	ChangedPropertyType      ChangeKind = "changed_property_type"
 	ChangeChangedConstraint  ChangeKind = "changed_constraint"
 	ChangeChangedNullability ChangeKind = "changed_nullability"
+	ChangeRenamedComponent   ChangeKind = "renamed_component"
+	ChangeRenamedProperty    ChangeKind = "renamed_property"
+	ChangeRenamedEntityType  ChangeKind = "renamed_entity_type"
 	ChangeAddedEntityType    ChangeKind = "added_entity_type"
 	ChangeRemovedEntityType  ChangeKind = "removed_entity_type"
 	ChangeChangedEntityType  ChangeKind = "changed_entity_type"
@@ -81,14 +85,22 @@ type Change struct {
 	// unlike the type fields they are always compared.
 	OldNullable bool
 	NewNullable bool
-	OldET       *EntityType // previous entity type spec (for changed_entity_type)
-	NewET       *EntityType // new entity type spec (for changed_entity_type)
+	// OldName is what a renamed thing was called in the database. The new name
+	// is in Component, Property or ETName, because that is what every other
+	// change on it uses.
+	OldName string
+	OldET   *EntityType // previous entity type spec (for changed_entity_type)
+	NewET   *EntityType // new entity type spec (for changed_entity_type)
 }
 
 // phase returns a numeric priority used for deterministic ordering.
 // Additions come first (1), modifications second (2), removals last (3).
 func (c Change) phase() int {
 	switch c.Kind {
+	case ChangeRenamedComponent, ChangeRenamedProperty, ChangeRenamedEntityType:
+		// Ahead of everything. A component renamed and given a property has to
+		// be renamed before the ALTER TABLE that adds the property names it.
+		return 0
 	case ChangeAddedComponent, ChangeAddedProperty, ChangeAddedEntityType:
 		return 1
 	case ChangedPropertyType, ChangeChangedConstraint, ChangeChangedNullability, ChangeChangedEntityType:
@@ -131,7 +143,12 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 		}
 	}
 
-	changes := make([]Change, 0)
+	// Renames first, and applied rather than merely recorded: everything below
+	// then compares the database as it will be once the renames have run, and
+	// needs to know nothing about them. Suppressing the add/remove pairs
+	// afterwards would instead leave every other comparison — types, foreign
+	// keys, nullability — looking at a column it believed had been dropped.
+	domain, changes, skippedRenames := applyRenames(domain, file)
 
 	// ── Component diff ───────────────────────────────────────────────
 	// Build lowercase key sets.
@@ -169,6 +186,7 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 			changes = append(changes, Change{
 				Kind:      ChangeRemovedComponent,
 				Component: name,
+				Reason:    droppedTableReason(name, dbCompSet, fileCompNames, skippedRenames),
 			})
 		}
 	}
@@ -289,6 +307,191 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 	return changes
 }
 
+// droppedTableReason is droppedColumnReason for a whole component: the table
+// goes, and it might have been a rename.
+func droppedTableReason(name string, dbSet map[string]bool, fileNames []string, skipped map[string]string) string {
+	base := fmt.Sprintf("the table comp_%s is dropped, and every row in it goes with it", name)
+
+	// The author declared a rename and it could not be carried out. Saying
+	// nothing here would drop the table they asked to keep, silently.
+	if to, was := skipped[name]; was {
+		return base + fmt.Sprintf(
+			"; it is declared as renamed to %q, which was not applied because comp_%s is already in the database",
+			to, to)
+	}
+
+	var newNames []string
+	for _, f := range fileNames {
+		if !dbSet[f] {
+			newNames = append(newNames, f)
+		}
+	}
+	// Both sides counted, not just the added one. With two tables dropped and
+	// one added, every drop would be told it might be the rename — two
+	// contradictory suggestions, each stated as if it were the answer, and
+	// acting on the wrong one moves the wrong rows.
+	dropped := 0
+	for d := range dbSet {
+		if !slices.Contains(fileNames, d) {
+			dropped++
+		}
+	}
+	if len(newNames) != 1 || dropped != 1 {
+		return base
+	}
+	return base + fmt.Sprintf(
+		"; if this is a rename to %q, say so with \"renamedFrom\": %q and the table is moved instead",
+		newNames[0], name)
+}
+
+// applyRenames rewrites the introspected schema into the shape the file's
+// renamedFrom declarations describe, and returns the renames it applied.
+//
+// A rename cannot be inferred: "x became col_x" and "x was deleted and col_x
+// added" are the same diff, and guessing wrong copies data into a column the
+// author did not mean. So the author says it, and this is where what they said
+// is taken at face value.
+//
+// A rename is only applied when the database has the old name and does not have
+// the new one. Nothing happens when the migration has already run, so
+// renamedFrom may stay in the file for good; and nothing happens when the
+// database never had the old name, which comes out as the plain addition it is.
+func applyRenames(domain *DomainSchema, file *DatabaseSchema) (*DomainSchema, []Change, map[string]string) {
+	changes := make([]Change, 0)
+	// Renames the file declares that could not be carried out, old name → new.
+	// The author wrote them down, so the table going instead is a thing to say
+	// rather than to do quietly.
+	skipped := map[string]string{}
+	out := &DomainSchema{
+		SchemaVersion:   domain.SchemaVersion,
+		Components:      make(map[string]DomainComponent, len(domain.Components)),
+		EntityTypeNames: make(map[string]bool, len(domain.EntityTypeNames)),
+	}
+	for k, v := range domain.Components {
+		out.Components[strings.ToLower(k)] = v
+	}
+	for k, v := range domain.EntityTypeNames {
+		out.EntityTypeNames[k] = v
+	}
+
+	// Components, in a fixed order so two renames never depend on map order.
+	for _, name := range sortedKeys(file.Components) {
+		comp := file.Components[name]
+		newName := strings.ToLower(name)
+		oldName := strings.ToLower(comp.RenamedFrom)
+		if oldName == "" || oldName == newName {
+			continue
+		}
+		if _, hasOld := out.Components[oldName]; !hasOld {
+			continue
+		}
+		if _, hasNew := out.Components[newName]; hasNew {
+			// Both names are in the database. Renaming would overwrite a table
+			// that is already there and delete the one being renamed, so it is
+			// refused — and recorded, because the old table is about to be
+			// dropped and the author asked for the opposite.
+			skipped[oldName] = newName
+			continue
+		}
+		out.Components[newName] = out.Components[oldName]
+		delete(out.Components, oldName)
+		changes = append(changes, Change{
+			Kind:      ChangeRenamedComponent,
+			Component: newName,
+			OldName:   oldName,
+			Reason:    fmt.Sprintf("it was called %q", oldName),
+		})
+	}
+
+	// Properties, against whatever the component is called by now.
+	for _, name := range sortedKeys(file.Components) {
+		comp := file.Components[name]
+		dbComp, ok := out.Components[strings.ToLower(name)]
+		if !ok || StorageLayout(comp.Type) != LayoutColumns {
+			continue
+		}
+		cols := make([]DomainColumn, len(dbComp.Columns))
+		copy(cols, dbComp.Columns)
+		var renamed bool
+		for _, propName := range sortedKeys(comp.Properties) {
+			prop := comp.Properties[propName]
+			newCol := strings.ToLower(propName)
+			oldCol := strings.ToLower(prop.RenamedFrom)
+			if oldCol == "" || oldCol == newCol {
+				continue
+			}
+			oldAt, newAt := -1, -1
+			for i, c := range cols {
+				switch strings.ToLower(c.Name) {
+				case oldCol:
+					oldAt = i
+				case newCol:
+					newAt = i
+				}
+			}
+			if oldAt < 0 || newAt >= 0 {
+				continue
+			}
+			cols[oldAt].Name = newCol
+			renamed = true
+			changes = append(changes, Change{
+				Kind:      ChangeRenamedProperty,
+				Component: strings.ToLower(name),
+				Property:  newCol,
+				OldName:   oldCol,
+				Reason:    fmt.Sprintf("it was called %q", oldCol),
+			})
+		}
+		if renamed {
+			dbComp.Columns = cols
+			out.Components[strings.ToLower(name)] = dbComp
+		}
+	}
+
+	// Entity types, which are rows rather than columns.
+	for _, name := range sortedKeys(file.EntityTypes) {
+		et := file.EntityTypes[name]
+		if et.RenamedFrom == "" || et.RenamedFrom == name {
+			continue
+		}
+		// No "the new name already exists" guard, unlike the two above. A table
+		// cannot be renamed onto another table, but this rename is an UPDATE
+		// moving rows from one type string to another, which is safe whether or
+		// not the destination already has some — and skipping it left entities
+		// filed under a name the schema no longer declares, which is the whole
+		// defect.
+		if !out.EntityTypeNames[et.RenamedFrom] {
+			continue
+		}
+		delete(out.EntityTypeNames, et.RenamedFrom)
+		out.EntityTypeNames[name] = true
+		changes = append(changes, Change{
+			Kind:    ChangeRenamedEntityType,
+			ETName:  name,
+			OldName: et.RenamedFrom,
+			Reason:  fmt.Sprintf("it was called %q", et.RenamedFrom),
+		})
+	}
+
+	return out, changes, skipped
+}
+
+// sortedKeys is map iteration made deterministic.
+//
+// It matters because Diff does not get to assume the schema validated. A chain
+// — B renamed from A, C renamed from B — is refused where the schema is loaded,
+// but Forge previews a schema in the middle of being edited, and two renames
+// applied in different orders reach different states. Sorted keys make the
+// answer to an impossible schema at least the same answer every time.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // diffObjectProperties compares columns of an object component table against
 // the file's property declarations.
 func diffObjectProperties(compName string, dbCols []DomainColumn, fileProps map[string]Property, changes *[]Change) {
@@ -319,15 +522,29 @@ func diffObjectProperties(compName string, dbCols []DomainColumn, fileProps map[
 	}
 
 	// Properties in DB but not in file → removed.
+	var dropped, added []string
 	for dp := range dbColNames {
 		if _, ok := filePropNames[dp]; !ok {
-			*changes = append(*changes, Change{
-				Kind:      ChangeRemovedProperty,
-				Component: compName,
-				Property:  dp,
-				OldType:   dbColNames[dp],
-			})
+			dropped = append(dropped, dp)
 		}
+	}
+	for fp := range filePropNames {
+		if _, ok := dbColNames[fp]; !ok {
+			added = append(added, fp)
+		}
+	}
+	// Deliberately unsorted. These two used to be, for determinism, and neither
+	// sort could affect anything: added is only read when it holds exactly one
+	// name, and Diff re-sorts every change by phase and sortKey before
+	// returning, so the order they are emitted in is not the order anybody sees.
+	for _, dp := range dropped {
+		*changes = append(*changes, Change{
+			Kind:      ChangeRemovedProperty,
+			Component: compName,
+			Property:  dp,
+			OldType:   dbColNames[dp],
+			Reason:    droppedColumnReason(dp, dbColNames[dp], dropped, added, filePropNames),
+		})
 	}
 
 	// Properties in both: compare SQL types.
@@ -342,6 +559,34 @@ func diffObjectProperties(compName string, dbCols []DomainColumn, fileProps map[
 			})
 		}
 	}
+}
+
+// droppedColumnReason says what a dropped column takes with it, and offers the
+// rename it might have been.
+//
+// A rename cannot be inferred — "x became col_x" and "x was deleted and col_x
+// added" are the same diff — so this does not act on the guess, it says it. Only
+// when the guess is unambiguous: exactly one column dropped and one added, of
+// the same SQL type. Any more than that and there is no way to say which went
+// with which, and a wrong suggestion is worse than none.
+//
+// This is the only notice anybody gets. The migration runs under MigrationAuto
+// by default, which drops the column and reports success.
+func droppedColumnReason(column, sqlType string, dropped, added []string, fileTypes map[string]string) string {
+	base := fmt.Sprintf("the column %q is dropped, and the data in it goes with it", column)
+	// Both sides counted. The comment above said "exactly one column dropped
+	// and one added" and the code only checked the added one, so dropping two
+	// columns and adding one told each of them it might be the rename.
+	if len(added) != 1 || len(dropped) != 1 {
+		return base
+	}
+	newName := added[0]
+	if fileTypes[newName] != sqlType {
+		return base
+	}
+	return base + fmt.Sprintf(
+		"; if this is a rename to %q, say so with \"renamedFrom\": %q and the column is moved instead",
+		newName, column)
 }
 
 // diffScalarComponent compares the SQL type of a scalar component's value column.

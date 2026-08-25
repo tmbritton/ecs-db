@@ -69,6 +69,15 @@ func writeComponent(b *strings.Builder, name string, c Component, last bool) err
 	}
 	fmt.Fprintf(b, "      \"type\": %s", typ)
 
+	if c.RenamedFrom != "" {
+		from, err := jsonString(c.RenamedFrom)
+		if err != nil {
+			return err
+		}
+		b.WriteString(",\n")
+		fmt.Fprintf(b, "      \"renamedFrom\": %s", from)
+	}
+
 	if c.Behavior != "" {
 		behavior, err := jsonString(c.Behavior)
 		if err != nil {
@@ -150,13 +159,32 @@ func propertyValue(p Property, indent string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// renamedFrom stays on the inline form. It is one short key, and expanding
+	// a leaf property over four lines because it carries one would reformat
+	// most of the file the first time anybody renames anything.
 	if len(p.Properties) == 0 && p.Items == nil {
-		return "{ \"type\": " + typ + " }", nil
+		out := "{ \"type\": " + typ
+		if p.RenamedFrom != "" {
+			from, err := jsonString(p.RenamedFrom)
+			if err != nil {
+				return "", err
+			}
+			out += ", \"renamedFrom\": " + from
+		}
+		return out + " }", nil
 	}
 
 	var b strings.Builder
 	b.WriteString("{\n")
 	fmt.Fprintf(&b, "%s  \"type\": %s", indent, typ)
+	if p.RenamedFrom != "" {
+		from, err := jsonString(p.RenamedFrom)
+		if err != nil {
+			return "", err
+		}
+		b.WriteString(",\n")
+		fmt.Fprintf(&b, "%s  \"renamedFrom\": %s", indent, from)
+	}
 	// Independent, for the same reason as writeComponent's.
 	if len(p.Properties) > 0 {
 		b.WriteString(",\n")
@@ -198,9 +226,19 @@ func writeEntityType(b *strings.Builder, name string, et EntityType, last bool) 
 		return err
 	}
 
+	// What this type used to be called, when it was renamed. First, because it
+	// is a fact about the type itself rather than part of its definition.
+	if et.RenamedFrom != "" {
+		from, err := jsonString(et.RenamedFrom)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(b, "      \"renamedFrom\": %s,\n", from)
+	}
+
 	// The binding to a state machine. Omitted when empty, like the component's
-	// own behavior field, and emitted first because that is where the authored
-	// files put it.
+	// own behavior field, and emitted before the component lists because that is
+	// where the authored files put it.
 	if et.Behavior != "" {
 		behavior, err := jsonString(et.Behavior)
 		if err != nil {

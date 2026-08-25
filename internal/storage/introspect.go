@@ -343,6 +343,69 @@ func IntrospectAll(db *sql.DB) (*DomainSchema, error) {
 	return result, nil
 }
 
+// withRenames returns the schema as it will be once the rename statements in
+// changes have run.
+//
+// schema.Diff decides what the renames are — this only replays them onto the
+// storage-side representation, which the generator reads. Doing the deciding
+// twice, on two types, is how the two halves came to disagree in the first
+// place.
+func (ds *DomainSchema) withRenames(changes []schema.Change) *DomainSchema {
+	if ds == nil {
+		return nil
+	}
+	out := &DomainSchema{
+		SchemaVersion:   ds.SchemaVersion,
+		Components:      make(map[string]DomainComponent, len(ds.Components)),
+		EntityTypeNames: make(map[string]bool, len(ds.EntityTypeNames)),
+	}
+	for k, v := range ds.Components {
+		cols := make([]DomainColumn, len(v.Columns))
+		copy(cols, v.Columns)
+		v.Columns = cols
+		out.Components[k] = v
+	}
+	for k, v := range ds.EntityTypeNames {
+		out.EntityTypeNames[k] = v
+	}
+
+	// Components first: a property rename names its component by the new name.
+	for _, c := range changes {
+		if c.Kind != schema.ChangeRenamedComponent {
+			continue
+		}
+		if comp, ok := out.Components[c.OldName]; ok {
+			out.Components[c.Component] = comp
+			delete(out.Components, c.OldName)
+		}
+	}
+	for _, c := range changes {
+		if c.Kind != schema.ChangeRenamedProperty {
+			continue
+		}
+		comp, ok := out.Components[c.Component]
+		if !ok {
+			continue
+		}
+		for i := range comp.Columns {
+			if strings.EqualFold(comp.Columns[i].Name, c.OldName) {
+				comp.Columns[i].Name = c.Property
+			}
+		}
+		out.Components[c.Component] = comp
+	}
+	for _, c := range changes {
+		if c.Kind != schema.ChangeRenamedEntityType {
+			continue
+		}
+		if out.EntityTypeNames[c.OldName] {
+			delete(out.EntityTypeNames, c.OldName)
+			out.EntityTypeNames[c.ETName] = true
+		}
+	}
+	return out
+}
+
 // ToDiffSchema converts the storage-side DomainSchema to the domain-side
 // representation used by schema.Diff(). It strips the Default field (not
 // needed for diff) and preserves everything else.

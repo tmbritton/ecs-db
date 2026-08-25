@@ -34,7 +34,13 @@ type DatabaseSchema struct {
 // that type must have, may have, and whether additional components are
 // permitted after creation.
 type EntityType struct {
-	Behavior             string          `json:"behavior,omitempty"`
+	Behavior string `json:"behavior,omitempty"`
+	// RenamedFrom is the name this entity type had in the database. Unlike a
+	// component or a property it is not DDL — entities.entity_type is a text
+	// column — so the migration is an UPDATE, and it is needed for the same
+	// reason: without it every existing entity keeps the old string and stops
+	// matching any declared type.
+	RenamedFrom          string          `json:"renamedFrom,omitempty"`
 	RequiredComponents   []string        `json:"requiredComponents"`
 	OptionalComponents   []string        `json:"optionalComponents"`
 	AllowExtraComponents bool            `json:"allowExtraComponents"`

@@ -220,9 +220,9 @@ func TestClone_PreservesEveryValue(t *testing.T) {
 func TestClone_CoversEveryField(t *testing.T) {
 	known := map[string][]string{
 		"DatabaseSchema": {"SchemaVersion", "Components", "EntityTypes", "ComponentOrder", "EntityTypeOrder"},
-		"Component":      {"Type", "Behavior", "Properties", "Items", "PropertyOrder"},
-		"Property":       {"Type", "Properties", "Items", "PropertyOrder"},
-		"EntityType":     {"Behavior", "RequiredComponents", "OptionalComponents", "AllowExtraComponents", "ValidationLevel"},
+		"Component":      {"Type", "Behavior", "RenamedFrom", "Properties", "Items", "PropertyOrder"},
+		"Property":       {"Type", "RenamedFrom", "Properties", "Items", "PropertyOrder"},
+		"EntityType":     {"Behavior", "RenamedFrom", "RequiredComponents", "OptionalComponents", "AllowExtraComponents", "ValidationLevel"},
 	}
 	types := map[string]reflect.Type{
 		"DatabaseSchema": reflect.TypeOf(schema.DatabaseSchema{}),
