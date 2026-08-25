@@ -49,13 +49,20 @@ type Tx interface {
 	// that. The explicit deletes stay because they also work on a database
 	// opened by something that did not set it.
 	//
-	// **What the cascade does not cover, and this does not either:** an
-	// entity-ref component in another entity declares
-	// `REFERENCES entities(id)` with no ON DELETE clause, which SQLite treats
-	// as a restrict. Deleting an entity that another entity points at is
-	// therefore refused by the database, and this method reports that rather
-	// than tidying up the pointer — what should happen to a component whose
-	// target is deleted is a schema question nobody has answered yet.
+	// An entity another entity *points at* is a different question, and the
+	// database answers it rather than this method: an entity-ref column
+	// declares ON DELETE CASCADE, so deleting the target removes the component
+	// that pointed at it and leaves the entity that held it alone. It used to
+	// declare no ON DELETE clause at all, which SQLite reads as a restrict — so
+	// deleting an entity could fail because of some other entity's data.
+	//
+	// Two things that follow, and neither is obvious. The whole component goes,
+	// not just the column that held the reference: a Holder with an owner and
+	// an hp loses both. And this is the database's promise rather than this
+	// method's, so it needs foreign keys enforced — on a connection opened
+	// without them, the pointing component survives its target. storage.DSN is
+	// what makes that true for every connection the engine opens; a database
+	// opened by something else is that something else's problem.
 	//
 	// Rows in transitions are left: it is the audit log, it declares no foreign
 	// key, and it is meant to outlive what it describes.

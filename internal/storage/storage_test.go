@@ -49,7 +49,9 @@ func TestComponentTableSQL_EntityRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertContains(t, sql, "target_entity_id INTEGER NOT NULL REFERENCES entities(id)")
+	// The whole clause. Without ON DELETE this passed either way, which made
+	// it the test that nominally pinned this DDL and did not.
+	assertContains(t, sql, "target_entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE")
 }
 
 func TestComponentTableSQL_Array(t *testing.T) {

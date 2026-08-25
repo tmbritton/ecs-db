@@ -68,6 +68,12 @@ Establish `schema.json` as the declarative source of truth for components and en
   - Bootstrap is one transaction: `meta` used to be created outside it, which left behind exactly the table that makes the next open migrate instead of build
   - `NewSQLiteStore("")` refused, and `pruneBackups` escapes and cleans its path — both defaults that quietly did the wrong thing
 
+- [x] **An entity-ref does not outlive its target** — `ON DELETE CASCADE` on every reference to an entity, so deleting the target removes the pointing component and leaves its holder.
+  - Replaces a restrict nobody chose: no `ON DELETE` clause meant deleting an entity could fail because of another entity's data
+  - An entity-ref *property* had no foreign key at all when its table was created — only when added by `ALTER TABLE`, and a rebuild dropped it again
+  - The three paths now agree that a property reference is nullable: declaring it `NOT NULL` on create and rebuild wedged any database where the property had been added to a populated component
+  - An existing database is not migrated — constraints are not in the shape the diff introspects — and the gap is pinned as a test rather than left as prose
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.

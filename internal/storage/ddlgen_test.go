@@ -175,7 +175,9 @@ func TestGenAddComponent_EntityRef(t *testing.T) {
 	if len(stmts) != 1 {
 		t.Fatalf("got %d statements, want 1", len(stmts))
 	}
-	assertContainsDDL(t, stmts[0].SQL, "target_entity_id INTEGER NOT NULL REFERENCES entities(id)")
+	// The whole clause. Without ON DELETE this passed either way, which made
+	// it the test that nominally pinned this DDL and did not.
+	assertContainsDDL(t, stmts[0].SQL, "target_entity_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE")
 }
 
 func TestGenAddComponent_Array(t *testing.T) {

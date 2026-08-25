@@ -159,15 +159,16 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 
 	sqlType := schema.PropertySQLType(prop)
 	dflt := defaultValueForProperty(prop)
-	// entity-ref columns must be nullable when added to an existing table:
-	// SQLite rejects NOT NULL DEFAULT NULL on ALTER TABLE ADD COLUMN when rows exist.
+	// An entity-ref column is nullable, which is what SQLite requires here —
+	// it rejects NOT NULL DEFAULT NULL on ALTER TABLE ADD COLUMN when rows
+	// exist — and, since columnConstraint declares the same thing, is what the
+	// created and rebuilt forms of the table say too. That agreement is
+	// load-bearing: see columnConstraint for the database it used to wedge.
 	notNullClause := " NOT NULL"
-	if prop.Type == schema.PropertyTypeEntityRef {
-		notNullClause = ""
-	}
 	extraClause := ""
 	if prop.Type == schema.PropertyTypeEntityRef {
-		extraClause = " REFERENCES entities(id)"
+		notNullClause = ""
+		extraClause = " " + entityRefReference
 	}
 	sql := fmt.Sprintf("ALTER TABLE comp_%s ADD COLUMN %s %s%s DEFAULT %s%s",
 		c.Component, c.Property, sqlType, notNullClause, dflt, extraClause)
@@ -323,14 +324,21 @@ func buildNewColumns(comp schema.Component) []string {
 		// of the generator disagreed: this one sorted and that one used map
 		// order.
 		for _, propName := range jsonorder.Apply(comp.PropertyOrder, comp.Properties) {
-			prop := comp.Properties[propName]
-			sqlType := schema.PropertySQLType(prop)
-			cols = append(cols, fmt.Sprintf("%s %s NOT NULL",
-				strings.ToLower(propName), sqlType))
+			// Through the same helper componentTableSQL uses, so a rebuilt
+			// table carries the constraints a created one does. It did not: an
+			// entity-ref property came out of a rebuild with no foreign key,
+			// silently dropping one an ALTER TABLE had added.
+			cols = append(cols, fmt.Sprintf("%s %s",
+				strings.ToLower(propName), columnConstraint(comp.Properties[propName])))
 		}
 
 	case schema.ComponentTypeEntityRef:
-		cols = append(cols, "target_entity_id INTEGER NOT NULL REFERENCES entities(id)")
+		// Reached when a *scalar* component is retyped to an entity-ref:
+		// schema.Diff reports that as a changed property named "value"
+		// (diff.go's diffScalarComponent), and genChangePropertyType sends a
+		// changed property here. Not only for object components, which is what
+		// "genRebuild is for property changes" would suggest.
+		cols = append(cols, "target_entity_id "+entityRefColumnType)
 	case schema.ComponentTypeArray:
 		cols = append(cols, "value TEXT NOT NULL DEFAULT '[]'")
 	case schema.ComponentTypeString:

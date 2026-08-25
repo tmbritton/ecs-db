@@ -42,13 +42,12 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 				return "", fmt.Errorf("component %q: property %q cannot be a column name", name, propName)
 			}
 			prop := comp.Properties[propName]
-			sqlType := propertySQLType(prop)
-			col := fmt.Sprintf("\t%s %s NOT NULL", strings.ToLower(propName), sqlType)
+			col := fmt.Sprintf("\t%s %s", strings.ToLower(propName), columnConstraint(prop))
 			cols = append(cols, col)
 		}
 
 	case schema.ComponentTypeEntityRef:
-		cols = append(cols, "\ttarget_entity_id INTEGER NOT NULL REFERENCES entities(id)")
+		cols = append(cols, "\ttarget_entity_id "+entityRefColumnType)
 
 	case schema.ComponentTypeArray:
 		// Arrays are stored as JSON in a single column regardless of item type.
@@ -78,4 +77,53 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 // propertySQLType maps a Property to its SQLite column type.
 func propertySQLType(p schema.Property) string {
 	return schema.PropertySQLType(p)
+}
+
+// entityRefReference is the foreign key every reference to an entity carries,
+// and the only place this engine says what such a reference means.
+//
+// **ON DELETE CASCADE**: when the target goes, the component that pointed at it
+// goes. Not a refusal — which is what no ON DELETE clause meant, and which made
+// deleting an entity fail because of some other entity's data — and not SET
+// NULL, which would leave a component describing a relationship to something
+// that is not there.
+//
+// The whole row goes, so for an object component that means the whole
+// component: a Holder with an owner and an hp loses both. That is the cost of
+// one rule rather than two, and it is the same rule entity_id has always had.
+//
+// ddlgen's ALTER TABLE path composes its own clause from this constant rather
+// than using entityRefColumnType, because it needs the nullability split below.
+const entityRefReference = "REFERENCES entities(id) ON DELETE CASCADE"
+
+// entityRefColumnType is the whole column for a component whose *type* is a
+// reference. NOT NULL, because the row is nothing else: a Carrier that points
+// at nothing is not a Carrier.
+const entityRefColumnType = "INTEGER NOT NULL " + entityRefReference
+
+// columnConstraint is the type and constraints for one property's column.
+//
+// An entity-ref property used to get "INTEGER NOT NULL" here and a foreign key
+// only when it arrived through ALTER TABLE ADD COLUMN — so the same schema
+// produced a constraint or no constraint depending on whether the component was
+// there at the start, and a rebuild silently dropped what an ALTER had added.
+func columnConstraint(prop schema.Property) string {
+	if prop.Type == schema.PropertyTypeEntityRef {
+		// Nullable, unlike the component form, and unlike every other
+		// property. A reference is the whole of a Carrier and only part of a
+		// Holder, so "no owner yet" is a state a Holder can legitimately be in
+		// — and it is the state every existing row is in the moment somebody
+		// adds the property, because ALTER TABLE ADD COLUMN has no value to
+		// backfill with.
+		//
+		// The three paths have to agree about this or a database wedges: with
+		// NOT NULL here and nullable on the ALTER, adding the property to a
+		// component that had rows and then changing any *other* property of it
+		// made the rebuild's INSERT...SELECT fail on a NOT NULL constraint —
+		// and since the store returns that error, every subsequent open failed
+		// the same way, with nothing able to repair it. Introspection does not
+		// read notnull, so the diff could never see what had happened.
+		return "INTEGER " + entityRefReference
+	}
+	return propertySQLType(prop) + " NOT NULL"
 }
