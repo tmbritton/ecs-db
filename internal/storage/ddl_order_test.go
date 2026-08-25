@@ -81,9 +81,12 @@ func TestBuildNewColumns_MatchesComponentTableSQL(t *testing.T) {
 	rebuild := buildNewColumns(comp)
 
 	createOrder := columnNames(create)
+	// The name the generator will put in the INSERT, not a re-parse of the DDL
+	// it just emitted — which is what this had to do while a column was a
+	// string, and is the same splitting-on-whitespace the generator itself did.
 	rebuildOrder := make([]string, 0, len(rebuild))
 	for _, col := range rebuild {
-		rebuildOrder = append(rebuildOrder, strings.Fields(strings.TrimSpace(col))[0])
+		rebuildOrder = append(rebuildOrder, col.Name)
 	}
 
 	if strings.Join(createOrder, ",") != strings.Join(rebuildOrder, ",") {
@@ -118,4 +121,55 @@ func columnNames(ddl string) []string {
 		}
 	}
 	return out
+}
+
+// A column's own belief about itself matches the DDL it emits.
+//
+// The rebuild reads NotNull to decide whether the copy has to put a value where
+// a NULL was, so a column whose flag disagreed with its own definition would
+// either invent values where NULL was legal or leave the copy to fail on one.
+// Nothing compared them: the two are set from the same expression, which makes
+// them agree by construction until somebody changes one of them.
+//
+// Every property type, enumerated rather than listed — an entity-ref is the only
+// one where the answer is not "NOT NULL", so a component that happened to have
+// no reference in it would make this test pass for a generator that had stopped
+// declaring one at all.
+func TestBuildNewColumns_TheNotNullFlagMatchesTheDDL(t *testing.T) {
+	props := map[string]schema.Property{}
+	for _, pt := range schema.PropertyTypes() {
+		p := schema.Property{Type: pt}
+		if pt == schema.PropertyTypeArray {
+			p.Items = &schema.Property{Type: schema.PropertyTypeString}
+		}
+		props["p_"+strings.ReplaceAll(pt, "-", "_")] = p
+	}
+	comps := []schema.Component{{Type: schema.ComponentTypeObject, Properties: props}}
+	for _, ct := range schema.ComponentTypes() {
+		if ct == schema.ComponentTypeObject {
+			continue
+		}
+		c := schema.Component{Type: ct}
+		if ct == schema.ComponentTypeArray {
+			c.Items = &schema.Property{Type: schema.PropertyTypeString}
+		}
+		comps = append(comps, c)
+	}
+
+	var checked int
+	for _, comp := range comps {
+		for _, col := range buildNewColumns(comp) {
+			if col.Name == "entity_id" {
+				continue // a primary key refuses NULL without saying so
+			}
+			checked++
+			if declared := strings.Contains(col.DDL, "NOT NULL"); col.NotNull != declared {
+				t.Errorf("%s component: column %q says NotNull=%v and is declared %q",
+					comp.Type, col.Name, col.NotNull, col.DDL)
+			}
+		}
+	}
+	if checked != len(schema.PropertyTypes())+len(schema.ComponentTypes())-1 {
+		t.Errorf("checked %d columns, which is not one per property type plus one per non-object component type", checked)
+	}
 }

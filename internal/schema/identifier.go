@@ -72,14 +72,42 @@ func ValidColumnName(name string) bool {
 // current_time stores 42 and reads "23:54:37". That is the same silent class as
 // "two words" building a column called "two", surviving one layer further in.
 //
-// **entity_id** is not a keyword at all. It is the primary key the generator
-// emits for every component table, so a property of that name is a duplicate
-// column — loud, but at bootstrap, and the message names the component rather
-// than the property. The other fixed columns the generator emits, value and
-// target_entity_id, belong to component kinds that have no properties, so they
-// cannot collide and are not reserved.
+// **entity_id and target_entity_id** are not keywords at all. They are columns
+// the generator emits for itself, and a property of the same name collides with
+// one.
+//
+// entity_id is the primary key of every component table, so a property called
+// that is a duplicate column — loud, but at bootstrap, and the message names the
+// component rather than the property.
+//
+// target_entity_id is the data column of a component whose *type* is a
+// reference, and this comment used to say it could not collide because such
+// components have no properties. That is true of any one component and not true
+// over time: a component's type can change. An object with a single entity-ref
+// property called target_entity_id builds a table that a component of type
+// entity-ref would also build, so Diff lets the type change without dropping the
+// table — and the two columns disagree about NULL, which the property form
+// allows and the reference form does not. The engine writes such a NULL through
+// CreateEntity with no value for the property, and the rebuild then has nothing
+// to put in its place:
+//
+//	INSERT INTO comp_link_new (entity_id, target_entity_id)
+//	  SELECT entity_id, target_entity_id FROM comp_link
+//	NOT NULL constraint failed: comp_link_new.target_entity_id
+//
+// which the store returns from every subsequent open. Reserving the name closes
+// that with a message naming the property, at the point the schema is loaded.
+//
+// **value** is the third fixed column and is deliberately *not* reserved. An
+// object whose one property is called value is the shape Forge gives every new
+// component, and it retypes to and from a scalar without trouble: both forms
+// refuse NULL, so the rows copy across. Reserving it would refuse the everyday
+// schema to close a hole that is not there.
 var unusableAsColumn = func() map[string]string {
-	m := map[string]string{"entity_id": "the column every component table already has"}
+	m := map[string]string{
+		"entity_id":        "the column every component table already has",
+		"target_entity_id": "the column a component of type entity-ref stores its reference in",
+	}
 	for _, w := range strings.Fields(`
 		add all alter and as autoincrement between case cast check collate commit
 		constraint create default deferrable delete distinct drop else escape

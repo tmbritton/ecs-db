@@ -114,7 +114,7 @@ const entityRefColumnType = "INTEGER NOT NULL " + entityRefReference
 // produced a constraint or no constraint depending on whether the component was
 // there at the start, and a rebuild silently dropped what an ALTER had added.
 func columnConstraint(prop schema.Property) string {
-	if prop.Type == schema.PropertyTypeEntityRef {
+	if schema.PropertyNullable(prop.Type) {
 		// Nullable, unlike the component form, and unlike every other
 		// property. A reference is the whole of a Carrier and only part of a
 		// Holder, so "no owner yet" is a state a Holder can legitimately be in

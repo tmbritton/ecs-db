@@ -89,6 +89,14 @@ Establish `schema.json` as the declarative source of truth for components and en
   - One rebuild per component rather than one per change that wants one, carrying every reason
   - Found by review: `LIKE 'comp_%'` has an unescaped wildcard, so a table merely *starting* with "comp" made the migration repeat on every open forever; and `.bak.v{version}` is no longer unique, so a second repair was overwriting the first one's restore point
 
+- [x] **A rebuild carries every row, and nullability is part of a column's shape** — the copy substitutes a column's default where a NULL cannot come across, and a column whose nullability drifted is repaired.
+  - An entity-ref property is the only column the generator declares nullable, so retyping one made the rebuild's copy fail — and `NewSQLiteStore` returns that error on *every* subsequent open, so the database never opened again until `schema.json` was edited back
+  - The engine already invents a value for exactly this: `ALTER TABLE ADD COLUMN … NOT NULL DEFAULT 0` gives every existing row a `0`. The copy now uses the same function, so adding a property and retyping one cannot disagree
+  - `notnull` is introspected and diffed, so a column that should refuse NULLs and does not is repaired — the half Story 11 left open. The primary key is excluded: SQLite reports every `INTEGER PRIMARY KEY` as nullable
+  - Loud, because it invents data: the log names the column, the value and how many rows
+  - Found by review: the one case documented as needing a hand-edited database was reachable in one save, because a component's *type* can change into the shape whose column it collides with — `target_entity_id` is now a reserved property name
+  - Found by review: the nullability rule was written out in five places and derived in none, so the rebuild's belief about a column could contradict the DDL it emitted for it with no test failing
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.

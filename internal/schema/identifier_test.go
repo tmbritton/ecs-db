@@ -216,3 +216,55 @@ func TestValidateSchema_RefusesTheKeywordsThatReadBackAsTheClock(t *testing.T) {
 		})
 	}
 }
+
+// A property called target_entity_id builds the same table a component of type
+// entity-ref does, so Diff lets the type change between them without dropping
+// the table — and the two disagree about NULL. The property form allows it, the
+// reference form does not, and the engine writes such a NULL for any entity
+// created without a value for the property. The rebuild then has nothing to put
+// there, and the store returns that failure from every subsequent open.
+//
+// Reserving the name turns a database that will not open into a schema that will
+// not load, with the property named.
+func TestValidateSchema_RefusesAPropertyNamedForTheReferenceColumn(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"Link": {Type: ComponentTypeObject, Properties: map[string]Property{
+				"target_entity_id": {Type: PropertyTypeEntityRef},
+			}},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"Link"}, ValidationLevel: "strict"},
+		},
+	}
+	err := ValidateSchema(s)
+	if err == nil {
+		t.Fatal("a property named for the reference column was accepted")
+	}
+	for _, want := range []string{"target_entity_id", "Link"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not name %q:\n%v", want, err)
+		}
+	}
+}
+
+// And value is deliberately still allowed: an object whose one property is
+// called value is the shape Forge gives every new component, and both it and the
+// scalar form refuse NULL, so retyping between them copies its rows across.
+func TestValidateSchema_StillAllowsAPropertyNamedValue(t *testing.T) {
+	s := DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]Component{
+			"Health": {Type: ComponentTypeObject, Properties: map[string]Property{
+				"value": {Type: PropertyTypeNumber},
+			}},
+		},
+		EntityTypes: map[string]EntityType{
+			"Thing": {RequiredComponents: []string{"Health"}, ValidationLevel: "strict"},
+		},
+	}
+	if err := ValidateSchema(s); err != nil {
+		t.Errorf("the shape Forge gives every new component was refused: %v", err)
+	}
+}

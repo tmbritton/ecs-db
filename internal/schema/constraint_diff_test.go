@@ -2,9 +2,16 @@ package schema
 
 import "testing"
 
-// col is a column as introspection reports it.
+// col is a column as introspection reports it. Nullability is derived from the
+// reference rather than passed: an entity-ref property is the one column the
+// generator declares nullable, so a fixture that said otherwise would describe a
+// table the generator could not have built — and would now be reported as a
+// nullability change on top of whatever the case was about.
 func col(name, sqlType, ref string, pk bool) DomainColumn {
-	return DomainColumn{Name: name, SQLType: sqlType, References: ref, IsPK: pk}
+	return DomainColumn{
+		Name: name, SQLType: sqlType, References: ref, IsPK: pk,
+		Nullable: ref == EntityReference && name != "entity_id" && name != "target_entity_id",
+	}
 }
 
 func entityIDCol() DomainColumn { return col("entity_id", "INTEGER", EntityReference, true) }
@@ -40,10 +47,20 @@ func TestDiff_AForeignKeyThatChangedIsAChange(t *testing.T) {
 				"owner": {Type: PropertyTypeEntityRef},
 				"hp":    {Type: PropertyTypeInteger},
 			}},
-			want: []Change{{
-				Kind: ChangeChangedConstraint, Component: "carrier", Property: "owner",
-				OldRef: NoReference, NewRef: EntityReference,
-			}},
+			// Two changes, because a reference property built before Story 9
+			// differs in two ways: it has no foreign key, and it refuses the
+			// NULL that a row without an owner needs. Reporting only the first
+			// would rebuild the table into one that still wedges.
+			want: []Change{
+				{
+					Kind: ChangeChangedConstraint, Component: "carrier", Property: "owner",
+					OldRef: NoReference, NewRef: EntityReference,
+				},
+				{
+					Kind: ChangeChangedNullability, Component: "carrier", Property: "owner",
+					OldNullable: false, NewNullable: true,
+				},
+			},
 		},
 		{
 			name: "a reference that stopped being one",
@@ -54,10 +71,19 @@ func TestDiff_AForeignKeyThatChangedIsAChange(t *testing.T) {
 			comp: Component{Type: ComponentTypeObject, Properties: map[string]Property{
 				"owner": {Type: PropertyTypeInteger},
 			}},
-			want: []Change{{
-				Kind: ChangeChangedConstraint, Component: "carrier", Property: "owner",
-				OldRef: EntityReference, NewRef: NoReference,
-			}},
+			// Also two: it loses the foreign key, and it stops accepting the
+			// NULLs it was allowed to hold while it was a reference. The second
+			// is what used to make this edit unopenable.
+			want: []Change{
+				{
+					Kind: ChangeChangedConstraint, Component: "carrier", Property: "owner",
+					OldRef: EntityReference, NewRef: NoReference,
+				},
+				{
+					Kind: ChangeChangedNullability, Component: "carrier", Property: "owner",
+					OldNullable: true, NewNullable: false,
+				},
+			},
 		},
 		{
 			// entity_id is a reference like any other, and the property diff
@@ -105,13 +131,17 @@ func TestDiff_AMatchingForeignKeyIsNotAChange(t *testing.T) {
 			}
 		}
 
+		nullable := ColumnNullable(comp)
 		var cols []DomainColumn
 		for name, ref := range ColumnReferences(comp) {
 			sqlType := "INTEGER"
 			if name != "entity_id" && name != "owner" && name != "target_entity_id" {
 				sqlType = sqlTypeOfDataColumn(comp, name)
 			}
-			cols = append(cols, col(name, sqlType, ref, name == "entity_id"))
+			cols = append(cols, DomainColumn{
+				Name: name, SQLType: sqlType, References: ref,
+				IsPK: name == "entity_id", Nullable: nullable[name],
+			})
 		}
 
 		domain := &DomainSchema{

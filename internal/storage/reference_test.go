@@ -749,9 +749,15 @@ func TestMigration_AConstraintChangeIsAppliedAfterAnAddedColumn(t *testing.T) {
 	}
 }
 
-// The failure that leaves a database unopenable says what to do about it. Until
-// Story 11 opened the version gate this needed a schemaVersion bump to reach;
-// it is now one save away.
+// The one failure that still leaves a database unopenable says what to do about
+// it.
+//
+// Since Story 12 a rebuild substitutes the column's default for NULLs it cannot
+// carry, so retyping a reference property migrates. The exception is the
+// target_entity_id of a component whose *type* is a reference: there is no
+// honest value for a Carrier that points at nothing, so nothing invents one.
+// The engine cannot produce such a row — the column refuses it — so reaching
+// this needs the hand-edited table below.
 func TestMigration_TheUnrepairableFailureSaysWhichFileToEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "w.sqlite")
 	store, err := NewSQLiteStore(path, refSchema(), "")
@@ -759,27 +765,25 @@ func TestMigration_TheUnrepairableFailureSaysWhichFileToEdit(t *testing.T) {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
 	for _, stmt := range []string{
+		`DROP TABLE comp_carrier`,
+		`CREATE TABLE comp_carrier (
+			entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+			target_entity_id INTEGER REFERENCES entities(id) ON DELETE CASCADE)`,
 		`INSERT INTO entities (id, entity_type, created_tick) VALUES (1, 'Thing', 0)`,
-		`INSERT INTO comp_holder (entity_id, owner, hp) VALUES (1, NULL, 4)`,
+		`INSERT INTO comp_carrier (entity_id, target_entity_id) VALUES (1, NULL)`,
 	} {
 		if _, err := store.DB().Exec(stmt); err != nil {
-			t.Fatalf("seeding: %v", err)
+			t.Fatalf("building the hand-edited shape: %v", err)
 		}
 	}
 	_ = store.Close()
 
-	// Retyping the one property kind that may be NULL to one that may not.
-	next := refSchema()
-	holder := next.Components["Holder"]
-	holder.Properties = map[string]schema.Property{
-		"owner": {Type: schema.PropertyTypeInteger},
-		"hp":    {Type: schema.PropertyTypeInteger},
-	}
-	next.Components["Holder"] = holder
-
-	_, err = NewSQLiteStore(path, next, "")
+	// The file says entity-ref, whose target_entity_id is NOT NULL, so the
+	// nullability diff asks for a rebuild — and the copy has nothing to put in
+	// place of the NULL.
+	_, err = NewSQLiteStore(path, refSchema(), "")
 	if err == nil {
-		t.Fatal("the rebuild succeeded — if NULLs are now carried across, this test should go")
+		t.Fatal("the rebuild succeeded — if a missing reference is now carried across, this test should go")
 	}
 	var migErr *SchemaMigrationError
 	if !errors.As(err, &migErr) {
@@ -788,7 +792,10 @@ func TestMigration_TheUnrepairableFailureSaysWhichFileToEdit(t *testing.T) {
 	if migErr.Hint == "" {
 		t.Fatal("the error that makes a database unopenable offers no hint")
 	}
-	for _, want := range []string{"schema.json", "holder"} {
+	// Including what actually caused it. The sentence used to blame retyping an
+	// entity-ref property, which is exactly what Story 12 made work — so the
+	// hint named the one cause that can no longer produce this error.
+	for _, want := range []string{"schema.json", "carrier", "no default to put there"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the error does not mention %q:\n%s", want, err)
 		}

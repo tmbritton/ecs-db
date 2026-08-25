@@ -1239,9 +1239,9 @@ func TestBuildCreateTable_NoIfExists(t *testing.T) {
 	// Rebuild temp tables must not use IF NOT EXISTS; if the temp
 	// table somehow exists we want the command to fail loudly rather
 	// than silently producing an empty table and corrupting data.
-	cols := []string{
-		"entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE",
-		"x REAL NOT NULL",
+	cols := []rebuildColumn{
+		{Name: "entity_id", DDL: "entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE"},
+		{Name: "x", DDL: "x REAL NOT NULL", NotNull: true, Default: "0.0"},
 	}
 	sql := buildCreateTable("comp_position_new", "position", cols)
 	assertNotContainsDDL(t, sql, "IF NOT EXISTS")
@@ -1261,8 +1261,8 @@ func TestBuildNewColumns_UnknownComponentType(t *testing.T) {
 	if len(cols) != 1 {
 		t.Errorf("got %d columns, want 1 (entity_id only)", len(cols))
 	}
-	assertContainsDDL(t, cols[0], "entity_id")
-	assertContainsDDL(t, cols[0], "REFERENCES entities(id)")
+	assertContainsDDL(t, cols[0].DDL, "entity_id")
+	assertContainsDDL(t, cols[0].DDL, "REFERENCES entities(id)")
 }
 
 func TestBuildNewColumns_Integer(t *testing.T) {
@@ -1271,7 +1271,7 @@ func TestBuildNewColumns_Integer(t *testing.T) {
 	if len(cols) != 2 {
 		t.Fatalf("got %d columns, want 2", len(cols))
 	}
-	assertContainsDDL(t, cols[1], "value INTEGER NOT NULL DEFAULT 0")
+	assertContainsDDL(t, cols[1].DDL, "value INTEGER NOT NULL DEFAULT 0")
 }
 
 func TestBuildNewColumns_Boolean(t *testing.T) {
@@ -1280,7 +1280,7 @@ func TestBuildNewColumns_Boolean(t *testing.T) {
 	if len(cols) != 2 {
 		t.Fatalf("got %d columns, want 2", len(cols))
 	}
-	assertContainsDDL(t, cols[1], "value INTEGER NOT NULL DEFAULT 0")
+	assertContainsDDL(t, cols[1].DDL, "value INTEGER NOT NULL DEFAULT 0")
 }
 
 func TestBuildNewColumns_ObjectPropertyNamesLowerCase(t *testing.T) {
@@ -1301,8 +1301,8 @@ func TestBuildNewColumns_ObjectPropertyNamesLowerCase(t *testing.T) {
 	}
 	// Columns must be lowercase even though file schema uses mixed case.
 	// After alphabetical sort: imageid at [1], scalex at [2].
-	assertContainsDDL(t, cols[1], "imageid TEXT NOT NULL")
-	assertContainsDDL(t, cols[2], "scalex REAL NOT NULL")
+	assertContainsDDL(t, cols[1].DDL, "imageid TEXT NOT NULL")
+	assertContainsDDL(t, cols[2].DDL, "scalex REAL NOT NULL")
 }
 
 // ── genRebuild: component missing from domain map ─────────────────────

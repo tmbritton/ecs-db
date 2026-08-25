@@ -38,24 +38,60 @@ func (e *SchemaMigrationError) Error() string {
 	return msg
 }
 
+// reportSubstitutions says how many rows are about to have a value invented for
+// them, and what it will be.
+//
+// The migration runs under MigrationAuto by default, so nothing asks anybody
+// first — the log is where this is mentioned or it is not mentioned at all. A
+// failure to count is not a failure to migrate: the count is commentary, and
+// losing it is not worth rolling back a repair for.
+func reportSubstitutions(tx *sql.Tx, stmt Statement, logger MigrationLogger) {
+	for _, sub := range stmt.Substitutions {
+		table := "comp_" + stmt.Component
+		var n int
+		q := fmt.Sprintf(`SELECT COUNT(*) FROM %q WHERE %q IS NULL`, table, sub.Column)
+		if err := tx.QueryRow(q).Scan(&n); err != nil {
+			logger.Warnf("migration: could not count the NULLs in %s.%s: %v", table, sub.Column, err)
+			continue
+		}
+		if n == 0 {
+			continue
+		}
+		logger.Warnf("migration: %s.%s no longer accepts NULL — %s taking the value %s, "+
+			"which is what adding the column would have given them",
+			table, sub.Column, rowsPhrase(n), sub.Default)
+	}
+}
+
+func rowsPhrase(n int) string {
+	if n == 1 {
+		return "1 row is"
+	}
+	return fmt.Sprintf("%d rows are", n)
+}
+
 // migrationHint explains the one failure that leaves a database unopenable
 // rather than merely unmigrated.
 //
 // A rebuild's copy fails on NOT NULL when the column being rebuilt holds NULLs
-// — which happens when an entity-ref property, the one kind that is nullable,
-// is retyped to anything else. The migration rolls back, so no data is lost,
-// but NewSQLiteStore returns this error on every subsequent open and nothing in
-// the engine can repair it: the only way out is to put the schema back.
+// and there is no value to put there instead. Since Story 12 that is one column:
+// the target_entity_id of a component whose type is entity-ref, where there is
+// no honest substitute — a Carrier pointing at nothing is not a Carrier — so
+// nothing invents an entity id for it. The engine cannot produce such a row,
+// because the column refuses it; a hand-edited database can.
 //
-// Until Story 11 that needed a schemaVersion bump to reach. It is now one save
-// away, so the error has to say what to do rather than name a temporary table.
+// The migration rolls back, so no data is lost, but NewSQLiteStore returns this
+// error on every subsequent open and nothing in the engine can repair it. So the
+// error says what to do rather than naming a temporary table.
 func migrationHint(err error, stmt Statement) string {
 	if stmt.Kind != "rebuild_table" || !strings.Contains(err.Error(), "NOT NULL constraint failed") {
 		return ""
 	}
 	return fmt.Sprintf(
 		"hint: comp_%s has rows whose new column is NULL, and the rebuilt table does not allow it. "+
-			"This is what retyping an entity-ref property does, because only an entity-ref may be NULL. "+
+			"A rebuild puts a column's default where a NULL used to be, so this is the one column "+
+			"with no default to put there: the reference a component of type entity-ref is made of, "+
+			"which has no honest value when it is missing. "+
 			"The database is unchanged and will fail to open until %q is put back in schema.json as it was.",
 		stmt.Component, stmt.Component)
 }
@@ -284,6 +320,11 @@ func (r *MigrationRunner) Apply(plan *MigrationPlan) error {
 		if stmt.Destructive {
 			r.logger.Warnf("migration: %s on %s is destructive: %s", stmt.Kind, stmt.Component, stmt.Description)
 		}
+		// Counted before the copy runs, because afterwards there is nothing
+		// left to count: the NULLs are gone. Only for the columns the generator
+		// actually substituted into, so an ordinary rebuild asks nothing.
+		reportSubstitutions(tx, stmt, r.logger)
+
 		if _, err := tx.Exec(stmt.SQL); err != nil {
 			_ = tx.Rollback()
 			return &SchemaMigrationError{

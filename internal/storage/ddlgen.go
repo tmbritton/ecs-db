@@ -17,6 +17,19 @@ type Statement struct {
 	Destructive bool   // true for DROP TABLE, column removal, type change
 	Component   string // affected component (lowercase)
 	Description string // human-readable summary
+
+	// Substitutions are the columns this statement reads through a COALESCE,
+	// because they refuse a NULL the source column allows. Carried so the
+	// runner can say how many rows it actually invented a value for: the
+	// difference between a no-op and eight thousand rows quietly taking a zero
+	// is not visible in the SQL.
+	Substitutions []Substitution
+}
+
+// Substitution is one column whose NULLs a rebuild replaces, and with what.
+type Substitution struct {
+	Column  string
+	Default string
 }
 
 // Config holds generator options.
@@ -187,7 +200,7 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 	// load-bearing: see columnConstraint for the database it used to wedge.
 	notNullClause := " NOT NULL"
 	extraClause := ""
-	if prop.Type == schema.PropertyTypeEntityRef {
+	if schema.PropertyNullable(prop.Type) {
 		notNullClause = ""
 		extraClause = " " + entityRefReference
 	}
@@ -237,7 +250,8 @@ func (g *Generator) genRebuildFor(c schema.Change, reason string) []Statement {
 // the same component.
 func causesRebuild(k schema.ChangeKind) bool {
 	switch k {
-	case schema.ChangeRemovedProperty, schema.ChangedPropertyType, schema.ChangeChangedConstraint:
+	case schema.ChangeRemovedProperty, schema.ChangedPropertyType,
+		schema.ChangeChangedConstraint, schema.ChangeChangedNullability:
 		return true
 	default:
 		return false
@@ -297,16 +311,28 @@ func (g *Generator) genRebuild(compName, reason string) []Statement {
 	// Build the new column list from the file schema.
 	newCols := buildNewColumns(comp)
 
-	// Build the named column list for INSERT ... SELECT. We derive column
-	// names from the new table layout (entity_id first, then the new schema's
-	// properties in sorted order). Using named columns ensures entity_id is
-	// preserved and column ordering mismatches between old and new tables
-	// cannot cause data to land in the wrong column.
-	colNames := make([]string, 0, len(newCols))
-	for _, colDef := range newCols {
-		colNames = append(colNames, strings.Fields(colDef)[0])
+	// The named column list for INSERT ... SELECT. Named rather than positional
+	// so entity_id is preserved and a column-order difference between the old
+	// and new tables cannot land data in the wrong column.
+	//
+	// The two sides differ where a column that used to accept NULL no longer
+	// does: the destination is the plain name, the source substitutes the value
+	// the column would have been given if it were being added now. See
+	// copyExpression.
+	dbCols := g.domain.Components[compName].Columns
+	names := make([]string, 0, len(newCols))
+	reads := make([]string, 0, len(newCols))
+	var subs []Substitution
+	for _, c := range newCols {
+		names = append(names, c.Name)
+		read := copyExpression(c, dbCols)
+		reads = append(reads, read)
+		if read != c.Name {
+			subs = append(subs, Substitution{Column: c.Name, Default: c.Default})
+		}
 	}
-	colList := strings.Join(colNames, ", ")
+	colList := strings.Join(names, ", ")
+	readList := strings.Join(reads, ", ")
 
 	tableName := "comp_" + compName
 	tempName := tableName + "_new"
@@ -328,13 +354,14 @@ func (g *Generator) genRebuild(compName, reason string) []Statement {
 	// 2. INSERT INTO comp_<name>_new (cols) SELECT cols FROM comp_<name>
 	// Named columns preserve entity_id and survive column-order differences.
 	selectSQL := fmt.Sprintf("INSERT INTO %s (%s) SELECT %s FROM %s",
-		tempName, colList, colList, tableName)
+		tempName, colList, readList, tableName)
 	stmts = append(stmts, Statement{
-		SQL:         selectSQL,
-		Kind:        "rebuild_table",
-		Destructive: true,
-		Component:   compName,
-		Description: "Copy data from " + tableName,
+		SQL:           selectSQL,
+		Kind:          "rebuild_table",
+		Destructive:   true,
+		Component:     compName,
+		Description:   "Copy data from " + tableName,
+		Substitutions: subs,
 	})
 
 	// 3. DROP TABLE comp_<name>
@@ -358,9 +385,30 @@ func (g *Generator) genRebuild(compName, reason string) []Statement {
 	return stmts
 }
 
+// rebuildColumn is one column of the table a rebuild is about to create.
+//
+// A struct rather than the DDL string this used to be. The generator has to know
+// each column's name to write the INSERT, and whether it refuses NULL and what
+// it would default to in order to write the SELECT — and it used to recover the
+// name by splitting its own output on whitespace, which is a parser for a format
+// it had just finished emitting.
+type rebuildColumn struct {
+	Name    string
+	DDL     string // the whole definition, as it goes into CREATE TABLE
+	NotNull bool
+	// Default is what ALTER TABLE ADD COLUMN would give existing rows for this
+	// property type — not necessarily what appears in DDL, which for an object
+	// property is nothing at all. It is here so the copy can put a value where a
+	// NULL used to be, from the same source the ALTER path uses.
+	Default string
+}
+
 // buildNewColumns generates the column definitions for a rebuild table.
-func buildNewColumns(comp schema.Component) []string {
-	cols := []string{"entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE"}
+func buildNewColumns(comp schema.Component) []rebuildColumn {
+	cols := []rebuildColumn{{
+		Name: "entity_id",
+		DDL:  "entity_id INTEGER PRIMARY KEY " + entityRefReference,
+	}}
 
 	switch comp.Type {
 	case schema.ComponentTypeObject:
@@ -369,12 +417,18 @@ func buildNewColumns(comp schema.Component) []string {
 		// of the generator disagreed: this one sorted and that one used map
 		// order.
 		for _, propName := range jsonorder.Apply(comp.PropertyOrder, comp.Properties) {
+			prop := comp.Properties[propName]
+			name := strings.ToLower(propName)
 			// Through the same helper componentTableSQL uses, so a rebuilt
 			// table carries the constraints a created one does. It did not: an
 			// entity-ref property came out of a rebuild with no foreign key,
 			// silently dropping one an ALTER TABLE had added.
-			cols = append(cols, fmt.Sprintf("%s %s",
-				strings.ToLower(propName), columnConstraint(comp.Properties[propName])))
+			cols = append(cols, rebuildColumn{
+				Name:    name,
+				DDL:     fmt.Sprintf("%s %s", name, columnConstraint(prop)),
+				NotNull: !schema.PropertyNullable(prop.Type),
+				Default: defaultValueForProperty(prop),
+			})
 		}
 
 	case schema.ComponentTypeEntityRef:
@@ -383,26 +437,67 @@ func buildNewColumns(comp schema.Component) []string {
 		// settled shape. A change *between* entity-ref and another layout no
 		// longer arrives here: schema.Diff makes that remove-and-add, because
 		// no ALTER renames value into target_entity_id.
-		cols = append(cols, "target_entity_id "+entityRefColumnType)
+		//
+		// No Default: there is no honest value for a reference that is missing,
+		// which is the whole reason this column is NOT NULL. A row with a NULL
+		// in it cannot be carried across, and nothing here pretends otherwise.
+		cols = append(cols, rebuildColumn{
+			Name: "target_entity_id", DDL: "target_entity_id " + entityRefColumnType, NotNull: true,
+		})
 	case schema.ComponentTypeArray:
-		cols = append(cols, "value TEXT NOT NULL DEFAULT '[]'")
+		cols = append(cols, scalarColumn("TEXT", "'[]'"))
 	case schema.ComponentTypeString:
-		cols = append(cols, "value TEXT NOT NULL DEFAULT ''")
+		cols = append(cols, scalarColumn("TEXT", "''"))
 	case schema.ComponentTypeInteger, schema.ComponentTypeBoolean:
-		cols = append(cols, "value INTEGER NOT NULL DEFAULT 0")
+		cols = append(cols, scalarColumn("INTEGER", "0"))
 	case schema.ComponentTypeNumber:
-		cols = append(cols, "value REAL NOT NULL DEFAULT 0.0")
+		cols = append(cols, scalarColumn("REAL", "0.0"))
 	}
 
 	return cols
 }
 
+// scalarColumn is the single data column of a non-object component.
+func scalarColumn(sqlType, dflt string) rebuildColumn {
+	return rebuildColumn{
+		Name:    "value",
+		DDL:     fmt.Sprintf("value %s NOT NULL DEFAULT %s", sqlType, dflt),
+		NotNull: true,
+		Default: dflt,
+	}
+}
+
+// copyExpression is what the rebuild's SELECT reads for one column.
+//
+// The plain column name, except where carrying it across would fail: a column
+// that refuses NULL, reading from one that allowed it. Then it substitutes the
+// column's default — the same value ALTER TABLE ADD COLUMN gives existing rows
+// when a NOT NULL property is added, so the two ways of arriving at "this column
+// now has to hold a value and these rows do not have one" give the same answer.
+// They used to disagree completely: adding invented a value, retyping made the
+// database refuse to open ever again.
+//
+// Narrow on purpose. Without drift there is nothing to coalesce and the SQL is
+// what it always was, which matters because Forge shows this text to somebody
+// deciding whether to allow the migration.
+func copyExpression(c rebuildColumn, dbCols []DomainColumn) string {
+	if !c.NotNull || c.Default == "" || c.Default == "NULL" {
+		return c.Name
+	}
+	for _, old := range dbCols {
+		if strings.EqualFold(old.Name, c.Name) && old.Nullable && !old.IsPK {
+			return fmt.Sprintf("COALESCE(%s, %s)", c.Name, c.Default)
+		}
+	}
+	return c.Name
+}
+
 // buildCreateTable generates a CREATE TABLE statement.
-func buildCreateTable(tableName string, compName string, cols []string) string {
+func buildCreateTable(tableName string, compName string, cols []rebuildColumn) string {
 	sql := fmt.Sprintf("CREATE TABLE %s (\n", tableName)
 	colDefs := make([]string, len(cols))
 	for i, c := range cols {
-		colDefs[i] = "\t" + c
+		colDefs[i] = "\t" + c.DDL
 	}
 	sql += strings.Join(colDefs, ",\n")
 	sql += "\n)"

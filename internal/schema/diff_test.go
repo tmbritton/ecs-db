@@ -897,6 +897,14 @@ func assertChanges(t *testing.T, got, want []Change) {
 		// "Only when the caller filled it in" cannot work here: the value that
 		// says a column references nothing is the empty string, which is the
 		// half of a constraint change most worth asserting.
+		if w.Kind == ChangeChangedNullability {
+			if g.OldNullable != w.OldNullable {
+				t.Errorf("changes[%d].OldNullable = %v, want %v", i, g.OldNullable, w.OldNullable)
+			}
+			if g.NewNullable != w.NewNullable {
+				t.Errorf("changes[%d].NewNullable = %v, want %v", i, g.NewNullable, w.NewNullable)
+			}
+		}
 		if w.Kind == ChangeChangedConstraint {
 			if g.OldRef != w.OldRef {
 				t.Errorf("changes[%d].OldRef = %q, want %q", i, g.OldRef, w.OldRef)

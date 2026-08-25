@@ -32,21 +32,26 @@ type DomainColumn struct {
 	// from having no foreign key: the first refuses the delete, the second
 	// leaves a dangling reference.
 	References string
+	// Nullable is the negation of PRAGMA table_info's notnull. It is only
+	// meaningful for data columns: SQLite reports every INTEGER PRIMARY KEY as
+	// nullable, so it says nothing about entity_id. See ColumnNullable.
+	Nullable bool
 }
 
 // ChangeKind identifies the category of a schema change.
 type ChangeKind string
 
 const (
-	ChangeAddedComponent    ChangeKind = "added_component"
-	ChangeRemovedComponent  ChangeKind = "removed_component"
-	ChangeAddedProperty     ChangeKind = "added_property"
-	ChangeRemovedProperty   ChangeKind = "removed_property"
-	ChangedPropertyType     ChangeKind = "changed_property_type"
-	ChangeChangedConstraint ChangeKind = "changed_constraint"
-	ChangeAddedEntityType   ChangeKind = "added_entity_type"
-	ChangeRemovedEntityType ChangeKind = "removed_entity_type"
-	ChangeChangedEntityType ChangeKind = "changed_entity_type"
+	ChangeAddedComponent     ChangeKind = "added_component"
+	ChangeRemovedComponent   ChangeKind = "removed_component"
+	ChangeAddedProperty      ChangeKind = "added_property"
+	ChangeRemovedProperty    ChangeKind = "removed_property"
+	ChangedPropertyType      ChangeKind = "changed_property_type"
+	ChangeChangedConstraint  ChangeKind = "changed_constraint"
+	ChangeChangedNullability ChangeKind = "changed_nullability"
+	ChangeAddedEntityType    ChangeKind = "added_entity_type"
+	ChangeRemovedEntityType  ChangeKind = "removed_entity_type"
+	ChangeChangedEntityType  ChangeKind = "changed_entity_type"
 )
 
 // Change represents a single structural difference between the database
@@ -71,8 +76,13 @@ type Change struct {
 	// describe the change as nothing.
 	OldRef string
 	NewRef string
-	OldET  *EntityType // previous entity type spec (for changed_entity_type)
-	NewET  *EntityType // new entity type spec (for changed_entity_type)
+	// OldNullable and NewNullable carry whether the column accepts NULL, for
+	// ChangeChangedNullability. Both are booleans whose false is meaningful, so
+	// unlike the type fields they are always compared.
+	OldNullable bool
+	NewNullable bool
+	OldET       *EntityType // previous entity type spec (for changed_entity_type)
+	NewET       *EntityType // new entity type spec (for changed_entity_type)
 }
 
 // phase returns a numeric priority used for deterministic ordering.
@@ -81,7 +91,7 @@ func (c Change) phase() int {
 	switch c.Kind {
 	case ChangeAddedComponent, ChangeAddedProperty, ChangeAddedEntityType:
 		return 1
-	case ChangedPropertyType, ChangeChangedConstraint, ChangeChangedEntityType:
+	case ChangedPropertyType, ChangeChangedConstraint, ChangeChangedNullability, ChangeChangedEntityType:
 		return 2
 	case ChangeRemovedComponent, ChangeRemovedProperty, ChangeRemovedEntityType:
 		return 3
@@ -217,6 +227,7 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 			diffScalarComponent(name, dbComp.Columns, fileComp, &changes)
 		}
 		diffReferences(name, dbComp.Columns, fileComp, &changes)
+		diffNullability(name, dbComp.Columns, fileComp, &changes)
 	}
 
 	// ── Entity type diff (names against DB) ──────────────────────────
@@ -389,6 +400,50 @@ func diffReferences(compName string, dbCols []DomainColumn, fileComp Component, 
 			Reason:    referenceReason(name, c.References, wantRef),
 		})
 	}
+}
+
+// diffNullability compares whether each column accepts NULL against whether the
+// generator would let it.
+//
+// The other half of the shape introspection used not to read. It matters in both
+// directions and for different reasons: a column that should refuse NULLs and
+// does not is a table the file does not describe, and a column that should
+// accept them and does not is the wedge Story 9 found — a rebuild of it fails on
+// the rows an ALTER left empty, and the store returns that failure from every
+// subsequent open.
+//
+// The primary key is skipped. SQLite reports every INTEGER PRIMARY KEY as
+// nullable, so comparing it would report every table in every database.
+func diffNullability(compName string, dbCols []DomainColumn, fileComp Component, changes *[]Change) {
+	want := ColumnNullable(fileComp)
+	for _, c := range dbCols {
+		if c.IsPK {
+			continue
+		}
+		name := strings.ToLower(c.Name)
+		wantNullable, declared := want[name]
+		if !declared || c.Nullable == wantNullable {
+			continue
+		}
+		*changes = append(*changes, Change{
+			Kind:        ChangeChangedNullability,
+			Component:   compName,
+			Property:    name,
+			OldNullable: c.Nullable,
+			NewNullable: wantNullable,
+			Reason:      nullabilityReason(name, wantNullable),
+		})
+	}
+}
+
+// nullabilityReason says what the change is for. The two directions are not
+// variations on one sentence: one is about what the table will refuse from now
+// on, the other is about rows that already exist.
+func nullabilityReason(column string, wantNullable bool) string {
+	if wantNullable {
+		return fmt.Sprintf("%s has to accept NULL, because it is a reference a row may not have yet", column)
+	}
+	return fmt.Sprintf("%s stops accepting NULL, and rows that have none take the value adding the column would have given them", column)
 }
 
 // referenceReason says what the change means, because the constraint text on

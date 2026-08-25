@@ -34,6 +34,9 @@ type DomainColumn struct {
 	// schema.NoReference when there is none. See schema.DomainColumn for why
 	// the two are different answers.
 	References string
+	// Nullable is the negation of PRAGMA table_info's notnull, and is only
+	// meaningful for data columns. See schema.ColumnNullable.
+	Nullable bool
 }
 
 func (c DomainColumn) DefaultVal() string {
@@ -127,6 +130,7 @@ func IntrospectComponentTable(db *sql.DB, tableName string) ([]DomainColumn, err
 			Default:    dfltValue.String,
 			IsPK:       pk == 1,
 			References: refs[name],
+			Nullable:   notNull == 0,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -362,6 +366,7 @@ func (ds *DomainSchema) ToDiffSchema() *schema.DomainSchema {
 				SQLType:    c.SQLType,
 				IsPK:       c.IsPK,
 				References: c.References,
+				Nullable:   c.Nullable,
 			}
 		}
 		result.Components[k] = schema.DomainComponent{
