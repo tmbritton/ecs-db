@@ -59,18 +59,6 @@ type Preview struct {
 	Problems []string
 }
 
-// WillMigrate reports whether the engine would actually run this plan.
-//
-// It only migrates when the database's recorded schema_version differs from
-// schema.json's — storage.checkAndMigrate returns early when they match, so an
-// edit saved without a version bump is never applied. The statements below are
-// real and the engine will run none of them, which is the one case where a
-// correct list of changes is still a misleading answer.
-// See TestEngine_SkipsMigrationWhenTheVersionIsUnchanged.
-func (p Preview) WillMigrate() bool {
-	return p.Available && p.DBVersion != p.FileVersion
-}
-
 // Stale reports that the database already disagreed with the file as last
 // saved, before this edit — a different fact from anything the current edit
 // does, and the same distinction the engine-status readout makes.

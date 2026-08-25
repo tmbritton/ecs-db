@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,11 @@ type DomainColumn struct {
 	SQLType string
 	Default string // Default value expression from PRAGMA, empty if none
 	IsPK    bool
+	// References is the column's foreign key, as PRAGMA foreign_key_list
+	// reports it and as schema.EntityReference is written — or
+	// schema.NoReference when there is none. See schema.DomainColumn for why
+	// the two are different answers.
+	References string
 }
 
 func (c DomainColumn) DefaultVal() string {
@@ -37,8 +43,20 @@ func (c DomainColumn) DefaultVal() string {
 // ListComponentTables returns the names of all component tables (comp_*)
 // in the database, sorted alphabetically.
 func ListComponentTables(db *sql.DB) ([]string, error) {
+	// The underscore is escaped. In SQL LIKE, "_" matches any single character,
+	// so 'comp_%' also matches "company", "compass" and "compact_things" — any
+	// table whose name begins with "comp". Such a table was introspected as a
+	// component, TrimPrefix left its name untouched because it does not start
+	// with "comp_", and the diff asked for "comp_compact_things" to be dropped:
+	// a table that does not exist, so the DROP succeeded, changed nothing, and
+	// was asked for again next time.
+	//
+	// That used to be bounded — it fired only on a version bump, and the bump
+	// itself made it stop. Since the migration no longer waits for a version to
+	// move, it would repeat on every open of the database, backup and all,
+	// forever.
 	rows, err := db.Query(
-		"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'comp_%' ORDER BY name",
+		`SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'comp\_%' ESCAPE '\' ORDER BY name`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying sqlite_master for component tables: %w", err)
@@ -81,6 +99,12 @@ func IntrospectComponentTable(db *sql.DB, tableName string) ([]DomainColumn, err
 	// Double-quote the identifier to handle names with special characters and
 	// prevent SQL injection through attacker-controlled table names.
 	quotedName := `"` + strings.ReplaceAll(tableName, `"`, `""`) + `"`
+
+	refs, err := introspectReferences(db, quotedName, tableName)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", quotedName))
 	if err != nil {
 		return nil, fmt.Errorf("PRAGMA table_info(%s): %w", tableName, err)
@@ -98,16 +122,107 @@ func IntrospectComponentTable(db *sql.DB, tableName string) ([]DomainColumn, err
 			return nil, fmt.Errorf("scanning PRAGMA table_info row: %w", err)
 		}
 		columns = append(columns, DomainColumn{
-			Name:    name,
-			SQLType: strings.ToUpper(colType),
-			Default: dfltValue.String,
-			IsPK:    pk == 1,
+			Name:       name,
+			SQLType:    strings.ToUpper(colType),
+			Default:    dfltValue.String,
+			IsPK:       pk == 1,
+			References: refs[name],
 		})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating PRAGMA table_info: %w", err)
 	}
 	return columns, nil
+}
+
+// introspectReferences reads a table's foreign keys, keyed by the column each
+// one is declared on.
+//
+// PRAGMA table_info does not report constraints, so this is a second query and
+// the reason a column's foreign key was invisible to the diff until Story 11.
+// Two details of what SQLite returns are load-bearing. The rows come back in
+// reverse declaration order rather than column order, so they are keyed by the
+// "from" column instead of zipped against table_info. And "to" is NULL for a
+// reference written without naming a column — "REFERENCES entities" — which no
+// generated table has and a hand-edited one might; it is reported as the
+// table alone, so it cannot be mistaken for the canonical form.
+//
+// A foreign key spanning several columns arrives as one row per column sharing
+// an id. The engine never emits one; if a database has one, every column in it
+// is reported with the whole key, which no single-column expectation matches —
+// so it is repaired into the canonical shape rather than silently accepted.
+func introspectReferences(db *sql.DB, quotedName, tableName string) (map[string]string, error) {
+	rows, err := db.Query(fmt.Sprintf(
+		`SELECT id, seq, "table", "from", "to", on_delete FROM pragma_foreign_key_list(%s)`,
+		quotedName))
+	if err != nil {
+		return nil, fmt.Errorf("PRAGMA foreign_key_list(%s): %w", tableName, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type part struct {
+		seq      int
+		from     string
+		to       sql.NullString
+		table    string
+		onDelete string
+	}
+	byID := map[int][]part{}
+	order := make([]int, 0)
+	for rows.Next() {
+		var p part
+		var id int
+		if err := rows.Scan(&id, &p.seq, &p.table, &p.from, &p.to, &p.onDelete); err != nil {
+			return nil, fmt.Errorf("scanning foreign key of %s: %w", tableName, err)
+		}
+		if _, seen := byID[id]; !seen {
+			order = append(order, id)
+		}
+		byID[id] = append(byID[id], p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating foreign keys of %s: %w", tableName, err)
+	}
+
+	perColumn := map[string][]string{}
+	for _, id := range order {
+		parts := byID[id]
+		sort.Slice(parts, func(i, j int) bool { return parts[i].seq < parts[j].seq })
+
+		targets := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p.to.Valid {
+				targets = append(targets, p.to.String)
+			}
+		}
+		ref := parts[0].table
+		if len(targets) > 0 {
+			ref += "(" + strings.Join(targets, ", ") + ")"
+		}
+		ref += " ON DELETE " + parts[0].onDelete
+
+		for _, p := range parts {
+			perColumn[p.from] = append(perColumn[p.from], ref)
+		}
+	}
+
+	// Every key on a column, joined, rather than whichever one was declared
+	// last. SQLite allows a column to carry more than one — "x INTEGER
+	// REFERENCES entities(id) ON DELETE CASCADE REFERENCES entities(id) ON
+	// DELETE SET NULL" is a legal column — and keeping only one of them made a
+	// column carrying the canonical key *plus* a stray one read as correct and
+	// never get repaired. Two keys is not the shape the generator emits, so the
+	// joined text matches no expectation and the table is rebuilt into the one
+	// key it should have. Sorted, so the answer does not depend on declaration
+	// order.
+	refs := make(map[string]string, len(perColumn))
+	for col, keys := range perColumn {
+		if len(keys) > 1 {
+			sort.Strings(keys)
+		}
+		refs[col] = strings.Join(keys, " + ")
+	}
+	return refs, nil
 }
 
 // IntBool is a helper for scanning SQLite's 0/1 integers from PRAGMA.
@@ -243,9 +358,10 @@ func (ds *DomainSchema) ToDiffSchema() *schema.DomainSchema {
 		domCols := make([]schema.DomainColumn, len(v.Columns))
 		for i, c := range v.Columns {
 			domCols[i] = schema.DomainColumn{
-				Name:    c.Name,
-				SQLType: c.SQLType,
-				IsPK:    c.IsPK,
+				Name:       c.Name,
+				SQLType:    c.SQLType,
+				IsPK:       c.IsPK,
+				References: c.References,
 			}
 		}
 		result.Components[k] = schema.DomainComponent{

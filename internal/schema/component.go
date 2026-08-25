@@ -32,6 +32,21 @@ func ComponentTypes() []string {
 	return out
 }
 
+// PropertyTypes is every property type a schema may declare, sorted.
+//
+// Exported for the same reason ComponentTypes is: a caller that has to answer
+// for all of them enumerates rather than keeps a second list. See
+// ColumnReference, whose test would otherwise pass for a type nobody had
+// thought about.
+func PropertyTypes() []string {
+	out := make([]string, 0, len(supportedPropertyTypes))
+	for t := range supportedPropertyTypes {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
 var supportedComponentTypes = map[string]bool{
 	ComponentTypeObject:    true,
 	ComponentTypeArray:     true,

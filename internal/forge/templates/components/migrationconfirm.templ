@@ -38,18 +38,15 @@ templ MigrationConfirm(props MigrationConfirmProps) {
 					is a decision to make without the list, not one the list says is safe.
 				</p>
 			} else {
+				// No "the engine will not run these" branch any more. It used
+				// to be reachable whenever schemaVersion was left alone, which
+				// made a destructive save look harmless until the next bump.
+				// The engine now migrates on structure, so a dialog that is
+				// showing statements at all is showing statements it will run.
 				<p class="migration__warn">
-					Saving writes <span class="mono">schema.json</span>.
-					if props.Preview.WillMigrate() {
-						The next time the engine starts it will run the statements below against the
-						database, and what they remove is not recoverable from the schema.
-					} else {
-						The statements below are what the database would need. The engine will not
-						run them while <span class="mono">schemaVersion</span> stays at
-						<span class="mono">v{ itoa(props.Preview.FileVersion) }</span>, the version
-						the database already records — so this save destroys nothing today, and
-						destroys all of it on the first save that bumps the version.
-					}
+					Saving writes <span class="mono">schema.json</span>. The next time the engine
+					starts it will run the statements below against the database, and what they
+					remove is not recoverable from the schema.
 				</p>
 				@StatementList(props.Preview.DestructiveStatements(), "confirm-statement")
 				<p class="schema__note">

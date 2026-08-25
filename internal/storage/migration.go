@@ -19,13 +19,45 @@ type SchemaMigrationError struct {
 	Underlying   error  // driver error
 	StatementIdx int    // zero-based index within the statement batch
 	TotalStmts   int    // total statements in the batch
+
+	// Hint is what to do about it, for the failures where the driver's sentence
+	// does not say. The store returns this error from every open, so whoever
+	// reads it is looking at a database that will not start and needs to know
+	// which file to edit — not the name of a temporary table.
+	Hint string
 }
 
 func (e *SchemaMigrationError) Error() string {
-	return fmt.Sprintf(
+	msg := fmt.Sprintf(
 		"migration failed: %s %q — statement %d/%d\nSQL: %s\nunderlying: %v",
 		e.ChangeKind, e.Change, e.StatementIdx+1, e.TotalStmts, e.SQL, e.Underlying,
 	)
+	if e.Hint != "" {
+		msg += "\n" + e.Hint
+	}
+	return msg
+}
+
+// migrationHint explains the one failure that leaves a database unopenable
+// rather than merely unmigrated.
+//
+// A rebuild's copy fails on NOT NULL when the column being rebuilt holds NULLs
+// — which happens when an entity-ref property, the one kind that is nullable,
+// is retyped to anything else. The migration rolls back, so no data is lost,
+// but NewSQLiteStore returns this error on every subsequent open and nothing in
+// the engine can repair it: the only way out is to put the schema back.
+//
+// Until Story 11 that needed a schemaVersion bump to reach. It is now one save
+// away, so the error has to say what to do rather than name a temporary table.
+func migrationHint(err error, stmt Statement) string {
+	if stmt.Kind != "rebuild_table" || !strings.Contains(err.Error(), "NOT NULL constraint failed") {
+		return ""
+	}
+	return fmt.Sprintf(
+		"hint: comp_%s has rows whose new column is NULL, and the rebuilt table does not allow it. "+
+			"This is what retyping an entity-ref property does, because only an entity-ref may be NULL. "+
+			"The database is unchanged and will fail to open until %q is put back in schema.json as it was.",
+		stmt.Component, stmt.Component)
 }
 
 // Unwrap allows errors.Is/As to reach the underlying driver error.
@@ -106,28 +138,73 @@ func NewMigrationRunner(
 	}
 }
 
+// MigrationPlan is what a migration would do: the shape the database is in,
+// the differences from the file, and the statements that close them.
+//
+// Separate from applying it so a caller can look first — the backup in
+// checkAndMigrate has to happen between deciding there is work and doing it,
+// and Forge shows the same list to somebody who has not saved yet.
+type MigrationPlan struct {
+	Domain     *DomainSchema
+	Changes    []schema.Change
+	Statements []Statement
+
+	// FromVersion is what the database records, ToVersion what the file says.
+	FromVersion int
+	ToVersion   int
+}
+
+// Empty reports that applying this plan would do nothing at all.
+//
+// Deliberately about statements rather than changes. DomainSchema.EntityTypeNames
+// comes from SELECT DISTINCT entity_type FROM entities, so a database with no
+// entities in it reports every entity type in the file as newly added — changes
+// that produce no DDL. A changes-based test would call every such database
+// stale, and back it up and migrate it on every single open.
+func (p *MigrationPlan) Empty() bool {
+	return p == nil || (len(p.Statements) == 0 && p.FromVersion == p.ToVersion)
+}
+
+// Plan introspects the database and works out what would have to happen to it,
+// without touching it.
+func (r *MigrationRunner) Plan() (*MigrationPlan, error) {
+	domain, err := IntrospectAll(r.db)
+	if err != nil {
+		return nil, fmt.Errorf("introspecting db: %w", err)
+	}
+	changes := schema.Diff(domain.ToDiffSchema(), &r.file, nil)
+	stmts := NewGenerator(&r.file, domain, Config{StrictDrop: true}).Generate(changes)
+	return &MigrationPlan{
+		Domain:      domain,
+		Changes:     changes,
+		Statements:  stmts,
+		FromVersion: domain.SchemaVersion,
+		ToVersion:   r.file.SchemaVersion,
+	}, nil
+}
+
 // Run executes the migration pipeline. Returns nil if the database is already
 // up to date or if migration succeeds. Returns *SchemaMigrationError if a DDL
 // statement fails (with full rollback), or *MigrationRequiresConfirmation when
 // policy=confirm and destructive changes are present.
 func (r *MigrationRunner) Run() error {
-	// 1. Introspect current DB state.
-	domain, err := IntrospectAll(r.db)
+	plan, err := r.Plan()
 	if err != nil {
-		return fmt.Errorf("introspecting db: %w", err)
+		return err
 	}
-
-	// 2. Compute structural diff.
-	changes := schema.Diff(domain.ToDiffSchema(), &r.file, nil)
-
-	// Nothing to do when versions already match and structure is identical.
-	if len(changes) == 0 && domain.SchemaVersion == r.file.SchemaVersion {
+	if plan.Empty() {
 		return nil
 	}
+	return r.Apply(plan)
+}
 
-	// 3. Generate DDL from structural changes.
-	gen := NewGenerator(&r.file, domain, Config{StrictDrop: true})
-	stmts := gen.Generate(changes)
+// Apply runs a plan: every statement and the meta update in one transaction, so
+// a failure leaves the database as it was.
+func (r *MigrationRunner) Apply(plan *MigrationPlan) error {
+	if plan == nil {
+		return nil
+	}
+	stmts := plan.Statements
 
 	// 4. Check policy against destructive statements.
 	if r.policy == MigrationConfirm {
@@ -216,6 +293,7 @@ func (r *MigrationRunner) Run() error {
 				Underlying:   err,
 				StatementIdx: i,
 				TotalStmts:   len(stmts),
+				Hint:         migrationHint(err, stmt),
 			}
 		}
 		r.logger.Infof("migration: executed %s on %s", stmt.Kind, stmt.Component)
@@ -248,7 +326,7 @@ func (r *MigrationRunner) Run() error {
 	}
 
 	r.logger.Infof("migration complete: %d statements applied, version %d → %d",
-		len(stmts), domain.SchemaVersion, r.file.SchemaVersion)
+		len(stmts), plan.FromVersion, plan.ToVersion)
 
 	return nil
 }

@@ -35,14 +35,14 @@ func TestDiff_IdenticalSchemas_NonEmpty(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "REAL"},
 					{Name: "y", SQLType: "REAL"},
 				},
 			},
 			"health": {
 				Type:    "integer",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "INTEGER"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "INTEGER"}},
 			},
 		},
 		EntityTypeNames: map[string]bool{"Player": true, "Enemy": true},
@@ -128,7 +128,7 @@ func TestDiff_RemovedComponent_One(t *testing.T) {
 	domain := &DomainSchema{
 		Components: map[string]DomainComponent{
 			"position": {Type: "object", Columns: []DomainColumn{
-				{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+				{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 				{Name: "x", SQLType: "REAL"},
 			}},
 		},
@@ -145,9 +145,9 @@ func TestDiff_RemovedComponent_One(t *testing.T) {
 func TestDiff_RemovedComponent_Multiple(t *testing.T) {
 	domain := &DomainSchema{
 		Components: map[string]DomainComponent{
-			"sprite":   {Type: "string", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT"}}},
-			"health":   {Type: "integer", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "INTEGER"}}},
-			"position": {Type: "object", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}}},
+			"sprite":   {Type: "string", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "TEXT"}}},
+			"health":   {Type: "integer", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "INTEGER"}}},
+			"position": {Type: "object", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}}},
 		},
 		EntityTypeNames: make(map[string]bool),
 	}
@@ -169,7 +169,7 @@ func TestDiff_AddedProperty_Object(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "REAL"},
 				},
 			},
@@ -201,7 +201,7 @@ func TestDiff_AddedProperty_Multiple(t *testing.T) {
 			"stats": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "hp", SQLType: "INTEGER"},
 				},
 			},
@@ -237,7 +237,7 @@ func TestDiff_RemovedProperty_Object(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "REAL"},
 					{Name: "y", SQLType: "REAL"},
 				},
@@ -267,7 +267,7 @@ func TestDiff_RemovedProperty_Multiple(t *testing.T) {
 			"stats": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "hp", SQLType: "INTEGER"},
 					{Name: "name", SQLType: "TEXT"},
 					{Name: "active", SQLType: "BOOLEAN"},
@@ -298,7 +298,7 @@ func TestDiff_ChangedPropertyType_Object(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "TEXT"},
 				},
 			},
@@ -323,7 +323,7 @@ func TestDiff_ChangedPropertyType_Scalar(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"health": {
 				Type:    "string",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "TEXT"}},
 			},
 		},
 		EntityTypeNames: make(map[string]bool),
@@ -347,7 +347,7 @@ func TestDiff_SameSQLType_NoChange(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"health": {
 				Type:    "integer",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "INTEGER"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "INTEGER"}},
 			},
 		},
 		EntityTypeNames: make(map[string]bool),
@@ -373,7 +373,7 @@ func TestDiff_ObjectToScalar_RemoveAdd(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "REAL"},
 					{Name: "y", SQLType: "REAL"},
 				},
@@ -409,7 +409,7 @@ func TestDiff_ScalarToObject_KeepsTheTable(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"marker": {
 				Type:    "string",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "TEXT"}},
 			},
 		},
 		EntityTypeNames: make(map[string]bool),
@@ -436,7 +436,7 @@ func TestDiff_ObjectToScalar_IsStillRemoveAndAdd(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"marker": {
 				Type:    "object",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "x", SQLType: "REAL"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "x", SQLType: "REAL"}},
 			},
 		},
 		EntityTypeNames: make(map[string]bool),
@@ -465,7 +465,7 @@ func TestDiff_AnObjectWhoseOnlyPropertyIsCalledValueIsLeftAlone(t *testing.T) {
 					"probe": {
 						Type: "number", // what InferComponentType guesses, and it is wrong
 						Columns: []DomainColumn{
-							{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+							{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 							{Name: name, SQLType: "REAL"},
 						},
 					},
@@ -493,18 +493,18 @@ func TestDiff_Ordering_MixedChanges(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"health": {
 				Type:    "integer",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "INTEGER"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "INTEGER"}},
 			},
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "REAL"},
 				},
 			},
 			"sprite": {
 				Type:    "string",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "TEXT"}},
 			},
 		},
 		EntityTypeNames: map[string]bool{"Player": true},
@@ -852,7 +852,7 @@ func TestDiff_NilInputs(t *testing.T) {
 	// Only file nil.
 	domain := &DomainSchema{
 		Components: map[string]DomainComponent{
-			"position": {Type: "object", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}}},
+			"position": {Type: "object", Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}}},
 		},
 		EntityTypeNames: map[string]bool{},
 	}
@@ -892,6 +892,18 @@ func assertChanges(t *testing.T, got, want []Change) {
 		}
 		if w.NewType != "" && g.NewType != w.NewType {
 			t.Errorf("changes[%d].NewType = %q, want %q", i, g.NewType, w.NewType)
+		}
+		// The references, compared unconditionally for the kind they belong to.
+		// "Only when the caller filled it in" cannot work here: the value that
+		// says a column references nothing is the empty string, which is the
+		// half of a constraint change most worth asserting.
+		if w.Kind == ChangeChangedConstraint {
+			if g.OldRef != w.OldRef {
+				t.Errorf("changes[%d].OldRef = %q, want %q", i, g.OldRef, w.OldRef)
+			}
+			if g.NewRef != w.NewRef {
+				t.Errorf("changes[%d].NewRef = %q, want %q", i, g.NewRef, w.NewRef)
+			}
 		}
 	}
 }
@@ -945,7 +957,7 @@ func TestDiff_ScalarTypes_AllCovered(t *testing.T) {
 				Components: map[string]DomainComponent{
 					"val": {
 						Type:    tt.dbType,
-						Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: tt.dbSQL}},
+						Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: tt.dbSQL}},
 					},
 				},
 				EntityTypeNames: make(map[string]bool),
@@ -978,15 +990,15 @@ func TestDiff_ScalarTypes_AllCovered(t *testing.T) {
 // exist — a migration that failed and then failed on every subsequent open.
 func TestDiff_AShapeChangeIsRemoveAndAdd(t *testing.T) {
 	entityRefCols := []DomainColumn{
-		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 		{Name: "target_entity_id", SQLType: "INTEGER"},
 	}
 	valueCols := []DomainColumn{
-		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 		{Name: "value", SQLType: "TEXT"},
 	}
 	objectCols := []DomainColumn{
-		{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+		{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 		{Name: "x", SQLType: "INTEGER"},
 	}
 
@@ -1027,7 +1039,7 @@ func TestDiff_AChangeWithinAShapeStaysAColumnChange(t *testing.T) {
 	domain := &DomainSchema{
 		Components: map[string]DomainComponent{
 			"val": {Type: "string", Columns: []DomainColumn{
-				{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+				{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 				{Name: "value", SQLType: "TEXT"},
 			}},
 		},
@@ -1114,7 +1126,7 @@ func TestDiff_ModificationPhase_Sorting(t *testing.T) {
 			"position": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "x", SQLType: "TEXT"}, // TEXT in DB, will be changed to REAL
 				},
 			},
@@ -1196,7 +1208,7 @@ func TestDiff_ScalarComponent_UnknownType(t *testing.T) {
 		Components: map[string]DomainComponent{
 			"mystery": {
 				Type:    "string",
-				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true}, {Name: "value", SQLType: "TEXT"}},
+				Columns: []DomainColumn{{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference}, {Name: "value", SQLType: "TEXT"}},
 			},
 		},
 		EntityTypeNames: make(map[string]bool),
@@ -1348,7 +1360,7 @@ func TestDiff_AFixedColumnLayoutNeedsExactlyItsOneColumn(t *testing.T) {
 			"probe": {
 				Type: "object",
 				Columns: []DomainColumn{
-					{Name: "entity_id", SQLType: "INTEGER", IsPK: true},
+					{Name: "entity_id", SQLType: "INTEGER", IsPK: true, References: EntityReference},
 					{Name: "value", SQLType: "TEXT"},
 					{Name: "extra", SQLType: "TEXT"},
 				},

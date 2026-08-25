@@ -2,7 +2,7 @@ package storage
 
 import (
 	"database/sql"
-	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -257,11 +257,16 @@ func TestSmoke_BackupCreatedBeforeMigration(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store2.Close() })
 
-	// Assert backup file exists.
-	backupPath := path + ".bak.v1"
-	if _, err := os.Stat(backupPath); err != nil {
-		t.Fatalf("backup file %s not found: %v", backupPath, err)
+	// Assert backup file exists. Globbed rather than named: the timestamp that
+	// makes each backup unique is part of the name.
+	found, err := filepath.Glob(path + ".bak.v1-*")
+	if err != nil {
+		t.Fatalf("looking for the backup: %v", err)
 	}
+	if len(found) != 1 {
+		t.Fatalf("backups matching %s.bak.v1-* = %v, want exactly one", path, found)
+	}
+	backupPath := found[0]
 
 	// Assert backup is a valid SQLite database with the pre-migration schema version.
 	bdb, err := sql.Open("sqlite", backupPath)

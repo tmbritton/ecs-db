@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/jsonorder"
@@ -64,8 +65,32 @@ func (g *Generator) Generate(changes []schema.Change) []Statement {
 		return []Statement{}
 	}
 
+	// One rebuild per component, not one per change that wants one.
+	//
+	// genRebuild ignores the change it is handed: it builds the whole table
+	// from the file schema, so two rebuild-causing changes on one component
+	// produced two identical four-statement sequences. That happened to work —
+	// the second copied from a table already in the new shape — and became
+	// common once a constraint could ask for a rebuild too, since a stale
+	// database has a constraint change and a property change on the same
+	// component.
+	// The reasons are collected first so the one rebuild that survives can
+	// carry all of them. Dropping the later sequences would otherwise drop
+	// what they said, and what a rebuild is for is the whole content of the
+	// confirmation dialog it appears in.
+	reasons := rebuildReasons(changes)
+
 	stmts := make([]Statement, 0)
+	rebuilt := map[string]bool{}
 	for _, change := range changes {
+		if causesRebuild(change.Kind) {
+			if rebuilt[change.Component] {
+				continue
+			}
+			rebuilt[change.Component] = true
+			stmts = append(stmts, g.genRebuildFor(change, reasons[change.Component])...)
+			continue
+		}
 		stmts = append(stmts, g.genChange(change)...)
 	}
 
@@ -89,10 +114,6 @@ func (g *Generator) genChange(c schema.Change) []Statement {
 		return g.genAddComponent(c)
 	case schema.ChangeAddedProperty:
 		return g.genAddProperty(c)
-	case schema.ChangeRemovedProperty:
-		return g.genRemoveProperty(c)
-	case schema.ChangedPropertyType:
-		return g.genChangePropertyType(c)
 	case schema.ChangeRemovedComponent:
 		return g.genRemoveComponent(c)
 	// Entity type changes produce no DDL.
@@ -193,8 +214,13 @@ func (g *Generator) genRemoveComponent(c schema.Change) []Statement {
 	}}
 }
 
-// genRemoveProperty produces a table-rebuild sequence to drop a column.
-func (g *Generator) genRemoveProperty(c schema.Change) []Statement {
+// genRebuildFor produces the rebuild sequence answering one change, carrying
+// the reasons every change that wanted this table rebuilt gave.
+//
+// A dropped column, a retyped column and a redeclared foreign key all need the
+// same thing, because SQLite has no ALTER for any of them: the table is built
+// again from the file schema and the rows copied across.
+func (g *Generator) genRebuildFor(c schema.Change, reason string) []Statement {
 	if g.domain == nil {
 		return []Statement{{
 			Kind:        "error",
@@ -203,20 +229,39 @@ func (g *Generator) genRemoveProperty(c schema.Change) []Statement {
 			Description: "ERROR: cannot rebuild comp_" + c.Component + " — no domain schema available",
 		}}
 	}
-	return g.genRebuild(c.Component, &c)
+	return g.genRebuild(c.Component, reason)
 }
 
-// genChangePropertyType produces a table-rebuild sequence to change a column's type.
-func (g *Generator) genChangePropertyType(c schema.Change) []Statement {
-	if g.domain == nil {
-		return []Statement{{
-			Kind:        "error",
-			Destructive: true,
-			Component:   c.Component,
-			Description: "ERROR: cannot rebuild comp_" + c.Component + " — no domain schema available",
-		}}
+// causesRebuild reports whether a change is answered with a table rebuild —
+// which is to say, with the same four statements as any other such change on
+// the same component.
+func causesRebuild(k schema.ChangeKind) bool {
+	switch k {
+	case schema.ChangeRemovedProperty, schema.ChangedPropertyType, schema.ChangeChangedConstraint:
+		return true
+	default:
+		return false
 	}
-	return g.genRebuild(c.Component, &c)
+}
+
+// rebuildReasons joins, per component, what each change that wants a rebuild
+// had to say for itself. Changes with nothing to say contribute nothing, so a
+// component whose rebuild needs no explaining keeps the description it had.
+func rebuildReasons(changes []schema.Change) map[string]string {
+	byComp := map[string][]string{}
+	for _, c := range changes {
+		if !causesRebuild(c.Kind) || c.Reason == "" {
+			continue
+		}
+		if !slices.Contains(byComp[c.Component], c.Reason) {
+			byComp[c.Component] = append(byComp[c.Component], c.Reason)
+		}
+	}
+	out := make(map[string]string, len(byComp))
+	for comp, reasons := range byComp {
+		out[comp] = strings.Join(reasons, "; ")
+	}
+	return out
 }
 
 // genRebuild generates the table-rebuild SQL sequence:
@@ -227,7 +272,7 @@ func (g *Generator) genChangePropertyType(c schema.Change) []Statement {
 //	DROP TABLE comp_<name>;
 //	ALTER TABLE comp_<name>_new RENAME TO comp_<name>;
 //	PRAGMA foreign_keys = ON;
-func (g *Generator) genRebuild(compName string, change *schema.Change) []Statement {
+func (g *Generator) genRebuild(compName, reason string) []Statement {
 	// Look up file component definition.
 	comp, canonicalName := schema.ComponentByName(g.file, compName)
 	if canonicalName == "" {
@@ -277,7 +322,7 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		Kind:        "rebuild_table",
 		Destructive: true,
 		Component:   compName,
-		Description: "Create temp table " + tempName,
+		Description: describe("Create temp table "+tempName, reason),
 	})
 
 	// 2. INSERT INTO comp_<name>_new (cols) SELECT cols FROM comp_<name>
@@ -298,7 +343,7 @@ func (g *Generator) genRebuild(compName string, change *schema.Change) []Stateme
 		Kind:        "rebuild_table",
 		Destructive: true,
 		Component:   compName,
-		Description: "Drop old table " + tableName,
+		Description: describe("Drop old table "+tableName, reason),
 	})
 
 	// 4. ALTER TABLE comp_<name>_new RENAME TO comp_<name>

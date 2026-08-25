@@ -41,16 +41,10 @@ templ migrationPanel(data Data) {
 					Nothing pending — the database already has this shape.
 				</p>
 			} else {
-				if !data.Migration.WillMigrate() {
-					<p class="migration__inert" role="alert" data-testid="migration-inert">
-						The engine will not run any of this. It migrates only when
-						<span class="mono">schemaVersion</span> differs from the
-						<span class="mono">v{ itoa(data.Migration.DBVersion) }</span> the database
-						records, and this edit leaves it at
-						<span class="mono">v{ itoa(data.Migration.FileVersion) }</span>. Bump it to
-						apply these changes.
-					</p>
-				}
+				// There was a warning here that the engine would run none of
+				// this unless schemaVersion moved. It no longer would be true:
+				// the engine migrates on structure, so a list with anything in
+				// it is a list the engine will run on its next start.
 				@components.StatementList(data.Migration.Statements, "migration-statement")
 			}
 			if len(data.Migration.Problems) > 0 {

@@ -194,24 +194,43 @@ func isMemoryDB(path string) bool {
 	return path == "" || strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory")
 }
 
-// checkAndMigrate reads the stored version. If it matches the config schema
-// version, it returns nil immediately. On mismatch, it optionally backs up
-// the database (when cfg.BackupRetention > 0) then runs the migration runner.
+// checkAndMigrate works out what the database needs and, if it needs anything,
+// backs it up and does it.
+//
+// It used to return the moment the stored schema_version equalled the file's,
+// without introspecting at all — which made schemaVersion the only signal that
+// a migration was wanted, and it is the wrong one. The generator's output
+// changes when the *engine* changes: Story 9 put ON DELETE CASCADE on every
+// reference to an entity, and no schema file moved, so no database ever got it.
+// The same gate is why a schema edit saved without a version bump did nothing,
+// which Forge had to warn about rather than rely on.
+//
+// The version is still read first, for the clear errors it gives on a meta row
+// that is missing or corrupt; it just no longer decides. What decides is the
+// plan, which is empty for a database that already matches — so the ordinary
+// open still does no work beyond introspecting.
 func checkAndMigrate(db *sql.DB, dbPath string, cfg StoreConfig) error {
-	err := checkSchemaVersion(db, cfg.Schema.SchemaVersion)
-	if err == nil {
-		return nil // versions match, nothing to do
+	if err := checkSchemaVersion(db, cfg.Schema.SchemaVersion); err != nil {
+		// A version mismatch is a thing to migrate, not a thing to refuse.
+		// Anything else — no meta row, an unparseable one — is fatal.
+		var mismatch *SchemaVersionMismatchError
+		if !errors.As(err, &mismatch) {
+			return err
+		}
 	}
 
-	// Only proceed if the error is a version mismatch; other errors are fatal.
-	var mismatch *SchemaVersionMismatchError
-	if !errors.As(err, &mismatch) {
+	runner := NewMigrationRunner(db, cfg.Schema, cfg.MigrationPolicy, cfg.Logger)
+	plan, err := runner.Plan()
+	if err != nil {
 		return err
+	}
+	if plan.Empty() {
+		return nil
 	}
 
 	// Back up before migration so the user has a restore point.
 	if cfg.BackupRetention > 0 && !isMemoryDB(dbPath) {
-		backupPath, backupErr := backupDatabase(db, dbPath, mismatch.DBVersion)
+		backupPath, backupErr := backupDatabase(db, dbPath, plan.FromVersion)
 		if backupErr != nil {
 			cfg.Logger.Warnf("backup failed (migration will proceed): %v", backupErr)
 		} else {
@@ -220,9 +239,7 @@ func checkAndMigrate(db *sql.DB, dbPath string, cfg StoreConfig) error {
 		}
 	}
 
-	// Run the migration pipeline.
-	runner := NewMigrationRunner(db, cfg.Schema, cfg.MigrationPolicy, cfg.Logger)
-	return runner.Run()
+	return runner.Apply(plan)
 }
 
 // bootstrapDatabase creates every table and writes the initial meta rows in one

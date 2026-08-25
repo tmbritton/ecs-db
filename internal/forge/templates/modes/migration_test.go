@@ -106,28 +106,30 @@ func TestMigrationPanel_NothingPendingIsItsOwnState(t *testing.T) {
 	if strings.Contains(got, `data-testid="migration-unavailable"`) {
 		t.Error("a checked preview rendered as unavailable")
 	}
-	if strings.Contains(got, `data-testid="migration-inert"`) {
-		t.Error("the version warning showed with nothing pending to warn about")
-	}
 }
 
-// The engine migrates only when schemaVersion changes. Statements it will
-// never run are a correct list and a misleading answer.
-func TestMigrationPanel_WarnsWhenTheEngineWillNotAct(t *testing.T) {
-	p := previewFixture()
-	p.FileVersion = p.DBVersion
-	got := renderMode(t, withPreview(p))
+// The panel used to warn that the engine would run none of this unless
+// schemaVersion moved, and Story 11 made the engine run it either way. What is
+// checked is that the list reads the same at both versions.
+//
+// Deliberately not "the migration-inert warning is absent": that testid is in
+// no template any more, so an assertion about it would pass whatever the panel
+// rendered.
+func TestMigrationPanel_ListsStatementsAtEitherVersion(t *testing.T) {
+	unbumped := previewFixture()
+	unbumped.FileVersion = unbumped.DBVersion
 
-	if !strings.Contains(got, `data-testid="migration-inert"`) {
-		t.Fatal("no warning that the engine will skip these changes")
-	}
-	if !strings.Contains(got, "schemaVersion") {
-		t.Error("the warning does not name what has to change")
-	}
-
-	bumped := renderMode(t, withPreview(previewFixture()))
-	if strings.Contains(bumped, `data-testid="migration-inert"`) {
-		t.Error("the warning showed for a change the engine will run")
+	for name, p := range map[string]migration.Preview{
+		"version left alone": unbumped,
+		"version bumped":     previewFixture(),
+	} {
+		got := renderMode(t, withPreview(p))
+		if n := strings.Count(got, `data-testid="migration-statement"`); n != len(p.Statements) {
+			t.Errorf("%s: the panel lists %d of %d statements", name, n, len(p.Statements))
+		}
+		if strings.Contains(got, `data-testid="migration-none"`) {
+			t.Errorf("%s: a plan with statements rendered as nothing pending", name)
+		}
 	}
 }
 

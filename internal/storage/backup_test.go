@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
@@ -55,7 +56,7 @@ func TestBackupDatabase(t *testing.T) {
 			version: 7,
 		},
 		{
-			name:      "overwrites pre-existing backup",
+			name:      "keeps a pre-existing backup at the same version",
 			version:   1,
 			preExist:  true,
 			wantValid: true,
@@ -82,9 +83,12 @@ func TestBackupDatabase(t *testing.T) {
 			db := openFileDB(t, srcPath)
 			bootstrapMigrationDB(t, db, emptySchema)
 
+			// A backup that is already there. It used to be deleted before
+			// writing, which is what made a second migration at one version
+			// destroy the first one's restore point.
+			preExisting := fmt.Sprintf("%s.bak.v%d-20200101T000000.000000000Z", destPath, tt.version)
 			if tt.preExist {
-				p := fmt.Sprintf("%s.bak.v%d", destPath, tt.version)
-				if err := os.WriteFile(p, []byte("old content"), 0o644); err != nil {
+				if err := os.WriteFile(preExisting, []byte("old content"), 0o644); err != nil {
 					t.Fatalf("pre-creating backup file: %v", err)
 				}
 			}
@@ -100,9 +104,34 @@ func TestBackupDatabase(t *testing.T) {
 				t.Fatalf("backupDatabase: %v", err)
 			}
 
-			wantPath := fmt.Sprintf("%s.bak.v%d", destPath, tt.version)
-			if got != wantPath {
-				t.Errorf("backup path = %q, want %q", got, wantPath)
+			// The name carries the version and then a timestamp, so it is
+			// checked in the two parts that mean something rather than as a
+			// literal. The timestamp is what stops a second migration at the
+			// same version from overwriting the first one's restore point, so
+			// it has to be there and it has to parse.
+			wantPrefix := fmt.Sprintf("%s.bak.v%d-", destPath, tt.version)
+			if !strings.HasPrefix(got, wantPrefix) {
+				t.Errorf("backup path = %q, want it to start with %q", got, wantPrefix)
+			}
+			v, stamp, ok := parseBackupSuffix(strings.TrimPrefix(got, destPath+".bak.v"))
+			if !ok {
+				t.Fatalf("backup path %q does not parse as a backup name", got)
+			}
+			if v != tt.version {
+				t.Errorf("backup names version %d, want %d", v, tt.version)
+			}
+			if _, err := time.Parse("20060102T150405.000000000Z", stamp); err != nil {
+				t.Errorf("backup timestamp %q does not parse: %v", stamp, err)
+			}
+
+			if tt.preExist {
+				kept, err := os.ReadFile(preExisting)
+				if err != nil {
+					t.Fatalf("the backup that was already there is gone: %v", err)
+				}
+				if string(kept) != "old content" {
+					t.Error("an existing backup was overwritten by a new one at the same version")
+				}
 			}
 
 			if tt.wantValid {

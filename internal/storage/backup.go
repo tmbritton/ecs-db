@@ -8,15 +8,29 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// backupDatabase creates a copy of the database at {dbPath}.bak.v{version}
+// backupDatabase copies the database to {dbPath}.bak.v{version}-{timestamp}
 // using VACUUM INTO, which flushes WAL and produces a standalone valid SQLite
-// file. Any pre-existing backup at that path is removed first.
-// Returns the backup path on success.
+// file. Returns the backup path on success.
+//
+// The timestamp is in the name because the version is no longer unique. Backups
+// used to be taken only when a migration moved the database from one
+// schemaVersion to another, so ".bak.v3" meant "the database as it last was at
+// v3" and there could only be one — and the old name was deleted before writing
+// to make that true. Since Story 11 the engine also migrates at a constant
+// version, so a second repair at v3 overwrote the restore point the first one
+// had made: delete a component without bumping the version and the backup holds
+// its table, until any later migration replaces that backup with one that does
+// not. Retention could not help, because it counts version-named files and
+// there was only ever one.
+//
+// Sub-second resolution is deliberate: two migrations inside one second is not
+// a realistic engine start, but it is an entirely realistic test.
 func backupDatabase(db *sql.DB, dbPath string, version int) (string, error) {
-	backupPath := fmt.Sprintf("%s.bak.v%d", dbPath, version)
-	_ = os.Remove(backupPath)
+	backupPath := fmt.Sprintf("%s.bak.v%d-%s", dbPath, version,
+		time.Now().UTC().Format("20060102T150405.000000000Z"))
 	// Escape single quotes in the path to avoid SQL injection.
 	escaped := strings.ReplaceAll(backupPath, "'", "''")
 	if _, err := db.Exec("VACUUM INTO '" + escaped + "'"); err != nil {
@@ -55,22 +69,35 @@ func pruneBackups(dbPath string, retention int, logger MigrationLogger) {
 		return
 	}
 
+	// Oldest first: by version, then by the timestamp within a version.
+	//
+	// The version is compared as a number, not as text. Sorting the whole name
+	// lexically would put ".bak.v10" before ".bak.v9", and the oldest backups
+	// are the ones this deletes. The timestamp is written in a format that
+	// sorts the way it reads, so comparing it as text is comparing it as time.
+	//
+	// Names that do not parse are skipped rather than deleted. A file this
+	// function does not understand is not one it should remove.
 	type backup struct {
 		path    string
 		version int
+		stamp   string
 	}
 	prefix := dbPath + ".bak.v"
 	backups := make([]backup, 0, len(matches))
 	for _, m := range matches {
-		vStr := strings.TrimPrefix(m, prefix)
-		v, err := strconv.Atoi(vStr)
-		if err != nil {
-			continue // skip non-numeric suffixes
+		v, stamp, ok := parseBackupSuffix(strings.TrimPrefix(m, prefix))
+		if !ok {
+			continue
 		}
-		backups = append(backups, backup{path: m, version: v})
+		backups = append(backups, backup{path: m, version: v, stamp: stamp})
 	}
-
-	sort.Slice(backups, func(i, j int) bool { return backups[i].version < backups[j].version })
+	sort.Slice(backups, func(i, j int) bool {
+		if backups[i].version != backups[j].version {
+			return backups[i].version < backups[j].version
+		}
+		return backups[i].stamp < backups[j].stamp
+	})
 
 	if len(backups) <= retention {
 		return
@@ -80,6 +107,25 @@ func pruneBackups(dbPath string, retention int, logger MigrationLogger) {
 			logger.Warnf("backup pruning: failed to remove %s: %v", b.path, err)
 		}
 	}
+}
+
+// parseBackupSuffix splits the "3-20260825T101500.000000000Z" that follows
+// ".bak.v" into its version and its timestamp.
+//
+// A bare version with no timestamp is accepted, with an empty stamp that sorts
+// before every real one: backups written before the timestamp was added are
+// still backups, and pruning has to be able to remove them rather than keeping
+// them forever alongside the ones it understands.
+func parseBackupSuffix(suffix string) (version int, stamp string, ok bool) {
+	digits := suffix
+	if i := strings.IndexByte(suffix, '-'); i >= 0 {
+		digits, stamp = suffix[:i], suffix[i+1:]
+	}
+	v, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, "", false
+	}
+	return v, stamp, true
 }
 
 // globEscape quotes the characters filepath.Match treats as syntax, so a

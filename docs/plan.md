@@ -81,6 +81,14 @@ Establish `schema.json` as the declarative source of truth for components and en
   - A statement the generator refused was committed around, because its SQL was empty and `tx.Exec("")` succeeds
   - Destructive statements are warnings, and the confirmation says the shape changed rather than just naming a drop
 
+- [x] **A database is repaired when the generator changes, not only when the version does** — foreign keys are introspected and diffed, and a constraint that differs from what the generator would emit is answered with a table rebuild.
+  - Two gates stood between "the generator changed" and "the table is rebuilt": `checkAndMigrate` returned the moment `meta.schema_version` matched the file's, and introspection never read `pragma_foreign_key_list`
+  - So Story 9's cascade reached no existing database, and a schema edit saved without a version bump did nothing — which Forge had to warn about rather than rely on
+  - One statement of what a reference is: `schema.EntityReference`, written in the form the pragma reports, with the generator's DDL derived from it and a test building a real table for every component and property type
+  - `MigrationRunner` splits into `Plan` and `Apply`, so the backup happens between deciding there is work and doing it; a plan is empty on statements rather than changes, because an entity-less database reports every entity type as new
+  - One rebuild per component rather than one per change that wants one, carrying every reason
+  - Found by review: `LIKE 'comp_%'` has an unescaped wildcard, so a table merely *starting* with "comp" made the migration repeat on every open forever; and `.bak.v{version}` is no longer unique, so a second repair was overwriting the first one's restore point
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.

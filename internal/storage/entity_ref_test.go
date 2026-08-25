@@ -218,88 +218,10 @@ func TestDeleteEntity_APropertyReferenceTakesItsWholeComponent(t *testing.T) {
 	}
 }
 
-// What an existing database gets, which is nothing — and it is worse for the
-// property form than for the component form.
-//
-// This story changed generated DDL without changing any schema, and the
-// migration runner decides what to do by diffing the schema in the file against
-// the shape introspected from the database. Constraints are not in that shape:
-// IntrospectComponentTable never reads pragma_foreign_key_list, so a diff cannot
-// see a foreign key that changed and cannot ask for a rebuild on account of one.
-// A migration for some *other* reason runs right past it.
-//
-// So a database built before this change keeps ON DELETE NO ACTION on a
-// component of type entity-ref — a refusal — and keeps **no foreign key at all**
-// on an entity-ref property, which is the worse half: a dangling reference to an
-// entity that no longer exists, silently, which is the behaviour this whole epic
-// set out to remove.
-//
-// Nothing is broken by that today: no shipped schema declares an entity-ref in
-// either form, so no database has such a column. This test is here to make the
-// gap visible rather than to accept it quietly. Closing it needs foreign-key
-// introspection and a rule that turns a constraint mismatch into a rebuild.
-func TestMigration_DoesNotNoticeAConstraintThatOnlyTheGeneratorChanged(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "w.sqlite")
-
-	// A database built the old way: both entity-ref forms with the constraints
-	// they used to get.
-	store, err := NewSQLiteStore(path, refSchema(), "")
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	for _, stmt := range []string{
-		`DROP TABLE comp_carrier`,
-		`CREATE TABLE comp_carrier (
-			entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
-			target_entity_id INTEGER NOT NULL REFERENCES entities(id))`,
-		`DROP TABLE comp_holder`,
-		`CREATE TABLE comp_holder (
-			entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
-			owner INTEGER NOT NULL,
-			hp INTEGER NOT NULL)`,
-	} {
-		if _, err := store.DB().Exec(stmt); err != nil {
-			t.Fatalf("building the old shape: %v", err)
-		}
-	}
-	_ = store.Close()
-
-	// A real migration, for an unrelated reason: the version moves and a
-	// property is added elsewhere, so the runner does not take its early
-	// "versions match" return. It still does not look at a constraint.
-	next := refSchema()
-	next.SchemaVersion = 2
-	pos := next.Components["Position"]
-	pos.Properties = map[string]schema.Property{
-		"x": {Type: schema.PropertyTypeInteger},
-		"y": {Type: schema.PropertyTypeInteger},
-	}
-	next.Components["Position"] = pos
-
-	migrated, err := NewSQLiteStore(path, next, "")
-	if err != nil {
-		t.Fatalf("migrating: %v", err)
-	}
-	defer func() { _ = migrated.Close() }()
-
-	var version int
-	if err := migrated.DB().QueryRow(
-		`SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
-		t.Fatalf("reading the version: %v", err)
-	}
-	if version != 2 {
-		t.Fatalf("schema_version = %d — no migration ran, so this proves nothing", version)
-	}
-
-	if got := foreignKeys(t, migrated.DB(), "comp_carrier"); !contains(got, "target_entity_id ON DELETE NO ACTION") {
-		t.Errorf("comp_carrier has %v — if this now cascades, the gap this test "+
-			"documents has been closed and the test should go", got)
-	}
-	if got := foreignKeys(t, migrated.DB(), "comp_holder"); contains(got, "owner ON DELETE CASCADE") {
-		t.Errorf("comp_holder has %v — if the property form is now repaired too, "+
-			"this test should go", got)
-	}
-}
+// The gap this file used to pin — an existing database keeping a constraint
+// only the generator had changed — is closed by Story 11, whose tests are in
+// reference_test.go. TestMigration_DoesNotNoticeAConstraintThatOnlyTheGenerator
+// Changed lived here and said to delete it when this became true.
 
 // A table that arrives by migration has to carry what a created one carries.
 // These are the paths where the constraint used to go missing: a rebuild

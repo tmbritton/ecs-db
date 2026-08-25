@@ -191,15 +191,24 @@ test("with no database the panel says so rather than showing an empty list", asy
   await expect(statements(page)).toHaveCount(0);
 });
 
-// The engine migrates only when schemaVersion changes, so a pending change with
-// the version untouched is a change it will silently skip.
-test("the panel says when the engine will not act without a version bump", async ({ page }) => {
+// The engine migrates on structure, not only on a version bump — Story 11
+// opened that gate. The panel used to carry a warning that these statements
+// would be skipped until schemaVersion moved, and to stop listing them as
+// pending; both are gone, so the list reads the same at either version.
+//
+// Deliberately not "the migration-inert warning is absent": that testid is not
+// in any template any more, so an assertion about it would pass whatever the
+// panel did. What is checked is the list that is still there.
+test("the panel lists pending statements with or without a version bump", async ({ page }) => {
   await openSchema(page);
   await byTestId(page, "add-component").click();
   await expect(statements(page).first()).toBeVisible({ timeout: 10_000 });
 
-  await expect(byTestId(page, "migration-inert")).toBeVisible();
+  const before = await statements(page).count();
+  await expect(byTestId(page, "migration-none")).toHaveCount(0);
 
   await byTestId(page, "schema-version").click();
-  await expect(byTestId(page, "migration-inert")).toHaveCount(0, { timeout: 10_000 });
+  await expect(statements(page).first()).toBeVisible({ timeout: 10_000 });
+  await expect(statements(page)).toHaveCount(before);
+  await expect(byTestId(page, "migration-none")).toHaveCount(0);
 });

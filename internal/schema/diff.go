@@ -25,6 +25,13 @@ type DomainColumn struct {
 	Name    string
 	SQLType string
 	IsPK    bool
+	// References is the foreign key on this column as PRAGMA
+	// foreign_key_list reports it — "entities(id) ON DELETE CASCADE" — and
+	// NoReference when the column has none. A foreign key with no ON DELETE
+	// clause reads as "... ON DELETE NO ACTION", which is a different answer
+	// from having no foreign key: the first refuses the delete, the second
+	// leaves a dangling reference.
+	References string
 }
 
 // ChangeKind identifies the category of a schema change.
@@ -36,6 +43,7 @@ const (
 	ChangeAddedProperty     ChangeKind = "added_property"
 	ChangeRemovedProperty   ChangeKind = "removed_property"
 	ChangedPropertyType     ChangeKind = "changed_property_type"
+	ChangeChangedConstraint ChangeKind = "changed_constraint"
 	ChangeAddedEntityType   ChangeKind = "added_entity_type"
 	ChangeRemovedEntityType ChangeKind = "removed_entity_type"
 	ChangeChangedEntityType ChangeKind = "changed_entity_type"
@@ -57,6 +65,12 @@ type Change struct {
 	// know that their data cannot come across rather than that they appear to
 	// have deleted something they did not.
 	Reason string
+	// OldRef and NewRef carry the foreign key for ChangeChangedConstraint, in
+	// the form DomainColumn.References uses. Not OldType/NewType: a constraint
+	// change leaves the SQL type alone, so those would both say INTEGER and
+	// describe the change as nothing.
+	OldRef string
+	NewRef string
 	OldET  *EntityType // previous entity type spec (for changed_entity_type)
 	NewET  *EntityType // new entity type spec (for changed_entity_type)
 }
@@ -67,7 +81,7 @@ func (c Change) phase() int {
 	switch c.Kind {
 	case ChangeAddedComponent, ChangeAddedProperty, ChangeAddedEntityType:
 		return 1
-	case ChangedPropertyType, ChangeChangedEntityType:
+	case ChangedPropertyType, ChangeChangedConstraint, ChangeChangedEntityType:
 		return 2
 	case ChangeRemovedComponent, ChangeRemovedProperty, ChangeRemovedEntityType:
 		return 3
@@ -202,6 +216,7 @@ func Diff(domain *DomainSchema, file, oldFile *DatabaseSchema) []Change {
 		} else {
 			diffScalarComponent(name, dbComp.Columns, fileComp, &changes)
 		}
+		diffReferences(name, dbComp.Columns, fileComp, &changes)
 	}
 
 	// ── Entity type diff (names against DB) ──────────────────────────
@@ -341,6 +356,62 @@ func diffScalarComponent(compName string, dbCols []DomainColumn, fileComp Compon
 			})
 		}
 		return
+	}
+}
+
+// diffReferences compares the foreign key on each column against the one the
+// generator would emit for it.
+//
+// This is the half of a table's shape introspection used not to read at all.
+// Story 9 changed what the generator emits without changing any schema file, so
+// every database built before it kept a reference that refuses where the file
+// now says cascade, and — for a reference declared as an object property — no
+// foreign key whatsoever. Neither is expressible as a property type change, and
+// a diff that cannot state a difference cannot ask for it to be repaired.
+//
+// Only columns the file declares are compared. One it does not is a removed
+// property, which diffObjectProperties has already said, and saying it twice
+// would mean two rebuilds of one table.
+func diffReferences(compName string, dbCols []DomainColumn, fileComp Component, changes *[]Change) {
+	want := ColumnReferences(fileComp)
+	for _, c := range dbCols {
+		name := strings.ToLower(c.Name)
+		wantRef, declared := want[name]
+		if !declared || c.References == wantRef {
+			continue
+		}
+		*changes = append(*changes, Change{
+			Kind:      ChangeChangedConstraint,
+			Component: compName,
+			Property:  name,
+			OldRef:    c.References,
+			NewRef:    wantRef,
+			Reason:    referenceReason(name, c.References, wantRef),
+		})
+	}
+}
+
+// referenceReason says what the change means, because the constraint text on
+// its own does not. Somebody reading a confirmation dialog is deciding whether
+// to let a table be rebuilt, and "owner gains a foreign key it never had" is
+// the sentence that answers it.
+//
+// The column is named because a rebuild carries the reasons of every change
+// that wanted it, deduplicated — so a sentence with no column in it would
+// collapse three columns gaining a foreign key into one line saying nothing
+// about which, or how many.
+func referenceReason(column, old, want string) string {
+	switch {
+	case old == NoReference:
+		return fmt.Sprintf("%s gains a foreign key it never had, so a reference to a deleted entity cannot be left behind", column)
+	case want == NoReference:
+		// Deliberately not "it is no longer a reference to an entity". The old
+		// key can point anywhere — a hand-edited table can reference any table
+		// — and describing a foreign key to something else as an entity
+		// reference that ended is a sentence about a thing that never was.
+		return fmt.Sprintf("%s loses its foreign key to %s", column, old)
+	default:
+		return fmt.Sprintf("%s changes its foreign key from %q to %q", column, old, want)
 	}
 }
 

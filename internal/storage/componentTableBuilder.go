@@ -94,7 +94,13 @@ func propertySQLType(p schema.Property) string {
 //
 // ddlgen's ALTER TABLE path composes its own clause from this constant rather
 // than using entityRefColumnType, because it needs the nullability split below.
-const entityRefReference = "REFERENCES entities(id) ON DELETE CASCADE"
+// The text is built from schema.EntityReference rather than written out again,
+// so the constraint the generator emits and the one the diff expects to find
+// cannot drift apart. schema owns the statement because the diff lives there
+// and cannot import storage; the "REFERENCES" keyword is DDL, so it is added
+// here. TestReferences_TheDiffExpectsWhatTheGeneratorEmits builds a real table
+// for every type and checks the two ends against each other.
+const entityRefReference = "REFERENCES " + schema.EntityReference
 
 // entityRefColumnType is the whole column for a component whose *type* is a
 // reference. NOT NULL, because the row is nothing else: a Carrier that points

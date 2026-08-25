@@ -8,16 +8,19 @@ import (
 	"github.com/tmbritton/ecs-db/internal/storage"
 )
 
-// The engine only migrates when the database's recorded schema_version differs
-// from schema.json's. storage.checkAndMigrate returns early when they match,
-// so an edit saved without a version bump is never applied — the statements
-// this package generates are real, and the engine will not run any of them.
+// The engine migrates on structure, not only on a version bump.
+//
+// It used to do the opposite — storage.checkAndMigrate returned the moment the
+// stored schema_version equalled the file's — and this panel had to warn that
+// the statements it was showing would not be run. Story 11 opened that gate,
+// because the generator's output also changes when the engine changes, and no
+// schema file moves when it does.
 //
 // This test exists because the preview makes a claim about another package's
 // behaviour, and a claim like that has to be checked against the code rather
-// than read off it. If the engine ever migrates on structure alone, this fails
-// and the panel's wording is wrong.
-func TestEngine_SkipsMigrationWhenTheVersionIsUnchanged(t *testing.T) {
+// than read off it. If the engine ever goes back to needing a version bump,
+// this fails and the panel is wrong again.
+func TestEngine_MigratesWhenOnlyTheStructureChanged(t *testing.T) {
 	path := bootstrap(t, built())
 
 	edited := built() // same SchemaVersion: 3
@@ -26,20 +29,30 @@ func TestEngine_SkipsMigrationWhenTheVersionIsUnchanged(t *testing.T) {
 	comp.PropertyOrder = append(comp.PropertyOrder, "z")
 	edited.Components["Position"] = comp
 
-	// The preview says there is work to do.
 	if p := Check(path, edited, built()); len(p.Statements) == 0 {
 		t.Fatal("the preview found no pending change to test against")
 	}
 
 	reopen(t, path, edited)
 
-	if columnExists(t, path, "comp_position", "z") {
-		t.Fatal("the engine migrated without a version bump — the panel's warning is now wrong")
+	if !columnExists(t, path, "comp_position", "z") {
+		t.Fatal("the engine did not apply an edit saved without a version bump")
 	}
 }
 
-// With the version bumped, the same edit is applied. Together these two pin
-// the difference the panel reports.
+// A database that already matches is left alone — the other half of the same
+// claim, and the one that stops every open from rebuilding every table.
+func TestEngine_LeavesAMatchingDatabaseAlone(t *testing.T) {
+	path := bootstrap(t, built())
+
+	if p := Check(path, built(), built()); len(p.Statements) != 0 {
+		t.Errorf("a database matching its schema has %d pending statement(s): %+v",
+			len(p.Statements), p.Statements)
+	}
+}
+
+// With the version bumped, the same edit is applied. Together these pin the
+// difference the panel reports.
 func TestEngine_MigratesWhenTheVersionIsBumped(t *testing.T) {
 	path := bootstrap(t, built())
 

@@ -206,8 +206,6 @@ func confirmTitle(p migration.Preview) string {
 	return "This save destroys data"
 }
 
-func itoa(n int) string { return strconv.Itoa(n) }
-
 func boolAttr(b bool) string {
 	if b {
 		return "true"

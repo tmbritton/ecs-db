@@ -333,9 +333,14 @@ func TestCheck_PreservesStatementOrder(t *testing.T) {
 	}
 }
 
-// The version gate, from the preview's side. TestEngine_* above proves the
-// engine behaves this way; these pin that the preview reports it.
-func TestCheck_ReportsWhetherTheEngineWillActAtAll(t *testing.T) {
+// What the engine will act on, from the preview's side. TestEngine_* above
+// proves the engine behaves this way; these pin that the preview reports it.
+//
+// There was a Preview.WillMigrate here, which existed only because the engine
+// used to need a version bump. Once it stopped needing one, the method said
+// "there is something to run", which is what an empty statement list already
+// says — so it went, along with the two templates that branched on it.
+func TestCheck_ReportsWhatTheEngineWillRun(t *testing.T) {
 	db := bootstrap(t, built())
 
 	withColumn := func(v int) schema.DatabaseSchema {
@@ -348,17 +353,23 @@ func TestCheck_ReportsWhetherTheEngineWillActAtAll(t *testing.T) {
 		return s
 	}
 
+	// Statements without a version bump are listed, and the engine runs them
+	// now, which it did not before Story 11 opened its version gate.
 	unbumped := Check(db, withColumn(built().SchemaVersion), built())
 	if len(unbumped.Statements) == 0 {
 		t.Fatal("no statements to reason about")
 	}
-	if unbumped.WillMigrate() {
-		t.Error("changes saved without a version bump were reported as pending; the engine skips them")
+
+	// A database that matches has nothing pending, whatever the version says.
+	if matching := Check(db, built(), built()); len(matching.Statements) != 0 {
+		t.Errorf("a matching database has %d pending statement(s): %+v",
+			len(matching.Statements), matching.Statements)
 	}
 
 	bumped := Check(db, withColumn(built().SchemaVersion+1), built())
-	if !bumped.WillMigrate() {
-		t.Error("changes with a version bump were not reported as pending")
+	if len(bumped.Statements) != len(unbumped.Statements) {
+		t.Errorf("the same edit lists %d statements bumped and %d unbumped",
+			len(bumped.Statements), len(unbumped.Statements))
 	}
 	if bumped.DBVersion != built().SchemaVersion {
 		t.Errorf("DBVersion = %d, want %d", bumped.DBVersion, built().SchemaVersion)

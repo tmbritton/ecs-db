@@ -222,27 +222,28 @@ func TestSave_WithNoDatabase_IsNotHeld(t *testing.T) {
 	}
 }
 
-// The panel reports what the engine will actually do. Without a version bump
-// the engine skips the migration entirely, and a list of statements it will
-// never run is a correct answer to the wrong question.
-func TestMigrationPanel_SaysWhenTheEngineWillNotAct(t *testing.T) {
+// The panel reports what the engine will actually do — which, since Story 11,
+// is to run these statements whether or not schemaVersion moved. The panel used
+// to carry a warning that it would not, and that warning would now be a lie.
+func TestMigrationPanel_ListsAnEditSavedAtTheSameVersion(t *testing.T) {
 	srv, _, _, _ := migrationServer(t)
 
 	post(t, srv, "/forge/schema/field?component=Position&add=z")
 
+	// Counted at both versions rather than asserting the absence of the
+	// warning that used to be here: its testid is in no template any more, so
+	// looking for it would pass whatever the panel did.
 	_, body := get(t, srv, "/forge/schema?component=Position")
-	if !strings.Contains(body, `data-testid="migration-statement"`) {
+	before := strings.Count(body, `data-testid="migration-statement"`)
+	if before == 0 {
 		t.Fatal("the panel shows no pending statement to reason about")
-	}
-	if !strings.Contains(body, `data-testid="migration-inert"`) {
-		t.Fatal("the panel does not say the engine will skip this without a version bump")
 	}
 
 	post(t, srv, "/forge/schema/version")
 
 	_, bumped := get(t, srv, "/forge/schema?component=Position")
-	if strings.Contains(bumped, `data-testid="migration-inert"`) {
-		t.Error("the panel still says the engine will skip the change after a version bump")
+	if after := strings.Count(bumped, `data-testid="migration-statement"`); after != before {
+		t.Errorf("the panel listed %d statements before the version bump and %d after", before, after)
 	}
 }
 
@@ -416,26 +417,28 @@ func TestSaveConfirm_RendersOnEveryMode(t *testing.T) {
 	}
 }
 
-// The modal claims the engine will run these statements. Without a version
-// bump it will not — and that is the default path, since the whole reason
-// WillMigrate exists is that authors do not think to bump it.
-func TestSaveConfirm_DoesNotClaimTheEngineWillActWhenItWillNot(t *testing.T) {
+// The modal claims the engine will run these statements, and now it does —
+// with or without a version bump. It used to make that claim conditionally,
+// and the "it will not run them yet" half was the default path, since authors
+// do not think to bump the version. Story 11 removed the condition rather than
+// the claim.
+func TestSaveConfirm_SaysTheEngineWillActAtEitherVersion(t *testing.T) {
 	srv, s, _, _ := migrationServer(t)
 
 	post(t, srv, "/forge/schema/field?component=Position&delete=y")
 	post(t, srv, "/forge/schema/save")
 
 	got := streamConfirm(t, s, "/forge/schema")
-	if strings.Contains(got, "The next time the engine starts it will run") {
-		t.Error("the dialog says the engine will run statements it will skip")
+	if !strings.Contains(got, `data-testid="confirm-statement"`) {
+		t.Fatal("the dialog shows no destructive statement to reason about")
 	}
-	if !strings.Contains(got, "schemaVersion") {
-		t.Error("the dialog does not explain why the engine will skip them")
+	if !strings.Contains(got, "The next time the engine starts it will run") {
+		t.Error("the dialog does not say the engine will run these statements")
 	}
 
 	post(t, srv, "/forge/schema/version")
 	if !strings.Contains(streamConfirm(t, s, "/forge/schema"), "The next time the engine starts it will run") {
-		t.Error("the dialog does not say the engine will act once the version is bumped")
+		t.Error("the dialog stopped saying so once the version was bumped")
 	}
 }
 
