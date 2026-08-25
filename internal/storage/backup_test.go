@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -242,5 +244,92 @@ func TestPruneBackups_LogsWarningOnRemoveFailure(t *testing.T) {
 
 	if !logger.warned {
 		t.Error("expected Warnf call when os.Remove fails on a non-empty directory")
+	}
+}
+
+// The backup path is built from the database path, which is user-supplied
+// config. A project directory holding a glob metacharacter used to make the
+// prune match nothing — and the error was swallowed, so the only symptom was
+// backups accumulating forever with nothing said about it.
+func TestPruneBackups_FindsBackupsBesideAPathHoldingGlobSyntax(t *testing.T) {
+	for _, dirName := range []string{"plain", "star*dir", "quest?dir", "brack[et]dir"} {
+		t.Run(dirName, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), dirName)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			dbPath := filepath.Join(dir, "world.sqlite")
+
+			// Four backups, retention of one: three should go.
+			for v := 1; v <= 4; v++ {
+				name := fmt.Sprintf("%s.bak.v%d", dbPath, v)
+				if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+					t.Fatalf("writing %s: %v", name, err)
+				}
+			}
+
+			pruneBackups(dbPath, 1, NopLogger())
+
+			left, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("ReadDir: %v", err)
+			}
+			var backups []string
+			for _, e := range left {
+				if strings.Contains(e.Name(), ".bak.v") {
+					backups = append(backups, e.Name())
+				}
+			}
+			if len(backups) != 1 {
+				t.Errorf("%d backups left, want 1: %v", len(backups), backups)
+			}
+			if len(backups) == 1 && !strings.HasSuffix(backups[0], ".v4") {
+				t.Errorf("kept %q, want the newest", backups[0])
+			}
+		})
+	}
+}
+
+// filepath.Glob returns cleaned paths, and the version is read back by trimming
+// the raw dbPath off each match. A "./ecs.db" — which is what config.Defaults
+// hands out when there is no game.toml — therefore matched four files, trimmed
+// nothing off any of them, failed to parse a version for each, and pruned none.
+func TestPruneBackups_PrunesForAPathThatIsNotAlreadyClean(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	for _, dbPath := range []string{"./ecs.db", "sub/../ecs.db"} {
+		t.Run(dbPath, func(t *testing.T) {
+			for _, f := range []string{"ecs.db.bak.v1", "ecs.db.bak.v2", "ecs.db.bak.v3"} {
+				if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+					t.Fatalf("writing %s: %v", f, err)
+				}
+			}
+			pruneBackups(dbPath, 1, NopLogger())
+
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				t.Fatalf("ReadDir: %v", err)
+			}
+			var left []string
+			for _, e := range entries {
+				if strings.Contains(e.Name(), ".bak.v") {
+					left = append(left, e.Name())
+				}
+			}
+			if len(left) != 1 {
+				t.Errorf("%d backups left for %q, want 1: %v", len(left), dbPath, left)
+			}
+			for _, f := range left {
+				_ = os.Remove(filepath.Join(dir, f))
+			}
+		})
 	}
 }

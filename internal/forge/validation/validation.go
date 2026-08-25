@@ -192,11 +192,19 @@ const (
 // The narrowing is sound because of how the engine's three phases are scoped.
 // Structure looks at the version, at whether the two maps are non-empty, and at
 // component names; cross-reference looks at one entity type at a time; SQL
-// compatibility looks at one component at a time. So a carrier holding a single
-// component answers exactly that component's naming and SQL questions, and one
-// holding every component and a single entity type answers exactly that entity
-// type's cross-reference questions. Nothing is re-decided here: the verdict on
-// every carrier is the engine's.
+// compatibility looks at one component at a time — with one exception, below.
+// So a carrier holding a single component answers exactly that component's
+// naming and SQL questions, and one holding every component and a single entity
+// type answers exactly that entity type's cross-reference questions. Nothing is
+// re-decided here: the verdict on every carrier is the engine's.
+//
+// The exception is the rule that two components whose names differ only in case
+// would build one table. It is the only rule that needs *two* components to
+// fail, so no single-component carrier reproduces it and every entity type's
+// carrier does — which would blame every entity type in the file for a problem
+// that is none of theirs, the exact failure the paragraph below describes.
+// A carrier of every component and no real entity type sits between the two
+// loops to catch it.
 //
 // Components are asked first and alone. That is the engine's own order, and for
 // its reason: what an entity type refers to means nothing while the components
@@ -247,6 +255,16 @@ func structuralProblems(s schema.DatabaseSchema) ([]Problem, bool) {
 		return out, true
 	}
 
+	// Every component together, and no entity type that asks anything of them.
+	// What fails here and passed above is a rule about a *pair* of components,
+	// which today means two names that differ only in case. Reported unattached
+	// because the message already names both and picking one to blame would be
+	// arbitrary — and because attaching it to an entity type, which is what
+	// happens without this step, points at the wrong file entirely.
+	if err := schema.ValidateSchema(componentsCarrier(s)); err != nil {
+		return []Problem{{Message: err.Error(), Blocking: true}}, true
+	}
+
 	for _, name := range jsonorder.Apply(s.EntityTypeOrder, s.EntityTypes) {
 		if err := schema.ValidateSchema(entityTypeCarrier(s, name)); err != nil {
 			out = append(out, Problem{
@@ -267,6 +285,21 @@ func emptyCarrier(version int) schema.DatabaseSchema {
 	return schema.DatabaseSchema{
 		SchemaVersion: version,
 		Components:    map[string]schema.Component{probeComponent: filler()},
+		EntityTypes:   map[string]schema.EntityType{probeEntityType: fillerType()},
+	}
+}
+
+// componentsCarrier is every real component, carried by a filler entity type
+// that asks nothing of any of them — so it answers the questions that need more
+// than one component and none of the questions an entity type raises.
+func componentsCarrier(s schema.DatabaseSchema) schema.DatabaseSchema {
+	comps := make(map[string]schema.Component, len(s.Components))
+	for name, comp := range s.Components {
+		comps[name] = comp
+	}
+	return schema.DatabaseSchema{
+		SchemaVersion: s.SchemaVersion,
+		Components:    comps,
 		EntityTypes:   map[string]schema.EntityType{probeEntityType: fillerType()},
 	}
 }

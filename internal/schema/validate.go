@@ -302,6 +302,12 @@ func validateCrossReference(s DatabaseSchema) error {
 // a component declares a type that has no corresponding CREATE TABLE
 // generator.
 func validateSQLCompatibility(s DatabaseSchema) error {
+	// Names first. This asks whether SQL can hold each property's type; the
+	// question of whether it can hold the *name* went unasked until a property
+	// called "two words" was found building a column called "two".
+	if err := validateIdentifiers(s); err != nil {
+		return err
+	}
 	for name, comp := range s.Components {
 		if !knownSQLComponentTypes[comp.Type] {
 			return fmt.Errorf("component %q uses type %q which has no SQL mapping",

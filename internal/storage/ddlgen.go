@@ -50,6 +50,15 @@ func NewGenerator(file *schema.DatabaseSchema, domain *DomainSchema, config Conf
 // Generate converts a list of changes into DDL statements.
 // Empty or nil changes produce an empty (non-nil) statement slice.
 // Entity type changes are silently skipped (no DDL).
+//
+// The component and property names in a Change are interpolated into ALTER
+// TABLE and DROP TABLE below without being checked, unlike componentTableSQL,
+// which refuses a name that cannot be an identifier. The names come from a
+// schema.Diff of two schemas, and schema.ValidateSchema refuses an unusable
+// name before either of them can be loaded — so this is reachable only from a
+// caller that skipped validation, which is the same caller componentTableSQL
+// guards against. Closing it properly means Generate returning an error, which
+// is a signature every caller uses; recorded rather than done here.
 func (g *Generator) Generate(changes []schema.Change) []Statement {
 	if changes == nil {
 		return []Statement{}

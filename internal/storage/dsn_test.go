@@ -438,3 +438,91 @@ func TestDSN_OpensARelativePathWhereItWasAsked(t *testing.T) {
 		})
 	}
 }
+
+// SQLite opens "" as a private temporary on-disk database that is deleted when
+// the connection closes. Bootstrapping a schema into it succeeds and then
+// evaporates — the most confusing possible way to lose a morning — so the store
+// refuses rather than inventing a default for a config that has none.
+func TestNewSQLiteStore_RefusesAnEmptyPath(t *testing.T) {
+	store, err := NewSQLiteStore("", pragmaSchema(), "")
+	if err == nil {
+		_ = store.Close()
+		t.Fatal("an empty path bootstrapped a database that no longer exists")
+	}
+	if !strings.Contains(err.Error(), "no database path") {
+		t.Errorf("error = %q, want it to say the path is missing", err)
+	}
+}
+
+// The refusal has to come before any DDL runs. Bootstrap creates the fixed
+// tables first and the comp_ tables after, so a name caught late leaves a
+// database that exists, has a meta row claiming a schema version, and is
+// missing the component it was refused for — which the next open would treat as
+// a migration rather than a mistake.
+func TestNewSQLiteStore_ABadNameLeavesNoHalfBuiltDatabase(t *testing.T) {
+	bad := pragmaSchema()
+	bad.Components["Two Words"] = schema.Component{
+		Type:       "object",
+		Properties: map[string]schema.Property{"x": {Type: "integer"}},
+	}
+	bad.EntityTypes["Thing"] = schema.EntityType{
+		RequiredComponents: []string{"Position", "Two Words"}, ValidationLevel: "strict",
+	}
+
+	path := filepath.Join(t.TempDir(), "w.sqlite")
+	if err := schema.ValidateSchema(bad); err == nil {
+		t.Fatal("the schema with an unusable component name validated")
+	}
+
+	// A caller that skipped validation still must not get half a database.
+	store, err := NewSQLiteStore(path, bad, "")
+	if err == nil {
+		_ = store.Close()
+		t.Fatal("the store built a database from a schema it cannot represent")
+	}
+	db, err := sql.Open("sqlite", DSN(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table'`).Scan(&n); err != nil {
+		t.Fatalf("counting tables: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("%d tables were left behind by a refused bootstrap", n)
+	}
+}
+
+// The other half of the same property. tablesExist asks whether `meta` is
+// there, and that is how the store decides between building a database and
+// migrating one. A bootstrap that failed after creating meta would leave
+// exactly the table that makes the next open take the migration path — against
+// a database with no entities table and no recorded version.
+func TestNewSQLiteStore_AFailedBootstrapIsStillFreshOnTheNextOpen(t *testing.T) {
+	bad := pragmaSchema()
+	bad.Components["Two Words"] = schema.Component{
+		Type:       "object",
+		Properties: map[string]schema.Property{"x": {Type: "integer"}},
+	}
+	path := filepath.Join(t.TempDir(), "w.sqlite")
+
+	if _, err := NewSQLiteStore(path, bad, ""); err == nil {
+		t.Fatal("the bad schema bootstrapped")
+	}
+
+	// The same path, with a schema that is fine. It has to build, not migrate.
+	store, err := NewSQLiteStore(path, pragmaSchema(), "")
+	if err != nil {
+		t.Fatalf("a second open after a failed bootstrap: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	var version string
+	if err := store.DB().QueryRow(`SELECT value FROM meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatalf("the database was not bootstrapped: %v", err)
+	}
+	if version != "1" {
+		t.Errorf("schema_version = %q, want 1", version)
+	}
+}

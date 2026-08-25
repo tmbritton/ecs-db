@@ -70,6 +70,17 @@ func NewSQLiteStoreWithConfig(dbPath string, cfg StoreConfig) (*SQLiteStore, err
 		cfg.MigrationPolicy = MigrationAuto
 	}
 
+	// An empty path is not "the default database", it is a private temporary
+	// one: SQLite opens "" as an unnamed on-disk database that is deleted when
+	// the connection closes. Bootstrapping a whole schema into it succeeds and
+	// then evaporates, which is a confusing way to lose a morning. Refused here
+	// because every caller reaching this point got the path from config, and a
+	// config with no database path is a config to fix rather than a default to
+	// invent.
+	if dbPath == "" {
+		return nil, fmt.Errorf("no database path: SQLite would open a temporary database and discard it on close")
+	}
+
 	// Ensure directory exists
 	dbDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(dbDir, 0o755); err != nil {
@@ -214,30 +225,39 @@ func checkAndMigrate(db *sql.DB, dbPath string, cfg StoreConfig) error {
 	return runner.Run()
 }
 
-// bootstrapDatabase creates all tables and writes initial meta rows
-// in a single transaction. The meta table is created first (outside the
-// transaction, as DDL auto-commits in SQLite), then remaining tables
-// and meta data are written inside a transaction.
+// bootstrapDatabase creates every table and writes the initial meta rows in one
+// transaction, so a failure leaves no database rather than half of one.
+//
+// This comment used to say that meta was created first and outside the
+// transaction "as DDL auto-commits in SQLite". DDL does not auto-commit in
+// SQLite — CREATE TABLE and CREATE INDEX roll back with everything else — and
+// that mistaken belief is what produced the defect the body now explains.
 func bootstrapDatabase(db *sql.DB, s schema.DatabaseSchema, schemaHash string) error {
-	// Create meta first so that tablesExist works after partial failure.
-	if _, err := db.Exec(`
-		CREATE TABLE meta (
-			key TEXT PRIMARY KEY,
-			value TEXT NOT NULL
-		);
-	`); err != nil {
-		return fmt.Errorf("creating meta table: %w", err)
-	}
-
-	// Begin transaction for the remaining DDL + meta writes.
+	// Everything in one transaction, meta included.
+	//
+	// meta used to be created first and outside it, "so that tablesExist works
+	// after partial failure" — but tablesExist asks whether meta is there, and
+	// that is how the store tells a database it must migrate from one it must
+	// build. A bootstrap that failed therefore left behind the single table
+	// that makes the next open take the *migration* path, against a database
+	// with no entities table and no recorded version. The half-built state was
+	// not being detected by that ordering, it was being created by it.
+	//
+	// SQLite runs DDL inside a transaction, so a failure now rolls back to a
+	// database with no tables at all — which tablesExist reads as "fresh", and
+	// the next open builds it properly.
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Remaining fixed tables.
 	fixed := `
+	CREATE TABLE meta (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
+
 	CREATE TABLE world (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL

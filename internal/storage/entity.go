@@ -54,6 +54,13 @@ func (t *sqliteTx) insertComponent(ctx context.Context, entityID int64, compName
 	comp := t.schema.Components[compName]
 
 	tableName := "comp_" + strings.ToLower(compName)
+	// The component name is exactly as caller-supplied as the field names below
+	// it, and it is interpolated into the same statement. Checked here rather
+	// than in each of the four insert paths, which all take tableName from
+	// this line.
+	if err := validateIdentifier(strings.TrimPrefix(tableName, "comp_"), "insertComponent compName"); err != nil {
+		return err
+	}
 
 	switch comp.Type {
 	case schema.ComponentTypeObject:
@@ -91,6 +98,18 @@ func (t *sqliteTx) insertObjectComponent(
 	sort.Strings(propNames)
 
 	for _, propName := range propNames {
+		// Validated here as well as at schema load, for the reason its
+		// neighbours are: this interpolates the name into an INSERT, and the
+		// schema it came from is whatever the caller handed the store.
+		//
+		// Through schema.ValidColumnName rather than this package's
+		// validateIdentifier, so there is one rule rather than two that agree
+		// until one is edited — and they can already disagree: the Kelvin sign
+		// K lowercases to an ASCII k, which the local regex accepts on a name
+		// the schema package rejects.
+		if !schema.ValidColumnName(propName) {
+			return fmt.Errorf("insertObjectComponent: %q cannot be a column name", propName)
+		}
 		cols = append(cols, strings.ToLower(propName))
 		val, ok := values[propName]
 		if !ok {

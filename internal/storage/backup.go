@@ -29,9 +29,29 @@ func backupDatabase(db *sql.DB, dbPath string, version int) (string, error) {
 // newest retention backup files. Files that do not match the versioned naming
 // pattern are ignored. Deletion failures are logged but do not return an error.
 func pruneBackups(dbPath string, retention int, logger MigrationLogger) {
-	pattern := dbPath + ".bak.v*"
+	// The path is escaped before it becomes a glob pattern. It is user-supplied
+	// config, and a project directory holding '*', '?' or '[' would otherwise
+	// make this match the wrong files or return ErrBadPattern — which used to
+	// be returned silently, so the only visible symptom was backups
+	// accumulating forever.
+	//
+	// With the escaping in place ErrBadPattern is unreachable: globEscape emits
+	// a well-formed pattern for every input. The check below stays as the thing
+	// that would notice if that ever stopped being true, and says which pattern
+	// it built rather than which path was configured, because the pattern is
+	// what failed.
+	// Cleaned first, because filepath.Glob returns cleaned paths and the version
+	// is read back by trimming this prefix off each match. With a raw "./ecs.db"
+	// — which is exactly what config.Defaults hands out — Glob answered
+	// "ecs.db.bak.v1" and the prefix was "./ecs.db.bak.v", so the trim did
+	// nothing, the version would not parse, and every backup was skipped. The
+	// symptom was the one this function exists to prevent: they accumulate, and
+	// nothing says so.
+	dbPath = filepath.Clean(dbPath)
+	pattern := globEscape(dbPath) + ".bak.v*"
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
+		logger.Warnf("backup pruning: %q is not a usable pattern: %v", pattern, err)
 		return
 	}
 
@@ -60,4 +80,25 @@ func pruneBackups(dbPath string, retention int, logger MigrationLogger) {
 			logger.Warnf("backup pruning: failed to remove %s: %v", b.path, err)
 		}
 	}
+}
+
+// globEscape quotes the characters filepath.Match treats as syntax, so a
+// database path can be used as the literal prefix of a pattern.
+//
+// filepath.Glob has no escaping helper of its own, and the ones in path/filepath
+// are for matching rather than for building. Backslash is the escape character
+// on the platforms this engine runs on; on Windows it would be a separator and
+// this would need to be a different function, which is a bridge to cross when
+// there is a Windows build to cross it for.
+func globEscape(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '*', '?', '[', ']', '\\':
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

@@ -668,3 +668,40 @@ func TestReport_CountsAndBlocking(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// The one SQL-compatibility rule that needs two components to fail: two names
+// differing only in case build one table. No single-component carrier
+// reproduces it and every entity type's carrier does, so without a step between
+// the two loops it comes out as a blocking error against every entity type in
+// the file — which is the failure the narrowing exists to prevent, arriving
+// through the one rule it did not anticipate.
+func TestValidate_APairOfComponentsIsNotBlamedOnEveryEntityType(t *testing.T) {
+	s := schema.DatabaseSchema{
+		SchemaVersion: 1,
+		Components: map[string]schema.Component{
+			"Probe": {Type: schema.ComponentTypeObject, Properties: map[string]schema.Property{"a": {Type: schema.PropertyTypeInteger}}},
+			"probe": {Type: schema.ComponentTypeObject, Properties: map[string]schema.Property{"b": {Type: schema.PropertyTypeInteger}}},
+		},
+		EntityTypes: map[string]schema.EntityType{
+			"Thing": {RequiredComponents: []string{"Probe"}, ValidationLevel: "strict"},
+			"Wall":  {RequiredComponents: []string{"Probe"}, ValidationLevel: "strict"},
+		},
+	}
+
+	got := validation.Check(validation.Input{Schema: s})
+	if !got.Blocked() {
+		t.Fatal("two components sharing a table was not blocking")
+	}
+	for _, p := range got.Problems {
+		if p.Owner.Kind == validation.OwnerEntityType {
+			t.Errorf("entity type %q was blamed for two components sharing a table: %s",
+				p.Owner.Name, p.Message)
+		}
+	}
+	if len(got.Problems) != 1 {
+		t.Errorf("got %d problems, want 1 naming both components: %+v", len(got.Problems), got.Problems)
+	}
+	if len(got.Problems) == 1 && !strings.Contains(got.Problems[0].Message, "comp_probe") {
+		t.Errorf("message = %q, want it to name the table they share", got.Problems[0].Message)
+	}
+}

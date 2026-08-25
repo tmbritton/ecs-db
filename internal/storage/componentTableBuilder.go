@@ -12,6 +12,16 @@ import (
 // Object components produce one typed column per property. Non-object components
 // produce a single "value" column with an appropriate SQL type.
 func componentTableSQL(name string, comp schema.Component) (string, error) {
+	// The last line of defence, not the first. schema.ValidateSchema refuses a
+	// name that cannot be an identifier, which is where a caller gets a message
+	// naming the file they have to fix. This is here because the generator
+	// interpolates these names into DDL, and a generator that trusted its input
+	// would build "CREATE TABLE comp_probe (two words INTEGER)" — a column
+	// called "two" of type "words INTEGER" — for anyone who called it without
+	// validating first.
+	if !schema.ValidIdentifier(name) {
+		return "", fmt.Errorf("component %q cannot be a table name", name)
+	}
 	sql := fmt.Sprintf("CREATE TABLE IF NOT EXISTS comp_%s (\n", strings.ToLower(name))
 	cols := []string{
 		"\tentity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE",
@@ -28,6 +38,9 @@ func componentTableSQL(name string, comp schema.Component) (string, error) {
 		// order the author wrote is recorded, so the DDL can read like the file
 		// it came from; a component built in code has none and sorts instead.
 		for _, propName := range jsonorder.Apply(comp.PropertyOrder, comp.Properties) {
+			if !schema.ValidIdentifier(propName) {
+				return "", fmt.Errorf("component %q: property %q cannot be a column name", name, propName)
+			}
 			prop := comp.Properties[propName]
 			sqlType := propertySQLType(prop)
 			col := fmt.Sprintf("\t%s %s NOT NULL", strings.ToLower(propName), sqlType)

@@ -61,6 +61,13 @@ Establish `schema.json` as the declarative source of truth for components and en
   - One builder and one `OpenReadOnly`, so "Forge never writes to the game database" is a property of a function rather than of every caller
   - Enforcing foreign keys for real means deleting an entity another entity's entity-ref points at is now refused — an improvement over the dangling reference it used to leave, and a schema question that wants its own story
 
+- [x] **Names that reach SQL are identifiers** — Component and property names are validated where the schema is loaded, so the generator and the insert path can rely on it.
+  - Three silent failures closed: `two words` built a column called `two` of type `words INTEGER`; `Probe` and `probe` shared one table; `current_time` built, accepted a write, and read back as the clock
+  - The reserved list is the 60 keywords SQLite actually refuses plus the 3 that fail silently — not all 147, because 84 of them (`action`, `key`, `first`, `row`) are names a game schema wants
+  - A test re-derives that list from SQLite on every run, so a driver upgrade that changes the answer fails a test rather than a map
+  - Bootstrap is one transaction: `meta` used to be created outside it, which left behind exactly the table that makes the next open migrate instead of build
+  - `NewSQLiteStore("")` refused, and `pruneBackups` escapes and cleans its path — both defaults that quietly did the wrong thing
+
 ## Epic 2: Schema versioning & migrations
 
 Automatic migrations driven purely by `schema.json` changes. The user edits the schema, bumps `schemaVersion`, and the engine brings the database up to date on startup. No migration files, no SQL authoring — the engine computes the diff, generates DDL, and applies it transactionally.
