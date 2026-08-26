@@ -34,11 +34,13 @@ and leaving this one as thin as possible.
       decoder
 - [x] `go test ./...` passes, and `make build-headless` still builds with no
       tags and no CGO
-- [ ] `ecs-db run` shows the migrated map drawn from its tileset — **not met, and
-      not meetable here.** There is no migrated map: `level1.toml` becomes
-      `level1.tmx` in Story 7, and until then the only map the engine loads has
-      no tileset and takes the colour fallback. This is the criterion to check
-      when Story 7 lands, on a machine with a display
+- [x] `ecs-db run` shows the migrated map drawn from its tileset — **met by
+      Story 7**, which migrated `level1.toml` to `level1.tmx` and gave it a
+      tileset. `internal/game/project_test.go` asserts that the shipped map
+      resolves its tileset, that the image it names is on disk, and that the
+      layout matches the file it replaced. The pixels themselves are still the
+      one thing no test here can see, because the renderer is behind
+      `//go:build ebitengine`
 
 ## As Implemented
 

@@ -94,7 +94,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 		// project would now draw its tiles on one grid and its player on
 		// another, with nothing to say so — so it is refused, naming both
 		// numbers, rather than half-drawn.
-		if src != nil && (src.TileWidth != cfg.Window.TileSize || src.TileHeight != cfg.Window.TileSize) {
+		if src.TileWidth != cfg.Window.TileSize || src.TileHeight != cfg.Window.TileSize {
 			return fmt.Errorf(
 				"map %s has %dx%d pixel tiles and window.tileSize is %d; "+
 					"entities are placed on the second and tiles on the first, so they must agree",
@@ -102,7 +102,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}
 		// The parsed map goes to the renderer as well as the database: the
 		// database holds one row per cell and cannot say what is stacked on it.
-		t, err := renderer.NewTilemapRenderer(store.DB(), src, imageCache,
+		t, err := renderer.NewTilemapRenderer(src, imageCache,
 			cfg.Window.Width, cfg.Window.Height, cfg.Window.TileSize)
 		if err != nil {
 			return fmt.Errorf("building tilemap renderer: %w", err)
@@ -144,22 +144,53 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	// The entities come from the map's object layer now, spawned by LoadMap
-	// above. What is left here is finding the two the engine still refers to by
-	// name — which is the half of the old ensure functions worth keeping, and
-	// goes when entity-type behaviour and player input stop being special-cased.
+	// Every entity whose type declares a "behavior" gets that machine, which is
+	// what makes schema.EntityType.Behavior mean anything. It used to be one
+	// hand-written call for the goblin, by name, for one entity.
+	//
+	// Here rather than where the entity is created, and the reason is the two
+	// lines above: a machine's entry actions may be pathfinding actions, and
+	// those do not exist until the registry has been given the map's grid —
+	// which comes from the same LoadMap that made the entities. See
+	// game.SyncBehaviors.
+	tick, err := store.GetCurrentTick(ctx)
+	if err != nil {
+		return fmt.Errorf("reading the current tick: %w", err)
+	}
+	behaviors, err := game.SyncBehaviors(ctx, game.BehaviorSync{
+		DB:             store.DB(),
+		Schema:         dbSchema,
+		Loader:         loader,
+		Registry:       registry,
+		Tick:           tick,
+		TickDurationMs: tickDurationMs,
+	})
+	if err != nil {
+		return fmt.Errorf("starting behaviors: %w", err)
+	}
+	for _, problem := range behaviors.Problems {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", problem)
+	}
+	for _, warning := range behaviors.Warnings {
+		fmt.Fprintf(os.Stderr, "Warning: started anyway: %s\n", warning)
+	}
+	// Said on the way past, like the behaviour count above it. A start-up where
+	// the binding did nothing and one where it did everything looked identical,
+	// and "the goblin is not moving" is the symptom of both a machine that did
+	// not start and a machine that did.
+	if behaviors.Started > 0 || behaviors.Running > 0 {
+		fmt.Printf("Behaviors: %d started, %d already running\n",
+			behaviors.Started, behaviors.Running)
+	}
+
+	// The entities come from the map's object layer, spawned by LoadMap above.
+	// What is left here is finding the one the engine still refers to by name:
+	// the player, because the input handler is bound to an entity and nothing
+	// in a map file says "this is the one the keyboard drives". That is the
+	// player-input story's to remove, not this one's.
 	playerID, err := findEntityOfType(ctx, store.DB(), "Player")
 	if err != nil {
 		return fmt.Errorf("looking up the player: %w", err)
-	}
-	goblinID, err := findEntityOfType(ctx, store.DB(), "Goblin")
-	if err != nil {
-		return fmt.Errorf("looking up the goblin: %w", err)
-	}
-	if goblinID != 0 {
-		if err := ensureGoblinBehavior(ctx, goblinID, loader, registry, store.DB()); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: goblin behavior: %v\n", err)
-		}
 	}
 
 	var inputHandler agent.InputHandler
@@ -234,9 +265,10 @@ func runGame(cmd *cobra.Command, args []string) error {
 // What is left of ensurePlayerEntity and ensureGoblinEntity, which created a
 // Player at (2,2) and a Goblin at (15,12) in Go under a TODO from Epic 5. The
 // map's object layer is that scene loader; this is only the lookup half, and
-// exists because the input handler and the goblin's machine still name their
-// entity by type. Zero rather than an error for "no such entity": a map without
-// a Player is a map somebody is still building, not a failure to start.
+// only for the player, because the input handler is bound to one entity and no
+// map file says which one the keyboard drives. Zero rather than an error for
+// "no such entity": a map without a Player is a map somebody is still building,
+// not a failure to start.
 func findEntityOfType(ctx context.Context, db *sql.DB, entityType string) (int64, error) {
 	var id int64
 	err := db.QueryRowContext(ctx,
@@ -248,35 +280,4 @@ func findEntityOfType(ctx context.Context, db *sql.DB, entityType string) (int64
 		return 0, err
 	}
 	return id, nil
-}
-
-// ensureGoblinBehavior starts the "goblin" machine for goblinID if it is not already running.
-// Must be called after loader.ScanDir so loader.Get("goblin") resolves.
-func ensureGoblinBehavior(ctx context.Context, goblinID int64, loader *agent.Loader, registry *agent.Registry, db *sql.DB) error {
-	var count int
-	if err := db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM behavior_components WHERE entity_id = ? AND machine_id = 'goblin'`,
-		goblinID).Scan(&count); err != nil || count > 0 {
-		return err
-	}
-	def, ok := loader.Get("goblin")
-	if !ok {
-		return fmt.Errorf("goblin machine not loaded")
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	// Ignored deliberately and said so: this rolls back only when the commit
-	// below did not happen, and a rollback that fails after a failure has
-	// nothing left to report to.
-	defer func() { _ = tx.Rollback() }()
-	a := agent.NewAgent(def, goblinID, "", tickDurationMs)
-	if err := agent.StartAgent(a, registry, 0,
-		storage.NewTxWorldWriter(tx),
-		storage.NewTxWorldReader(tx),
-		storage.NewMachineWriter(tx)); err != nil {
-		return fmt.Errorf("starting goblin agent: %w", err)
-	}
-	return tx.Commit()
 }

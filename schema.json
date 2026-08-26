@@ -55,6 +55,7 @@
   },
   "entityTypes": {
     "Goblin": {
+      "behavior": "goblin",
       "requiredComponents": ["Position", "Health", "Sprite"],
       "optionalComponents": ["Path", "Speed", "GoblinStats"],
       "allowExtraComponents": false,

@@ -300,22 +300,6 @@ func Parse(data []byte, name string) (*Map, error) {
 	return m, nil
 }
 
-// LooksLike reports whether data begins the way a map this package reads
-// begins.
-//
-// For a caller with more than one format to choose between — the loader in
-// internal/tilemap still reads the character map this epic is replacing — which
-// would otherwise keep its own copy of what a Tiled file starts with, in a
-// package that does not know. Whether it really is one is Parse's answer.
-func LooksLike(data []byte) bool {
-	switch firstMeaningfulByte(data) {
-	case '{', '<':
-		return true
-	default:
-		return false
-	}
-}
-
 // firstMeaningfulByte skips leading whitespace and a UTF-8 byte-order mark,
 // which Tiled does not write but an editor in between may have added.
 func firstMeaningfulByte(data []byte) byte {

@@ -96,10 +96,13 @@ func (p DrawProblem) String() string {
 
 // Drawable reports whether this map has any tileset that could be drawn from.
 //
-// The question the renderer asks to decide between drawing tiles and colouring
-// rectangles by tile_type. A map with no tilesets is the second thing, and is
-// not a fault: it is every fixture in this epic and the character-format map
-// until it is migrated.
+// It used to be the question the renderer asked to decide between drawing tiles
+// and colouring rectangles by tile_type; Story 7 deleted the colours with the
+// character format that was the only thing taking them, so nothing in the engine
+// asks it now. Kept because it is the honest answer to "will anything appear",
+// which is what a map fixture and Forge's MAP mode both want to know, and
+// because a map with no tilesets is not a fault — a caller has to be able to
+// tell that from a failure.
 func (m *Map) Drawable() bool {
 	for _, ref := range m.Tilesets {
 		if ref.Tileset != nil {

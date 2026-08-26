@@ -3,34 +3,28 @@
 package renderer
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"image"
-	"image/color"
 	"log"
 	"maps"
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/vector"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
-// TilemapRenderer builds a static *ebiten.Image from the tile entities in the
-// DB. The image is rebuilt on construction and again whenever Invalidate is
-// called. This avoids re-querying the DB every frame for tiles that almost
-// never change.
+// TilemapRenderer builds a static *ebiten.Image of a map, drawn from the
+// tilesets the map names. The image is rebuilt on construction and again
+// whenever Invalidate is called.
 type TilemapRenderer struct {
-	db       *sql.DB
 	img      *ebiten.Image
 	w, h     int
 	tileSize int
 
-	// src is the parsed map, and nil when there is none — the character format,
-	// or no map at all. Where the *appearance* comes from: comp_tile holds one
-	// row per cell by design, so the database can say what a cell is and never
-	// what is stacked on it, and a stack is most of what a tileset is for.
+	// src is the parsed map — where the appearance comes from. Not the
+	// database: comp_tile holds one row per cell by design, so it can say what
+	// a cell is and never what is stacked on it, and a stack is most of what a
+	// tileset is for.
 	src *tiled.Map
 	// images loads a tileset's picture once and keeps it. Shared with the
 	// sprite renderer rather than a second cache of the same PNGs.
@@ -39,10 +33,15 @@ type TilemapRenderer struct {
 
 // NewTilemapRenderer builds the static map image.
 //
-// src may be nil, and is nil for a map this engine's original character format
-// describes. Then the tiles are coloured by tile_type from the database, which
-// is what the renderer did for every map before tilesets existed.
-func NewTilemapRenderer(db *sql.DB, src *tiled.Map, images *ImageCache, w, h, tileSize int) (*TilemapRenderer, error) {
+// src used to be allowed to be nil, for a map in the character format this
+// engine started with — those were coloured by comp_tile.tile_type, a grey
+// rectangle per cell. Story 7 migrated the one map that used it and deleted the
+// reader, so every map that reaches here is a Tiled map and the colours could
+// only ever have drawn an empty picture. A nil map is a caller's mistake now.
+func NewTilemapRenderer(src *tiled.Map, images *ImageCache, w, h, tileSize int) (*TilemapRenderer, error) {
+	if src == nil {
+		return nil, fmt.Errorf("renderer: a tilemap renderer needs a parsed map to draw")
+	}
 	// Not "make one if there isn't one". There is exactly one image cache in
 	// the process, because it is also what hot-reload evicts from — a second
 	// one would decode the same PNGs twice and see half the evictions. A caller
@@ -50,10 +49,8 @@ func NewTilemapRenderer(db *sql.DB, src *tiled.Map, images *ImageCache, w, h, ti
 	if images == nil {
 		return nil, fmt.Errorf("renderer: a tilemap renderer needs the process's image cache")
 	}
-	r := &TilemapRenderer{db: db, src: src, images: images, w: w, h: h, tileSize: tileSize}
-	if err := r.rebuild(); err != nil {
-		return nil, err
-	}
+	r := &TilemapRenderer{src: src, images: images, w: w, h: h, tileSize: tileSize}
+	r.rebuild()
 	return r, nil
 }
 
@@ -67,24 +64,18 @@ func (r *TilemapRenderer) Image() *ebiten.Image { return r.img }
 // called, because the old fallback colours by tile_type and that action does
 // not write one.
 //
-// On the drawn path it is dead by construction rather than by oversight: the
-// picture comes from the map file, which is read once at startup and never
-// changed, so a rebuild is guaranteed to produce the same pixels. Making a
-// tile's appearance change at run time means giving the database something the
-// renderer reads, which is a story and not a comment.
-func (r *TilemapRenderer) Invalidate() {
-	if err := r.rebuild(); err != nil {
-		log.Printf("TilemapRenderer.Invalidate: %v", err)
-	}
-}
+// It is dead by construction rather than by oversight: the picture comes from
+// the map file, which is read once at startup and never changed, so a rebuild is
+// guaranteed to produce the same pixels. Making a tile's appearance change at
+// run time means giving the database something the renderer reads, which is a
+// story and not a comment.
+//
+// It returns nothing, and so does rebuild. There used to be an error, from the
+// query the colour fallback ran; drawing from the map file cannot fail — a
+// picture that will not open is logged by name and its tiles are skipped.
+func (r *TilemapRenderer) Invalidate() { r.rebuild() }
 
-func (r *TilemapRenderer) rebuild() error {
-	if r.src != nil && r.src.Drawable() {
-		r.img = r.drawTiles()
-		return nil
-	}
-	return r.drawColours()
-}
+func (r *TilemapRenderer) rebuild() { r.img = r.drawTiles() }
 
 // drawTiles paints every tile of every visible layer from its tileset.
 //
@@ -142,43 +133,4 @@ func (r *TilemapRenderer) drawTiles() *ebiten.Image {
 		log.Printf("tilemap: %s: %s", r.src.Name, p)
 	}
 	return img
-}
-
-// drawColours is the map before tilesets: a filled rectangle per tile, grey for
-// a wall and lighter grey for anything else. Kept as the path a map with no
-// tileset takes, which is the character format and every test fixture.
-func (r *TilemapRenderer) drawColours() error {
-	img := ebiten.NewImage(r.w, r.h)
-	rows, err := r.db.QueryContext(context.Background(),
-		`SELECT comp_tile.x, comp_tile.y, comp_tile.tile_type
-		 FROM entities
-		 JOIN comp_tile ON entities.id = comp_tile.entity_id
-		 WHERE entities.entity_type = 'Tile'`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var x, y int
-		var tileType string
-		if err := rows.Scan(&x, &y, &tileType); err != nil {
-			return err
-		}
-		var c color.RGBA
-		switch tileType {
-		case "wall":
-			c = color.RGBA{R: 60, G: 60, B: 60, A: 255}
-		default: // floor
-			c = color.RGBA{R: 180, G: 180, B: 180, A: 255}
-		}
-		vector.FillRect(img,
-			float32(x*r.tileSize), float32(y*r.tileSize),
-			float32(r.tileSize), float32(r.tileSize),
-			c, false)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	r.img = img
-	return nil
 }

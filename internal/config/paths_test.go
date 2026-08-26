@@ -29,7 +29,7 @@ guards    = "./guards/"
 assets    = "./assets/"
 
 [map]
-path = "maps/level1.toml"
+path = "maps/level1.tmx"
 `
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("writing config: %v", err)
@@ -43,7 +43,7 @@ path = "maps/level1.toml"
 	want := map[string]string{
 		"database":      filepath.Join(dir, "world.db"),
 		"schema":        filepath.Join(dir, "schema.json"),
-		"map":           filepath.Join(dir, "maps", "level1.toml"),
+		"map":           filepath.Join(dir, "maps", "level1.tmx"),
 		"mod.behaviors": filepath.Join(dir, "behaviors"),
 		"mod.actions":   filepath.Join(dir, "actions"),
 		"mod.guards":    filepath.Join(dir, "guards"),

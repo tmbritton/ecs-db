@@ -189,6 +189,14 @@ func defaults() *Config {
 			Height:   480,
 			TileSize: 16,
 		},
-		Map: MapConfig{Path: "mods/map/level1.toml"},
+		// No map. It used to be "mods/map/level1.toml", which was this
+		// repository's own level file — a guess about somebody else's directory
+		// layout that happened to be right in exactly one project, and that
+		// named a file which no longer exists once Epic 14 story 7 migrated it.
+		//
+		// These defaults are what a run with no game.toml at all gets, and a
+		// project with no config file has no level either. run handles an empty
+		// map path deliberately: no tiles, no tilemap renderer, and no advice
+		// about adding a Player object to a file nobody named.
 	}
 }

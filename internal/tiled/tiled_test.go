@@ -1068,28 +1068,42 @@ func TestParse_ObjectLayerOrderIsTheFilesOrder(t *testing.T) {
 	}
 }
 
-// LooksLike exists so a caller choosing between formats does not keep its own
-// copy of what a Tiled file starts with. It answers on the shape of the file,
-// not on whether it parses — that is Parse's job.
-func TestLooksLike(t *testing.T) {
+// Parse dispatches on the first meaningful byte, which is what makes a renamed
+// file load as what it is rather than as what it is called — and there is only
+// one format now, so it is also the whole of "this is not a map".
+//
+// The byte-order mark is the case worth keeping: Tiled does not write one, an
+// editor in between may, and a map that fails to load because of three
+// invisible bytes is not a failure anybody guesses.
+func TestParse_DispatchesOnWhatTheFileHolds(t *testing.T) {
+	const tmx = `<?xml version="1.0"?><map version="1.10" width="1" height="1" tilewidth="8" tileheight="8"/>`
 	cases := []struct {
 		name string
 		data string
-		want bool
+		ok   bool
 	}{
-		{"a tmx map", `<?xml version="1.0"?><map/>`, true},
-		{"a tmj map", `{"width":1}`, true},
-		{"leading whitespace", "\n\n  <map/>", true},
-		{"a byte-order mark somebody's editor added", "\xef\xbb\xbf<map/>", true},
-		{"markup that is not a map", `<tileset/>`, true},
+		{"a tmx map", tmx, true},
+		{"a tmj map", `{"width":1,"height":1,"tilewidth":8,"tileheight":8}`, true},
+		{"leading whitespace", "\n\n  " + tmx, true},
+		{"a byte-order mark somebody's editor added", "\xef\xbb\xbf" + tmx, true},
 		{"the character format it replaces", "width = 3\nheight = 3\n", false},
 		{"nothing at all", "", false},
 		{"whitespace and nothing else", "  \n\t", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := tiled.LooksLike([]byte(c.data)); got != c.want {
-				t.Errorf("LooksLike = %v, want %v", got, c.want)
+			_, err := tiled.Parse([]byte(c.data), "level.tmx")
+			if c.ok {
+				if err != nil {
+					t.Fatalf("Parse: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("a file that is not a map was accepted")
+			}
+			if !strings.Contains(err.Error(), "level.tmx") {
+				t.Errorf("error = %q, want it to name the file", err)
 			}
 		})
 	}

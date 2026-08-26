@@ -580,14 +580,14 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - Everything decidable lives in an untagged `DrawList`, because the renderer is behind `//go:build ebitengine` and a test can never compile it
   - Found by review, all of them parsed-then-silently-ignored: a map with no pixel tile size drew every tile in one stack off screen; `renderorder` and `opacity` were dropped; a source rectangle past the end of its image drew nothing; a diagonally flipped non-square tile landed a row out
   - `make lint` now runs both tag sets, which is how two findings had sat unseen in the half `golangci-lint run` does not compile
-  - Not verified on screen: the only map the engine loads is still the character format, which has no tileset. Story 7 migrates it, and that is when to look
+  - Not verified on screen when it landed, because the only map the engine loaded was still the character format. Story 7 migrated it
 
 - [x] **Object-layer spawns** — Entity type + component overrides at startup, replacing `ensurePlayerEntity`/`ensureGoblinEntity`.
   - Identity is an engine-owned `spawns` table keyed `(map, object_id)`: an object has none of its own, because the entity it made has moved or died by the time the file is re-read. Create once, never update, never delete — the file says where a world starts, not what it is
   - `ON DELETE SET NULL`, not `CASCADE`: the row is a fact about the import and stays true after the goblin dies
   - An object with no class is not a spawn, so an object layer can hold markers and bounds; a spawnable type must declare `Position`, and a property setting it is refused
   - Found by review: a duplicate object id left an entity no spawn row pointed at and then hid it forever; entity and record were two transactions; `validationLevel: "warning"` built half an entity in silence; pixel→cell truncated instead of flooring and checked no bounds
-  - Not verified on screen — the configured map is still the character format, and Story 7 migrates it
+  - Not verified on screen when it landed — the configured map was still the character format. Story 7 migrated it
 
 - [x] **A spawn is re-imported like a tile** — supersedes the rule above: the file wins for what the file describes, so an edit in the editor lands in the world.
   - Story 6 said create-once-never-touch and argued it as "an entity stops being the file's the moment the game runs" — which is the sentence `SyncTiles` had already rejected with "corridor" in place of "goblin". People editing map files are making a game, not playing one
@@ -601,9 +601,15 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - A map with no id still works and is warned about, because the trap only springs later
   - The engine cannot tell two maps sharing an id from a rename — it sees one map at a time. Forge can, across a project
 
-- [ ] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
+- [x] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
+  - A load-time reconcile rather than part of creating the entity, and recorded as a choice: a machine's entry actions may be pathfinding actions, which do not exist until the registry has the map's grid — but only `SyncTiles` feeds that grid, so the ordering does not forbid a create hook. What decided it is that an existing database gets its machines, a crash between the two recovers, and nothing below has to learn about machines
+  - Found by review, and new surface this story opened: `StartAgent` seeds its context by attaching components through the raw storage port, which validates nothing — so a binding could give an entity a component its own type forbids, written by the engine, in silence
+  - It never stops a machine, and that covers retargeting a binding *and removing one*. The composite key exists so an entity may run machines nothing bound it to, so from here the two cannot be told apart
 
-- [ ] **Migrate `level1.toml` → `level1.tmx`** — Plus a starter tileset and a `game.toml` update.
+- [x] **Migrate `level1.toml` → `level1.tmx`** — Plus a starter tileset and a `game.toml` update.
+  - The character-format reader went with the file it described, and `tiled.LooksLike` with it: `Parse` refuses a file that is neither serialisation better than a boolean can. That made the renderer's colour fallback dead in effect — a map with no tileset imports zero cells, so it could only ever have painted an empty picture
+  - The epic's claim is now asserted from the shipped files, through `game.toml`: every other test in it runs against a fixture written for it, and each can pass while the game is broken
+  - Found by review: the built-in default map path still named the deleted file, so a run with no `game.toml` failed on a missing map; and the test claiming to load "the files this repository ships" hardcoded them, so reverting `game.toml` left it green
 
 ---
 

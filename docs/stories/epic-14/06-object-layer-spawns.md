@@ -36,10 +36,12 @@ any exist is the bootstrap trap Story 3 exists to remove.
 - [x] Running twice does not duplicate spawns, and the rule that prevents it is
       stated rather than inherited from the tile bootstrap
 - [x] `ensurePlayerEntity` and `ensureGoblinEntity` are gone, not bypassed
-- [ ] `ecs-db run` against the migrated map spawns the player and the goblin
-      where the map puts them — **not met, and not meetable here.** The map the
-      engine loads is still `level1.toml`, which has no object layer;
-      Story 7 migrates it. See *As Implemented*
+- [x] `ecs-db run` against the migrated map spawns the player and the goblin
+      where the map puts them — **met by Story 7**, which migrated the map and
+      gave it the object layer. `internal/game/project_test.go` asserts both
+      spawns from the shipped files: the Player at (2,2) with 10 hp and the
+      Goblin at (15,12) with 5, which is what the deleted `ensure` functions
+      created
 - [x] `go test ./...` passes
 
 ## As Implemented

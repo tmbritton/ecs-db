@@ -444,26 +444,13 @@ func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
 	}
 }
 
-// The TOML reader is still there until the map that needs it is migrated, and
-// dispatch is on what the file holds rather than what it is called.
-func TestLoadMap_StillReadsTheCharacterFormat(t *testing.T) {
-	svc, db := syncFixture(t)
-	grid, _, err := LoadMap(context.Background(), svc, db, writeTempMap(t, threeByThree))
-	if err != nil {
-		t.Fatalf("LoadMap: %v", err)
-	}
-	if !grid.IsPassable(1, 1) || grid.IsPassable(0, 0) {
-		t.Error("the character map no longer loads as a room with walls round it")
-	}
-}
-
-// Both sides of the dispatch refuse what they are handed. The Tiled cases are
-// the ones the sniff creates: a file that opens like a Tiled map goes to the
-// Tiled reader whatever else is in it, and the character reader will never see
-// it to refuse it.
+// Every file the loader is handed goes to the Tiled reader — there is no second
+// format to dispatch to since Story 7 — so a file that is not one is refused by
+// the parser rather than tried as something else.
 func TestLoadMap_RefusesAFileThatIsNeitherFormat(t *testing.T) {
 	cases := []struct{ name, content string }{
 		{"prose", "this is not a map\n"},
+		{"the character format", "width=3\nheight=3\nrows=[\"###\",\"#.#\",\"###\"]\n"},
 		{"markup that is not a map", `<notamap version="1"/>`},
 		{"JSON that is not a map", `{"hello":"world"}`},
 		{"a JSON map of no size", `{"type":"map","width":0,"height":0}`},
@@ -776,20 +763,5 @@ func TestLoadMap_ReturnsTheParsedMapForTheRenderer(t *testing.T) {
 	}
 	if got := src.Tilesets[0].Tileset.Image.Path; got == "" {
 		t.Error("the tileset's image was never resolved to a path")
-	}
-}
-
-// The character format has no layers, no tilesets and nothing to draw from, so
-// it comes back with no map rather than an empty one — which the renderer would
-// take for a map it could draw and then draw nothing at all.
-func TestLoadMap_TheCharacterFormatHasNoMapToDraw(t *testing.T) {
-	svc, db := syncFixture(t)
-
-	_, src, err := LoadMap(context.Background(), svc, db, writeTempMap(t, threeByThree))
-	if err != nil {
-		t.Fatalf("LoadMap: %v", err)
-	}
-	if src != nil {
-		t.Errorf("the character format came back with a map: %+v", src)
 	}
 }

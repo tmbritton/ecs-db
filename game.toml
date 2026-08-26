@@ -24,7 +24,7 @@ height   = 480
 tileSize = 32
 
 [map]
-path = "mods/map/level1.toml"
+path = "mods/map/level1.tmx"
 
 # To add a mod, uncomment and fill in:
 # [[mods]]

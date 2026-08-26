@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ level1, migrated from the character format this engine started with. The layout
+ is the one level1.toml held: 20x15 cells, '#' walls and '.' floor.
+
+ mapId is what the spawns table is keyed by, so this level survives being
+ renamed, moved or re-spelled without its player and its goblin being created a
+ second time.
+
+ The two objects reproduce the ensurePlayerEntity and ensureGoblinEntity that
+ used to sit in cmd/: a Player at (2,2) with 10 hp and a Goblin at (15,12) with
+ 5. An object's class names an entity type, and every custom property is
+ "Component.property" — Position is not among them, because the object's own
+ coordinates are where the map shows the spawn.
+-->
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="20" height="15" tilewidth="32" tileheight="32" infinite="0" nextlayerid="3" nextobjectid="3">
+ <properties>
+  <property name="mapId" value="level1"/>
+ </properties>
+ <tileset firstgid="1" source="starter.tsx"/>
+ <layer id="1" name="ground" width="20" height="15">
+  <data encoding="csv">
+2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,2,2,2,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,2,2,2,2,2,2,2,2,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,2,2,2,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,
+2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+</data>
+ </layer>
+ <objectgroup id="2" name="spawns">
+  <object id="1" name="player" type="Player" x="64" y="64" width="32" height="32">
+   <properties>
+    <property name="Health.hp" type="int" value="10"/>
+    <property name="Health.maxHp" type="int" value="10"/>
+    <property name="Sprite.animation" value="player_idle"/>
+    <property name="Sprite.flip_x" type="bool" value="false"/>
+    <property name="Sprite.sheet" value=""/>
+   </properties>
+  </object>
+  <object id="2" name="goblin" type="Goblin" x="480" y="384" width="32" height="32">
+   <properties>
+    <property name="Health.hp" type="int" value="5"/>
+    <property name="Health.maxHp" type="int" value="5"/>
+    <property name="Sprite.animation" value="goblin_idle"/>
+    <property name="Sprite.flip_x" type="bool" value="false"/>
+    <property name="Sprite.sheet" value=""/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>

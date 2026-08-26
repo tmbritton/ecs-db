@@ -66,11 +66,16 @@ func tilesOfTiled(m *tiled.Map) (map[Point]TileState, error) {
 
 // checkShape refuses a map that would import as fewer cells than it has.
 //
-// The same argument mapDef.check makes about the character format, and it has
-// to be made again because the reason is the caller rather than the format:
-// what these cells are handed to *deletes* every tile they do not mention. A
-// map that describes no cells is not an empty map, it is every tile in the
-// database gone, with no error to notice.
+// What these cells are handed to *deletes* every tile they do not mention, so a
+// map that arrives smaller than it is takes the difference with it. The
+// character format made the same check on its own row list, where a misspelled
+// `rows` key unmarshalled into a map of zeroes.
+//
+// It is narrower than "refuse a map that imports as nothing", and deliberately:
+// a Tiled map whose tile layer has been deleted really does describe no cells,
+// and emptying the world is the file-wins rule working rather than a mistake to
+// catch. What is refused is a map that contradicts itself — one that says how
+// big it is and then is not that.
 //
 // A size of zero is what that looks like here. The parser refuses a negative
 // one and accepts a map with no dimensions at all, deliberately — nothing below
@@ -205,9 +210,14 @@ func holds(ts *tiled.Tileset, local uint32) bool {
 // back to the default there draws a wall the player walks through, which is
 // invisible until somebody tests the geometry.
 //
-// tile_type is the tile's class, then its tileset's, then empty. The renderer
-// draws anything that is not "wall" as floor, so a tile with no class draws
-// rather than disappears.
+// tile_type is the tile's class, then its tileset's, then empty. Nothing draws
+// it any more — the renderer took its colours from it until Story 7 deleted
+// them, and appearance comes from the tileset image now. What is left reading
+// comp_tile.tile_type is SyncTiles' own diff, deciding whether to write it
+// again. It stays because it is the only place a map says what a cell *is*
+// rather than what it looks like, and a game rule that wants "is this lava" has
+// nowhere else to ask — but it is a column with no consumer today, and the
+// story records that rather than leaving it to be discovered.
 func stateOf(ts *tiled.Tileset, local uint32, where string) (TileState, error) {
 	props := ts.Tiles[local].Properties
 	passable, declared := props.Bool(tiled.PropPassable)
