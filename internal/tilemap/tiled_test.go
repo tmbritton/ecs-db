@@ -69,7 +69,7 @@ func layerOf(name string, w, h int, attrs, csv string) string {
 func loadTiledMap(t *testing.T, path string) (*TileGrid, *sql.DB) {
 	t.Helper()
 	svc, db := syncFixture(t)
-	grid, err := LoadMap(context.Background(), svc, db, path)
+	grid, _, err := LoadMap(context.Background(), svc, db, path)
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestLoadMap_RefusesAGidPastTheEndOfItsTileset(t *testing.T) {
 	path := tiledMap(t, twoTileTSX, mapOf(2, 2,
 		layerOf("ground", 2, 2, "", "1,1,\n1,99")), "level.tmx")
 
-	_, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err == nil {
 		t.Fatal("a tile past the end of its tileset was accepted")
 	}
@@ -321,7 +321,7 @@ func TestLoadMap_RefusesAGidPastTheEndOfItsTileset(t *testing.T) {
 	// tileset in a map has no upper bound of its own to catch them.
 	onePast := tiledMap(t, twoTileTSX, mapOf(1, 1,
 		layerOf("ground", 1, 1, "", "3")), "level.tmx")
-	if _, err := LoadMap(context.Background(), svc, db, onePast); err == nil {
+	if _, _, err := LoadMap(context.Background(), svc, db, onePast); err == nil {
 		t.Error("global id 3 is tile 2 of a tileset holding 2, and it was accepted")
 	}
 }
@@ -333,7 +333,7 @@ func TestLoadMap_RefusesAGidBelowEveryTileset(t *testing.T) {
 	file := strings.Replace(mapOf(1, 1, layerOf("ground", 1, 1, "", "3")),
 		`firstgid="1"`, `firstgid="10"`, 1)
 
-	_, err := LoadMap(context.Background(), svc, db, tiledMap(t, twoTileTSX, file, "level.tmx"))
+	_, _, err := LoadMap(context.Background(), svc, db, tiledMap(t, twoTileTSX, file, "level.tmx"))
 	if err == nil {
 		t.Fatal("a tile below every tileset was accepted")
 	}
@@ -350,7 +350,7 @@ func TestLoadMap_RefusesAMapThatIsNotOrthogonal(t *testing.T) {
 	file := strings.Replace(mapOf(1, 1, layerOf("ground", 1, 1, "", "1")),
 		`orientation="orthogonal"`, `orientation="isometric"`, 1)
 
-	_, err := LoadMap(context.Background(), svc, db, tiledMap(t, twoTileTSX, file, "level.tmx"))
+	_, _, err := LoadMap(context.Background(), svc, db, tiledMap(t, twoTileTSX, file, "level.tmx"))
 	if err == nil {
 		t.Fatal("an isometric map was accepted")
 	}
@@ -365,7 +365,7 @@ func TestLoadMap_RefusesAMapWhoseTilesetWillNotOpen(t *testing.T) {
 	svc, db := syncFixture(t)
 	path := tiledMap(t, "", mapOf(1, 1, layerOf("ground", 1, 1, "", "1")), "level.tmx")
 
-	_, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err == nil {
 		t.Fatal("a map whose tileset is missing was accepted")
 	}
@@ -382,7 +382,7 @@ func TestLoadMap_RefusesAMapWhoseTilesetWillNotOpen(t *testing.T) {
 func TestLoadMap_AnUnparseableTiledFileLeavesTheDatabaseAlone(t *testing.T) {
 	svc, db := syncFixture(t)
 	good := tiledMap(t, twoTileTSX, mapOf(2, 1, layerOf("ground", 2, 1, "", "1,2")), "level.tmx")
-	if _, err := LoadMap(context.Background(), svc, db, good); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, db, good); err != nil {
 		t.Fatalf("first LoadMap: %v", err)
 	}
 	before := tileRows(t, db)
@@ -390,7 +390,7 @@ func TestLoadMap_AnUnparseableTiledFileLeavesTheDatabaseAlone(t *testing.T) {
 	if err := os.WriteFile(good, []byte(`<map width="2" height="1"><layer`), 0o644); err != nil {
 		t.Fatalf("truncating map: %v", err)
 	}
-	_, err := LoadMap(context.Background(), svc, db, good)
+	_, _, err := LoadMap(context.Background(), svc, db, good)
 	if err == nil {
 		t.Fatal("a half-written map was accepted")
 	}
@@ -411,13 +411,13 @@ func TestLoadMap_AnUnparseableTiledFileLeavesTheDatabaseAlone(t *testing.T) {
 func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
 	svc, db := syncFixture(t)
 	path := tiledMap(t, twoTileTSX, mapOf(2, 1, layerOf("ground", 2, 1, "", "1,2")), "level.tmx")
-	if _, err := LoadMap(context.Background(), svc, db, path); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, db, path); err != nil {
 		t.Fatalf("first LoadMap: %v", err)
 	}
 	before := tileRows(t, db)
 
 	writes := watchTiles(t, db)
-	if _, err := LoadMap(context.Background(), svc, db, path); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, db, path); err != nil {
 		t.Fatalf("second LoadMap: %v", err)
 	}
 	if got := writes(); len(got) != 0 {
@@ -430,7 +430,7 @@ func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
 	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	grid, err := LoadMap(context.Background(), svc, db, path)
+	grid, _, err := LoadMap(context.Background(), svc, db, path)
 	if err != nil {
 		t.Fatalf("third LoadMap: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
 // dispatch is on what the file holds rather than what it is called.
 func TestLoadMap_StillReadsTheCharacterFormat(t *testing.T) {
 	svc, db := syncFixture(t)
-	grid, err := LoadMap(context.Background(), svc, db, writeTempMap(t, threeByThree))
+	grid, _, err := LoadMap(context.Background(), svc, db, writeTempMap(t, threeByThree))
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestLoadMap_RefusesAFileThatIsNeitherFormat(t *testing.T) {
 			svc, db := syncFixture(t)
 			// A map already loaded, so a refusal has something to lose.
 			good := tiledMap(t, twoTileTSX, mapOf(2, 1, layerOf("g", 2, 1, "", "1,2")), "level.tmx")
-			if _, err := LoadMap(context.Background(), svc, db, good); err != nil {
+			if _, _, err := LoadMap(context.Background(), svc, db, good); err != nil {
 				t.Fatalf("first LoadMap: %v", err)
 			}
 			before := tileRows(t, db)
@@ -483,7 +483,7 @@ func TestLoadMap_RefusesAFileThatIsNeitherFormat(t *testing.T) {
 			if err := os.WriteFile(path, []byte(c.content), 0o644); err != nil {
 				t.Fatalf("writing: %v", err)
 			}
-			if _, err := LoadMap(context.Background(), svc, db, path); err == nil {
+			if _, _, err := LoadMap(context.Background(), svc, db, path); err == nil {
 				t.Fatal("a file that describes no map was accepted")
 			}
 			if got := tileRows(t, db); !reflect.DeepEqual(got, before) {
@@ -572,7 +572,7 @@ func TestLoadMap_AFlippedTileIsStillItsTile(t *testing.T) {
 func TestLoadMap_RefusesAMapFileThatIsNotThere(t *testing.T) {
 	svc, db := syncFixture(t)
 
-	_, err := LoadMap(context.Background(), svc, db, filepath.Join(t.TempDir(), "absent.tmx"))
+	_, _, err := LoadMap(context.Background(), svc, db, filepath.Join(t.TempDir(), "absent.tmx"))
 	if err == nil {
 		t.Fatal("a map file that does not exist was loaded")
 	}
@@ -597,7 +597,7 @@ func TestLoadMap_RefusesAMapThatNamesNoTilesetAtAll(t *testing.T) {
  <layer name="ground" width="1" height="1"><data encoding="csv">5</data></layer>
 </map>`
 
-	_, err := LoadMap(context.Background(), svc, db, tiledMap(t, "", file, "level.tmx"))
+	_, _, err := LoadMap(context.Background(), svc, db, tiledMap(t, "", file, "level.tmx"))
 	if err == nil {
 		t.Fatal("a map that declares no tilesets was accepted")
 	}
@@ -639,7 +639,7 @@ func TestLoadMap_RefusesAGidInACollectionsGap(t *testing.T) {
 	path := tiledMap(t, collectionTSX, mapOf(1, 1,
 		layerOf("ground", 1, 1, "", "2")), "level.tmx")
 
-	_, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err == nil {
 		t.Fatal("a tile the collection does not hold was accepted as a passable, typeless floor")
 	}
@@ -665,7 +665,7 @@ func TestLoadMap_RefusesAPassableThatIsDeclaredAndUnreadable(t *testing.T) {
 	path := tiledMap(t, malformedTSX, mapOf(1, 1,
 		layerOf("ground", 1, 1, "", "1")), "level.tmx")
 
-	_, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err == nil {
 		t.Fatal("passable=0 loaded as a floor")
 	}
@@ -687,7 +687,7 @@ func TestLoadMap_RefusesATilesetsPassableThatIsDeclaredAndUnreadable(t *testing.
 	path := tiledMap(t, malformedTilesetTSX, mapOf(1, 1,
 		layerOf("ground", 1, 1, "", "1")), "level.tmx")
 
-	_, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err == nil {
 		t.Fatal(`a tileset saying passable="no" loaded as a floor`)
 	}
@@ -747,5 +747,49 @@ func TestTilesOfTiled_RefusesAMapThatDescribesNoCells(t *testing.T) {
 				t.Errorf("refusal %q does not say %q", err, c.says)
 			}
 		})
+	}
+}
+
+// ── What the loader hands the renderer ───────────────────────────────
+
+// A Tiled map comes back alongside the grid, because the renderer draws layers
+// and tilesets that comp_tile has no room for: it holds one row per cell, so it
+// can say what a cell is and never what is stacked on it.
+func TestLoadMap_ReturnsTheParsedMapForTheRenderer(t *testing.T) {
+	svc, db := syncFixture(t)
+	path := tiledMap(t, twoTileTSX, mapOf(3, 2,
+		layerOf("ground", 3, 2, "", "2,1,2,\n2,2,2")), "level.tmx")
+
+	_, src, err := LoadMap(context.Background(), svc, db, path)
+	if err != nil {
+		t.Fatalf("LoadMap: %v", err)
+	}
+	if src == nil {
+		t.Fatal("a Tiled map came back with nothing for the renderer to draw")
+	}
+	if len(src.Layers) != 1 || src.Layers[0].Name != "ground" {
+		t.Errorf("the map has layers %+v, want the one named ground", src.Layers)
+	}
+	// Resolved, not just referenced: the renderer needs a path that opens.
+	if !src.Drawable() {
+		t.Error("the map came back with unresolved tilesets, so nothing can be drawn from it")
+	}
+	if got := src.Tilesets[0].Tileset.Image.Path; got == "" {
+		t.Error("the tileset's image was never resolved to a path")
+	}
+}
+
+// The character format has no layers, no tilesets and nothing to draw from, so
+// it comes back with no map rather than an empty one — which the renderer would
+// take for a map it could draw and then draw nothing at all.
+func TestLoadMap_TheCharacterFormatHasNoMapToDraw(t *testing.T) {
+	svc, db := syncFixture(t)
+
+	_, src, err := LoadMap(context.Background(), svc, db, writeTempMap(t, threeByThree))
+	if err != nil {
+		t.Fatalf("LoadMap: %v", err)
+	}
+	if src != nil {
+		t.Errorf("the character format came back with a map: %+v", src)
 	}
 }

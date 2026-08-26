@@ -188,7 +188,7 @@ func parseTMX(data []byte, name string) (*Map, error) {
 		return nil, fmt.Errorf("tiled: %s is an infinite map, which this reader does not decode; "+
 			"in Tiled, Map ▸ Map Properties ▸ Infinite ▸ off, then save", name)
 	}
-	if err := checkSize(wire.Width, wire.Height, name); err != nil {
+	if err := checkSize(wire.Width, wire.Height, wire.TileWidth, wire.TileHeight, name); err != nil {
 		return nil, err
 	}
 	m := &Map{

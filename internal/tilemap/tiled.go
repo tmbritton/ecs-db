@@ -14,10 +14,10 @@ import (
 // The tilesets are resolved through os.ReadFile against the directory the map
 // was read from, which is where Tiled writes them relative to. A map that names
 // a tileset nobody shipped is refused here rather than loaded with a hole in it.
-func readTiled(path string, data []byte) (map[Point]TileState, int, int, error) {
+func readTiled(path string, data []byte) (loaded, error) {
 	m, err := tiled.Parse(data, path)
 	if err != nil {
-		return nil, 0, 0, err
+		return loaded{}, err
 	}
 	// Point is a square cell, and so is everything that reads a TileGrid: A*
 	// costs one per step, line of sight walks a straight line through it. An
@@ -27,17 +27,17 @@ func readTiled(path string, data []byte) (map[Point]TileState, int, int, error) 
 	// An absent orientation is orthogonal. Tiled always writes the attribute;
 	// a file that does not is not thereby claiming to be a hex map.
 	if m.Orientation != "" && m.Orientation != "orthogonal" {
-		return nil, 0, 0, fmt.Errorf("tilemap: %s is %s, and this engine's grid is square cells",
+		return loaded{}, fmt.Errorf("tilemap: %s is %s, and this engine's grid is square cells",
 			m.Name, m.Orientation)
 	}
 	if err := m.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
-		return nil, 0, 0, err
+		return loaded{}, err
 	}
 	want, err := tilesOfTiled(m)
 	if err != nil {
-		return nil, 0, 0, err
+		return loaded{}, err
 	}
-	return want, m.Width, m.Height, nil
+	return loaded{Tiles: want, Width: m.Width, Height: m.Height, Source: m}, nil
 }
 
 // tilesOfTiled is the cell of every position the map describes a tile at.

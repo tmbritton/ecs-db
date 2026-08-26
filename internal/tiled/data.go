@@ -143,9 +143,22 @@ func sane(cells int) int {
 // negative one panics `make`, and a vast one asks for the allocation before
 // anything has been read — so both are refused at the door rather than deep
 // inside a decoder, where the message would be about a layer.
-func checkSize(width, height int, name string) error {
+func checkSize(width, height, tileWidth, tileHeight int, name string) error {
 	if width < 0 || height < 0 {
 		return fmt.Errorf("tiled: %s is %dx%d tiles, which is not a size", name, width, height)
+	}
+	// The pixel size of a cell, which is what places every tile on screen.
+	//
+	// Checked here for the same reason the tile counts are: a file's numbers
+	// are not numbers this package chose. A map with no tilewidth put every
+	// tile of every layer at x=0 and one tile above the top of the window —
+	// the whole map in a single stack, off screen, with nothing to report. The
+	// same shape as the missing map size this reader already refuses, one
+	// attribute over.
+	if tileWidth <= 0 || tileHeight <= 0 {
+		return fmt.Errorf("tiled: %s says its tiles are %dx%d pixels, which is not a size; "+
+			"in Tiled this is Map ▸ Map Properties ▸ Tile Width and Tile Height",
+			name, tileWidth, tileHeight)
 	}
 	return nil
 }

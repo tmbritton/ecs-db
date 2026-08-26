@@ -1,4 +1,4 @@
-.PHONY: build build-headless run generate fmt clean test e2e e2e-seed
+.PHONY: build build-headless run generate fmt clean test lint e2e e2e-seed
 
 BREW_PREFIX := /home/linuxbrew/.linuxbrew
 XORGPROTO   := $(shell brew --prefix xorgproto 2>/dev/null || echo $(BREW_PREFIX)/Cellar/xorgproto/2025.1)
@@ -19,6 +19,14 @@ build-headless: generate
 
 run: build
 	./bin/ecs-db run
+
+# Both tag sets. The renderer and the game's composition root are behind
+# //go:build ebitengine, so a plain `golangci-lint run` never compiles them —
+# which is how a deprecated call and an unchecked rollback sat there unseen.
+lint:
+	mise exec -- golangci-lint run ./...
+	CGO_CFLAGS="$(CGO_CFLAGS)" CGO_LDFLAGS="$(CGO_LDFLAGS)" \
+	mise exec -- golangci-lint run --build-tags ebitengine ./...
 
 fmt:
 	gofumpt -w .

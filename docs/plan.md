@@ -575,7 +575,12 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - A Tiled map with no declared size imported as zero cells and deleted every tile: the `rowz` bug again, in the format that replaces it
   - A collection tileset's ids are not consecutive, so judging membership by `tilecount` refused its last tile and accepted its holes
 
-- [ ] **Tileset rendering** — Draw tile layers from tileset images rather than colouring by `tile_type` string.
+- [x] **Tileset rendering** — Draw tile layers from tileset images rather than colouring by `tile_type` string.
+  - Drawn from the parsed map, not the database: `comp_tile` holds one row per cell and cannot express a stack, and a stack is most of what layers are for. No schema change and no migration — and nothing in the database can alter a drawn pixel any more, which is the trade
+  - Everything decidable lives in an untagged `DrawList`, because the renderer is behind `//go:build ebitengine` and a test can never compile it
+  - Found by review, all of them parsed-then-silently-ignored: a map with no pixel tile size drew every tile in one stack off screen; `renderorder` and `opacity` were dropped; a source rectangle past the end of its image drew nothing; a diagonally flipped non-square tile landed a row out
+  - `make lint` now runs both tag sets, which is how two findings had sat unseen in the half `golangci-lint run` does not compile
+  - Not verified on screen: the only map the engine loads is still the character format, which has no tileset. Story 7 migrates it, and that is when to look
 
 - [ ] **Object-layer spawns** — Entity type + component overrides at startup, replacing `ensurePlayerEntity`/`ensureGoblinEntity`.
 

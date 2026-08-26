@@ -25,25 +25,42 @@ type mapDef struct {
 // run and the file decoration. A map edited afterwards loaded without error and
 // changed nothing. Loading now diffs — see SyncTiles for what the file owns and
 // what survives it.
-func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string) (*TileGrid, error) {
+// The second result is the parsed map, for callers that need the file rather
+// than the grid — the renderer, which draws layers and tilesets that
+// comp_tile has no room for. Nil for the character format, which has neither.
+func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string) (*TileGrid, *tiled.Map, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("LoadMap: reading %q: %w", path, err)
+		return nil, nil, fmt.Errorf("LoadMap: reading %q: %w", path, err)
 	}
-	want, width, height, err := readMap(path, data)
+	file, err := readMap(path, data)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if _, err := SyncTiles(ctx, svc, db, want); err != nil {
-		return nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
+	if _, err := SyncTiles(ctx, svc, db, file.Tiles); err != nil {
+		return nil, nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
 	}
 
-	grid := NewTileGrid(width, height)
+	grid := NewTileGrid(file.Width, file.Height)
 	if err := grid.Rebuild(ctx, db); err != nil {
-		return nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
+		return nil, nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
 	}
-	return grid, nil
+	return grid, file.Source, nil
+}
+
+// loaded is what a map file yields.
+//
+// A struct rather than four returns and an error: the third and fourth were
+// already a width and a height nobody could tell apart at a call site, and the
+// parsed map makes five.
+type loaded struct {
+	Tiles  map[Point]TileState
+	Width  int
+	Height int
+	// Source is the parsed Tiled map, and nil for the character format — which
+	// has no layers, no tilesets and nothing to draw from.
+	Source *tiled.Map
 }
 
 // readMap turns a map file into the cells it describes and the size of the grid
@@ -59,7 +76,7 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 // The character format is here until Story 7 migrates the one map that uses it.
 // It is not a second way to write a map — it is the way the old map is written,
 // and it goes with the file.
-func readMap(path string, data []byte) (map[Point]TileState, int, int, error) {
+func readMap(path string, data []byte) (loaded, error) {
 	if tiled.LooksLike(data) {
 		return readTiled(path, data)
 	}
@@ -67,15 +84,15 @@ func readMap(path string, data []byte) (map[Point]TileState, int, int, error) {
 }
 
 // readTOML reads the bespoke character format this engine started with.
-func readTOML(path string, data []byte) (map[Point]TileState, int, int, error) {
+func readTOML(path string, data []byte) (loaded, error) {
 	var def mapDef
 	if err := toml.Unmarshal(data, &def); err != nil {
-		return nil, 0, 0, fmt.Errorf("LoadMap: parsing %q: %w", path, err)
+		return loaded{}, fmt.Errorf("LoadMap: parsing %q: %w", path, err)
 	}
 	if err := def.check(path); err != nil {
-		return nil, 0, 0, err
+		return loaded{}, err
 	}
-	return tilesOf(def), def.Width, def.Height, nil
+	return loaded{Tiles: tilesOf(def), Width: def.Width, Height: def.Height}, nil
 }
 
 // check refuses a file that parsed but does not describe a map.

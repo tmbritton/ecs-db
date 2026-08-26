@@ -72,7 +72,7 @@ func TestLoadMap_CreatesEntities(t *testing.T) {
 	svc := world.NewEntityService(store)
 	svc.SetSchema(ds)
 
-	grid, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree))
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree))
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestLoadMap_Idempotent(t *testing.T) {
 
 	path := writeTempMap(t, threeByThree)
 	for range 2 {
-		if _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
+		if _, _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
 			t.Fatalf("LoadMap: %v", err)
 		}
 	}
@@ -116,7 +116,7 @@ func TestLoadMap_ASecondLoadPicksUpAnEditedFile(t *testing.T) {
 	svc.SetSchema(ds)
 
 	path := writeTempMap(t, threeByThree)
-	if _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
 		t.Fatalf("first LoadMap: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestLoadMap_ASecondLoadPicksUpAnEditedFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("width=3\nheight=3\nrows=[\"###\",\"###\",\"###\"]\n"), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err != nil {
 		t.Fatalf("second LoadMap: %v", err)
 	}
@@ -148,14 +148,14 @@ func TestLoadMap_ASmallerMapDropsTheTilesItNoLongerHas(t *testing.T) {
 	svc.SetSchema(ds)
 
 	path := writeTempMap(t, threeByThree)
-	if _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
 		t.Fatalf("first LoadMap: %v", err)
 	}
 
 	if err := os.WriteFile(path, []byte("width=2\nheight=2\nrows=[\"##\",\"#.\"]\n"), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err != nil {
 		t.Fatalf("second LoadMap: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestLoadMap_AnUnparseableFileLeavesTheDatabaseAlone(t *testing.T) {
 	svc.SetSchema(ds)
 
 	path := writeTempMap(t, threeByThree)
-	if _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
+	if _, _, err := LoadMap(context.Background(), svc, store.DB(), path); err != nil {
 		t.Fatalf("first LoadMap: %v", err)
 	}
 	before := tileRows(t, store.DB())
@@ -190,7 +190,7 @@ func TestLoadMap_AnUnparseableFileLeavesTheDatabaseAlone(t *testing.T) {
 	if err := os.WriteFile(path, []byte("width=3\nheight=3\nrows=[\"##\n"), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	_, err := LoadMap(context.Background(), svc, store.DB(), path)
+	_, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err == nil {
 		t.Fatal("LoadMap accepted a file that is not TOML")
 	}
@@ -213,7 +213,7 @@ func TestLoadMap_CharactersThatAreNotTilesDescribeNoCell(t *testing.T) {
 	svc.SetSchema(ds)
 
 	path := writeTempMap(t, "width=3\nheight=1\nrows=[\"#?.\"]\n")
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestLoadMap_RowsAreRowsAndColumnsAreColumns(t *testing.T) {
 	// Asymmetric on purpose: a square map of symmetric rows cannot tell a
 	// loader that reads (x,y) from one that reads (y,x).
 	path := writeTempMap(t, "width=3\nheight=2\nrows=[\"..#\",\"###\"]\n")
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestLoadMap_AnImportTheDatabaseRefusesIsNotLoadedAnyway(t *testing.T) {
 	}
 
 	path := writeTempMap(t, threeByThree)
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err == nil {
 		t.Fatal("LoadMap returned a grid for a map the database refused to store")
 	}
@@ -309,12 +309,12 @@ func TestLoadMap_RefusesAFileThatParsedButDescribesNoMap(t *testing.T) {
 			svc.SetSchema(ds)
 
 			// A map already loaded, so a refusal has something to lose.
-			if _, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree)); err != nil {
+			if _, _, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, threeByThree)); err != nil {
 				t.Fatalf("first LoadMap: %v", err)
 			}
 			before := tileRows(t, store.DB())
 
-			_, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, c.content))
+			_, _, err := LoadMap(context.Background(), svc, store.DB(), writeTempMap(t, c.content))
 			if err == nil {
 				t.Fatal("accepted a file that does not describe a map")
 			}
@@ -338,7 +338,7 @@ func TestLoadMap_ACharacterWiderThanAByteDoesNotShiftTheRow(t *testing.T) {
 	// '…' is three bytes and one cell. Ranging over the string would put the
 	// wall after it at x=4 in a three-wide map.
 	path := writeTempMap(t, "width=3\nheight=1\nrows=[\"#…#\"]\n")
-	grid, err := LoadMap(context.Background(), svc, store.DB(), path)
+	grid, _, err := LoadMap(context.Background(), svc, store.DB(), path)
 	if err != nil {
 		t.Fatalf("LoadMap: %v", err)
 	}

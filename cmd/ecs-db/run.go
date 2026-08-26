@@ -70,17 +70,40 @@ func runGame(cmd *cobra.Command, args []string) error {
 	svc := world.NewEntityService(store)
 	svc.SetSchema(dbSchema)
 
+	// One image cache for the whole process. Created here rather than beside
+	// the sprite renderer that used to own it, because the tilemap now loads
+	// through it too and a second cache would decode the same PNGs twice and
+	// miss half the hot-reload evictions.
+	imageCache := renderer.NewImageCache()
+
 	var (
 		grid *tilemap.TileGrid
 		tr   *renderer.TilemapRenderer
 	)
 	if cfg.Map.Path != "" {
-		g, err := tilemap.LoadMap(ctx, svc, store.DB(), cfg.Map.Path)
+		g, src, err := tilemap.LoadMap(ctx, svc, store.DB(), cfg.Map.Path)
 		if err != nil {
 			return fmt.Errorf("loading map: %w", err)
 		}
 		grid = g
-		t, err := renderer.NewTilemapRenderer(store.DB(), cfg.Window.Width, cfg.Window.Height, cfg.Window.TileSize)
+		// The map's own cell size has to be the one everything else uses.
+		//
+		// Tiles are placed from the map file now; entities are placed from
+		// window.tileSize, as they always were. Before this they could not
+		// disagree, because both came from the config. A 32px map in a 16px
+		// project would now draw its tiles on one grid and its player on
+		// another, with nothing to say so — so it is refused, naming both
+		// numbers, rather than half-drawn.
+		if src != nil && (src.TileWidth != cfg.Window.TileSize || src.TileHeight != cfg.Window.TileSize) {
+			return fmt.Errorf(
+				"map %s has %dx%d pixel tiles and window.tileSize is %d; "+
+					"entities are placed on the second and tiles on the first, so they must agree",
+				cfg.Map.Path, src.TileWidth, src.TileHeight, cfg.Window.TileSize)
+		}
+		// The parsed map goes to the renderer as well as the database: the
+		// database holds one row per cell and cannot say what is stacked on it.
+		t, err := renderer.NewTilemapRenderer(store.DB(), src, imageCache,
+			cfg.Window.Width, cfg.Window.Height, cfg.Window.TileSize)
 		if err != nil {
 			return fmt.Errorf("building tilemap renderer: %w", err)
 		}
@@ -161,7 +184,6 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	imageCache := renderer.NewImageCache()
 	if spritesDir != "" {
 		go func() {
 			if err := imageCache.WatchDir(ctx, spritesDir); err != nil {
@@ -253,7 +275,10 @@ func ensureGoblinBehavior(ctx context.Context, goblinID int64, loader *agent.Loa
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	// Ignored deliberately and said so: this rolls back only when the commit
+	// below did not happen, and a rollback that fails after a failure has
+	// nothing left to report to.
+	defer func() { _ = tx.Rollback() }()
 	a := agent.NewAgent(def, goblinID, "", tickDurationMs)
 	if err := agent.StartAgent(a, registry, 0,
 		storage.NewTxWorldWriter(tx),

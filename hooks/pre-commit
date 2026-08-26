@@ -57,6 +57,15 @@ fi
 
 # ── 2. Lint ──
 run "golangci-lint" $MISE_BIN golangci-lint run ./...
+# The ebitengine-tagged half, which the run above does not compile. Skipped
+# rather than failed when the X11 headers are not installed: a contributor
+# without a graphics toolchain can still commit, and CI has one.
+if pkg-config --exists x11 2>/dev/null || [ -d /home/linuxbrew/.linuxbrew/include/X11 ]; then
+  run "golangci-lint (ebitengine)" env \
+    CGO_CFLAGS="-I/home/linuxbrew/.linuxbrew/include -I/home/linuxbrew/.linuxbrew/opt/xorgproto/include" \
+    CGO_LDFLAGS="-L/home/linuxbrew/.linuxbrew/lib" \
+    $MISE_BIN golangci-lint run --build-tags ebitengine ./...
+fi
 
 # ── 3. Tests ──
 run "go test" go test ./...
