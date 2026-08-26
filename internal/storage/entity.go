@@ -409,6 +409,22 @@ func (t *sqliteTx) exactlyOneRow(ctx context.Context, tableName string, entityID
 // are gone — quietly, on every tick, forever. event_queue is drained by tick
 // the same way. Only transitions is left: it is the audit log, and it is meant
 // to outlive what it describes, which is why it declares no foreign key.
+// RecordSpawn records that a map's object has become an entity.
+//
+// In the caller's transaction so it commits with the entity it names, and a
+// plain INSERT so a repeat is a refusal rather than a silent overwrite: two
+// objects claiming one id is a bad map, and the spawner refuses the second
+// before it gets here.
+func (t *sqliteTx) RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error {
+	_, err := t.tx.ExecContext(ctx,
+		`INSERT INTO spawns (map, object_id, entity_id) VALUES (?, ?, ?)`,
+		mapPath, objectID, entityID)
+	if err != nil {
+		return fmt.Errorf("recording spawn %d of %q: %w", objectID, mapPath, err)
+	}
+	return nil
+}
+
 func (t *sqliteTx) DeleteEntity(ctx context.Context, entityID int64) error {
 	names := make([]string, 0, len(t.schema.Components))
 	for name := range t.schema.Components {

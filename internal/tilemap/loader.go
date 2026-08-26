@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/BurntSushi/toml"
 	"github.com/tmbritton/ecs-db/internal/tiled"
@@ -40,6 +42,25 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 
 	if _, err := SyncTiles(ctx, svc, db, file.Tiles); err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
+	}
+
+	// Spawns come from the same file as the tiles and are loaded with them: a
+	// caller that wanted one without the other would be asking for half a map.
+	// Refusals are returned rather than raised — one object with a typo in its
+	// type should not stop the other nineteen, and the caller decides how loud
+	// to be about it.
+	spawns, err := SyncSpawns(ctx, svc, db, filepath.Clean(path), file.Source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("LoadMap: spawning from %q: %w", path, err)
+	}
+	for _, refused := range spawns.Refused {
+		log.Printf("tilemap: %s: %s", path, refused)
+	}
+	// Warnings are entities that were created and should not have been — a type
+	// at validationLevel "warning" missing a required component. Louder than
+	// nothing and quieter than a refusal, which is what "warning" asked for.
+	for _, warning := range spawns.Warnings {
+		log.Printf("tilemap: %s: created anyway: %s", path, warning)
 	}
 
 	grid := NewTileGrid(file.Width, file.Height)

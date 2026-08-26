@@ -582,7 +582,12 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - `make lint` now runs both tag sets, which is how two findings had sat unseen in the half `golangci-lint run` does not compile
   - Not verified on screen: the only map the engine loads is still the character format, which has no tileset. Story 7 migrates it, and that is when to look
 
-- [ ] **Object-layer spawns** — Entity type + component overrides at startup, replacing `ensurePlayerEntity`/`ensureGoblinEntity`.
+- [x] **Object-layer spawns** — Entity type + component overrides at startup, replacing `ensurePlayerEntity`/`ensureGoblinEntity`.
+  - Identity is an engine-owned `spawns` table keyed `(map, object_id)`: an object has none of its own, because the entity it made has moved or died by the time the file is re-read. Create once, never update, never delete — the file says where a world starts, not what it is
+  - `ON DELETE SET NULL`, not `CASCADE`: the row is a fact about the import and stays true after the goblin dies
+  - An object with no class is not a spawn, so an object layer can hold markers and bounds; a spawnable type must declare `Position`, and a property setting it is refused
+  - Found by review: a duplicate object id left an entity no spawn row pointed at and then hid it forever; entity and record were two transactions; `validationLevel: "warning"` built half an entity in silence; pixel→cell truncated instead of flooring and checked no bounds
+  - Not verified on screen — the configured map is still the character format, and Story 7 migrates it
 
 - [ ] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
 

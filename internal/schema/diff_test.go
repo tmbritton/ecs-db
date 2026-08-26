@@ -1335,9 +1335,9 @@ func TestPropertyByName_Found(t *testing.T) {
 	props := map[string]Property{
 		"x": {Type: PropertyTypeNumber},
 	}
-	p, ok := PropertyByName(props, "x")
-	if !ok {
-		t.Fatal("PropertyByName returned false")
+	p, canonical := PropertyByName(props, "x")
+	if canonical != "x" {
+		t.Fatalf("canonical name = %q, want %q", canonical, "x")
 	}
 	if p.Type != PropertyTypeNumber {
 		t.Errorf("p.Type = %q, want %q", p.Type, PropertyTypeNumber)
@@ -1348,9 +1348,12 @@ func TestPropertyByName_CaseInsensitive(t *testing.T) {
 	props := map[string]Property{
 		"imageId": {Type: PropertyTypeString},
 	}
-	p, ok := PropertyByName(props, "IMAGEID")
-	if !ok {
-		t.Fatal("PropertyByName returned false")
+	// The canonical key, not the one that was asked for. Values are written
+	// back under it, so a caller that used the caller's casing produced a row
+	// with no value for the property it had just found.
+	p, canonical := PropertyByName(props, "IMAGEID")
+	if canonical != "imageId" {
+		t.Fatalf("canonical name = %q, want %q", canonical, "imageId")
 	}
 	if p.Type != PropertyTypeString {
 		t.Errorf("p.Type = %q, want %q", p.Type, PropertyTypeString)
@@ -1361,17 +1364,17 @@ func TestPropertyByName_NotFound(t *testing.T) {
 	props := map[string]Property{
 		"x": {Type: PropertyTypeNumber},
 	}
-	_, ok := PropertyByName(props, "y")
-	if ok {
-		t.Error("PropertyByName returned true for missing property")
+	_, canonical := PropertyByName(props, "y")
+	if canonical != "" {
+		t.Errorf("PropertyByName found %q for a property that is not there", canonical)
 	}
 }
 
 func TestPropertyByName_EmptyMap(t *testing.T) {
 	props := map[string]Property{}
-	_, ok := PropertyByName(props, "x")
-	if ok {
-		t.Error("PropertyByName returned true on empty map")
+	_, canonical := PropertyByName(props, "x")
+	if canonical != "" {
+		t.Errorf("PropertyByName found %q in an empty map", canonical)
 	}
 }
 

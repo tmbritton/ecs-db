@@ -11,6 +11,7 @@ type mockTx struct {
 	detachCompErr       error
 	setValuesErr        error
 	deleteEntityErr     error
+	spawns              [][3]any
 	commitErr           error
 	rollbackErr         error
 	committed           bool
@@ -45,6 +46,11 @@ func (m *mockTx) DetachComponent(ctx context.Context, entityID int64, compName s
 
 func (m *mockTx) SetComponentValues(ctx context.Context, entityID int64, compName string, values ComponentValues) error {
 	return m.setValuesErr
+}
+
+func (m *mockTx) RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error {
+	m.spawns = append(m.spawns, [3]any{mapPath, objectID, entityID})
+	return nil
 }
 
 func (m *mockTx) DeleteEntity(ctx context.Context, entityID int64) error {

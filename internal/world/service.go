@@ -29,6 +29,17 @@ func (s *EntityService) SetSchema(ds schema.DatabaseSchema) {
 	s.schema = &ds
 }
 
+// Schema is the schema this service validates against, or nil when none has
+// been set.
+//
+// Read-only by convention and by the caller's need: the map loader has to know
+// what type a component's property is before it can read a Tiled property as
+// one, and the alternative is loading the schema a second time from a path the
+// service already knows.
+func (s *EntityService) Schema() *schema.DatabaseSchema {
+	return s.schema
+}
+
 // Warnings returns warnings from the last CreateEntity call.
 func (s *EntityService) Warnings() []string {
 	s.mu.Lock()

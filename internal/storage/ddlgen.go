@@ -190,8 +190,8 @@ func (g *Generator) genAddProperty(c schema.Change) []Statement {
 	}
 
 	// Look up the property definition.
-	prop, found := schema.PropertyByName(comp.Properties, c.Property)
-	if !found {
+	prop, canonicalProp := schema.PropertyByName(comp.Properties, c.Property)
+	if canonicalProp == "" {
 		return []Statement{{
 			Kind:        "error",
 			Destructive: false,

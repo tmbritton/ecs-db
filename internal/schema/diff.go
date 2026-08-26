@@ -777,15 +777,21 @@ func ComponentByName(db *DatabaseSchema, name string) (Component, string) {
 	return Component{}, ""
 }
 
-// PropertyByName looks up a Property by lowercase name from a map.
-func PropertyByName(props map[string]Property, name string) (Property, bool) {
+// PropertyByName looks up a Property from a map by case-insensitive name, and
+// returns the canonical key alongside it — empty when there is no such property.
+//
+// The canonical name, not a bool, on the same terms as ComponentByName: the
+// insert path keys its values by the name the schema declares, so a caller that
+// matched "maxhp" and then wrote it back in that casing produced a row with no
+// value for maxHp and a NOT NULL constraint failure naming a column.
+func PropertyByName(props map[string]Property, name string) (Property, string) {
 	lower := strings.ToLower(name)
 	for k, p := range props {
 		if strings.ToLower(k) == lower {
-			return p, true
+			return p, k
 		}
 	}
-	return Property{}, false
+	return Property{}, ""
 }
 
 // canBecome reports whether the columns a table already has can be altered into

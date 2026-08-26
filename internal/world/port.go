@@ -67,6 +67,14 @@ type Tx interface {
 	// Rows in transitions are left: it is the audit log, it declares no foreign
 	// key, and it is meant to outlive what it describes.
 	DeleteEntity(ctx context.Context, entityID int64) error
+	// RecordSpawn records that a map's object has become an entity, so a later
+	// load of the same map does not create it again.
+	//
+	// On Tx rather than beside it, because it has to commit with the entity it
+	// describes. The two were separate statements, and anything between them —
+	// a duplicate object id, a killed process — left an entity that no spawn
+	// row pointed at, which the next load duplicated and never mentioned.
+	RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error
 	// Commit commits the transaction.
 	Commit() error
 	// Rollback rolls back the transaction.

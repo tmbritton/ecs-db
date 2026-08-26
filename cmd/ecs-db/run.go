@@ -144,22 +144,39 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	playerID, err := ensurePlayerEntity(ctx, svc, store.DB())
+	// The entities come from the map's object layer now, spawned by LoadMap
+	// above. What is left here is finding the two the engine still refers to by
+	// name — which is the half of the old ensure functions worth keeping, and
+	// goes when entity-type behaviour and player input stop being special-cased.
+	playerID, err := findEntityOfType(ctx, store.DB(), "Player")
 	if err != nil {
-		return fmt.Errorf("ensuring player entity: %w", err)
+		return fmt.Errorf("looking up the player: %w", err)
 	}
-
-	goblinID, err := ensureGoblinEntity(ctx, svc, store.DB())
+	goblinID, err := findEntityOfType(ctx, store.DB(), "Goblin")
 	if err != nil {
-		return fmt.Errorf("ensuring goblin entity: %w", err)
+		return fmt.Errorf("looking up the goblin: %w", err)
 	}
-	if err := ensureGoblinBehavior(ctx, goblinID, loader, registry, store.DB()); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: goblin behavior: %v\n", err)
+	if goblinID != 0 {
+		if err := ensureGoblinBehavior(ctx, goblinID, loader, registry, store.DB()); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: goblin behavior: %v\n", err)
+		}
 	}
 
 	var inputHandler agent.InputHandler
-	if grid != nil {
+	if grid != nil && playerID != 0 {
 		inputHandler = game.NewPlayerInputHandler(playerID, grid)
+	}
+	if playerID == 0 && cfg.Map.Path != "" {
+		// Said once and plainly. A map with no Player object draws fine and
+		// does not respond to a key, and "nothing happens when I press an arrow"
+		// is not a symptom anybody traces back to a missing spawn.
+		//
+		// Only when a map is configured: a project with no [map] section has
+		// nowhere to add the object, and telling it to "add a Player to " with
+		// nothing after it is worse than saying nothing.
+		fmt.Fprintf(os.Stderr,
+			"Warning: no Player entity — nothing to control. Add an object of class Player to %s\n",
+			cfg.Map.Path)
 	}
 
 	var animPath, spritesDir string
@@ -212,50 +229,25 @@ func runGame(cmd *cobra.Command, args []string) error {
 	return ebiten.RunGame(g)
 }
 
-// TODO: prototype bootstrap — replace with a proper scene/level loader before shipping a real game.
-// ensurePlayerEntity returns the existing Player entity ID, or creates one at (2,2) if absent.
-// The sheet field is intentionally empty — SyncToDatabase stamps the correct path on every startup.
-func ensurePlayerEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
+// findEntityOfType is the id of an entity of this type, or 0 when there is none.
+//
+// What is left of ensurePlayerEntity and ensureGoblinEntity, which created a
+// Player at (2,2) and a Goblin at (15,12) in Go under a TODO from Epic 5. The
+// map's object layer is that scene loader; this is only the lookup half, and
+// exists because the input handler and the goblin's machine still name their
+// entity by type. Zero rather than an error for "no such entity": a map without
+// a Player is a map somebody is still building, not a failure to start.
+func findEntityOfType(ctx context.Context, db *sql.DB, entityType string) (int64, error) {
 	var id int64
-	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Player' LIMIT 1`).Scan(&id)
-	if err == nil {
-		return id, nil
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM entities WHERE entity_type = ? ORDER BY id LIMIT 1`, entityType).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("looking up player: %w", err)
-	}
-	e, err := svc.CreateEntity(ctx, "Player", []world.EntityComponent{
-		{Name: "Position", Values: world.ComponentValues{"x": 2, "y": 2}},
-		{Name: "Sprite", Values: world.ComponentValues{"sheet": "", "animation": "player_idle", "flip_x": false}},
-		{Name: "Health", Values: world.ComponentValues{"hp": 10, "maxHp": 10}},
-	})
 	if err != nil {
-		return 0, fmt.Errorf("creating player: %w", err)
+		return 0, err
 	}
-	return e.ID, nil
-}
-
-// TODO: prototype bootstrap — replace with a proper scene/level loader before shipping a real game.
-// ensureGoblinEntity returns the existing Goblin entity ID, or creates one at (15,12) if absent.
-// The sheet field is intentionally empty — SyncToDatabase stamps the correct path on every startup.
-func ensureGoblinEntity(ctx context.Context, svc *world.EntityService, db *sql.DB) (int64, error) {
-	var id int64
-	err := db.QueryRowContext(ctx, `SELECT id FROM entities WHERE entity_type = 'Goblin' LIMIT 1`).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("looking up goblin: %w", err)
-	}
-	e, err := svc.CreateEntity(ctx, "Goblin", []world.EntityComponent{
-		{Name: "Position", Values: world.ComponentValues{"x": 15, "y": 12}},
-		{Name: "Sprite", Values: world.ComponentValues{"sheet": "", "animation": "goblin_idle", "flip_x": false}},
-		{Name: "Health", Values: world.ComponentValues{"hp": 5, "maxHp": 5}},
-	})
-	if err != nil {
-		return 0, fmt.Errorf("creating goblin: %w", err)
-	}
-	return e.ID, nil
+	return id, nil
 }
 
 // ensureGoblinBehavior starts the "goblin" machine for goblinID if it is not already running.
