@@ -1,0 +1,691 @@
+package tiled_test
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/tmbritton/ecs-db/internal/tiled"
+)
+
+// richTMX carries one of everything the reading model drops. If a save can keep
+// this file intact it can keep a real Tiled project intact, which is the whole
+// claim of the story this belongs to.
+const richTMX = `<?xml version="1.0" encoding="UTF-8"?>
+<!-- a level somebody wrote by hand -->
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="2" height="2" tilewidth="32" tileheight="32" infinite="0" nextlayerid="9" nextobjectid="42" backgroundcolor="#112233">
+ <editorsettings>
+  <export target="level.json" format="json"/>
+ </editorsettings>
+ <properties>
+  <property name="mapId" value="rich"/>
+ </properties>
+ <tileset firstgid="1" source="starter.tsx"/>
+ <imagelayer id="7" name="sky" offsetx="4" offsety="-8" repeatx="1">
+  <image source="sky.png" width="64" height="64"/>
+ </imagelayer>
+ <group id="8" name="folder">
+  <layer id="1" name="ground" width="2" height="2" offsetx="8" offsety="-4" parallaxx="0.5" tintcolor="#ff0000" class="floors">
+   <data encoding="csv">
+1,1,
+1,1
+</data>
+  </layer>
+ </group>
+ <objectgroup id="2" name="spawns" color="#00ff00" draworder="index">
+  <object id="7" name="g" type="Goblin" x="32" y="64">
+   <polygon points="0,0 8,0 8,8"/>
+   <properties>
+    <property name="Health.hp" type="int" value="5"/>
+   </properties>
+  </object>
+  <object id="8" name="note" x="0" y="0">
+   <text wrap="1">hello</text>
+  </object>
+ </objectgroup>
+</map>
+`
+
+func shippedLevel(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile("../../mods/map/level1.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestParseDocument_ASaveWithNoEditIsByteIdentical(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  []byte
+	}{
+		{"the shipped level", nil},
+		{"a map full of things the reader drops", []byte(richTMX)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := tc.src
+			if src == nil {
+				src = shippedLevel(t)
+			}
+			doc, err := tiled.ParseDocument(src, "level.tmx")
+			if err != nil {
+				t.Fatalf("ParseDocument: %v", err)
+			}
+			if got := doc.Bytes(); string(got) != string(src) {
+				t.Errorf("a save with no edit changed the file\n got: %q\nwant: %q", got, src)
+			}
+		})
+	}
+}
+
+func TestDocument_MapReadsWhatTheDocumentHolds(t *testing.T) {
+	doc, err := tiled.ParseDocument(shippedLevel(t), "level1.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Width != 20 || m.Height != 15 {
+		t.Errorf("map is %dx%d, want 20x15", m.Width, m.Height)
+	}
+	if len(m.Layers) != 1 || m.Layers[0].Name != "ground" {
+		t.Errorf("layers: %+v", m.Layers)
+	}
+	if m.Name != "level1.tmx" {
+		t.Errorf("map name is %q", m.Name)
+	}
+}
+
+func TestParseDocument_RefusesWhatItCannotEdit(t *testing.T) {
+	for _, tc := range []struct{ name, src, want string }{
+		{"a .tmj", `{"width":2}`, ".tmx"},
+		{"not a map at all", `<tileset name="x"/>`, "tiled:"},
+		{"an infinite map", `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" infinite="1"/>`, "infinite"},
+		{"a map with no tile size", `<map version="1.10" width="1" height="1"/>`, "pixels"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tiled.ParseDocument([]byte(tc.src), "x.tmx")
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refusal %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDocument_SetLayerDataChangesTheDataAndNothingElse(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetLayerData(0, []uint32{1, 2, 2, 1}); err != nil {
+		t.Fatal(err)
+	}
+	got := string(doc.Bytes())
+	want := strings.Replace(richTMX, "\n1,1,\n1,1\n", "\n1,2,\n2,1\n", 1)
+	if got != want {
+		t.Errorf("painting a cell changed more than the layer\n got: %q\nwant: %q", got, want)
+	}
+
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Layers[0].TileAt(1, 0).GID != 2 {
+		t.Errorf("the map does not read back what was painted: %v", m.Layers[0].Data)
+	}
+}
+
+func TestDocument_SetLayerDataKeepsTheEncodingTheFileUsed(t *testing.T) {
+	const src = `<map version="1.10" width="2" height="1" tilewidth="8" tileheight="8">
+ <layer id="1" name="l" width="2" height="1">
+  <data encoding="base64" compression="zlib">eJxjZGBgYGJgYAAAABgABA==</data>
+ </layer>
+</map>`
+	doc, err := tiled.ParseDocument([]byte(src), "b.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetLayerData(0, []uint32{5, 6}); err != nil {
+		t.Fatal(err)
+	}
+	out := string(doc.Bytes())
+	if !strings.Contains(out, `encoding="base64" compression="zlib"`) {
+		t.Fatalf("the encoding attributes changed: %q", out)
+	}
+	if strings.Contains(out, "5,6") {
+		t.Fatalf("a base64 layer was rewritten as CSV: %q", out)
+	}
+	back, err := tiled.ParseDocument([]byte(out), "b.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := back.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Layers[0].Data[0] != 5 || m.Layers[0].Data[1] != 6 {
+		t.Errorf("gids did not survive: %v", m.Layers[0].Data)
+	}
+}
+
+func TestDocument_SetLayerDataWritesTheElementFormWhenThatIsWhatTheFileUses(t *testing.T) {
+	const src = `<map version="1.10" width="2" height="1" tilewidth="8" tileheight="8">
+ <layer id="1" name="l" width="2" height="1">
+  <data>
+   <tile gid="1"/>
+   <tile gid="0"/>
+  </data>
+ </layer>
+</map>`
+	doc, err := tiled.ParseDocument([]byte(src), "e.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetLayerData(0, []uint32{0, 3}); err != nil {
+		t.Fatal(err)
+	}
+	back, err := tiled.ParseDocument(doc.Bytes(), "e.tmx")
+	if err != nil {
+		t.Fatalf("the element form did not parse back: %v\n%s", err, doc.Bytes())
+	}
+	m, err := back.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Layers[0].Data[0] != 0 || m.Layers[0].Data[1] != 3 {
+		t.Errorf("gids did not survive: %v", m.Layers[0].Data)
+	}
+}
+
+func TestDocument_SetLayerDataRefusesWhatWouldBreakTheMap(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		idx  int
+		gids []uint32
+		want string
+	}{
+		{"a layer that is not there", 4, []uint32{1, 1, 1, 1}, "layer 4"},
+		{"a negative index", -1, []uint32{1, 1, 1, 1}, "layer -1"},
+		{"too few cells", 0, []uint32{1, 1, 1}, "3"},
+		{"too many cells", 0, []uint32{1, 1, 1, 1, 1}, "5"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := doc.SetLayerData(tc.idx, tc.gids)
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refusal %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+	if string(doc.Bytes()) != richTMX {
+		t.Error("a refused edit changed the document")
+	}
+}
+
+// The layer index the document takes is the index into Map().Layers, and that
+// list is flattened through <group> folders. A document that counted only
+// top-level <layer> elements would paint the wrong layer in any map whose
+// author had organised it.
+func TestDocument_LayerIndexMatchesTheFlattenedMap(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Layers) != 1 || m.Layers[0].Name != "ground" {
+		t.Fatalf("the fixture's only layer is inside a folder: %+v", m.Layers)
+	}
+	if err := doc.SetLayerData(0, []uint32{2, 2, 2, 2}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(doc.Bytes()), "\n2,2,\n2,2\n") {
+		t.Error("layer 0 is not the layer inside the folder")
+	}
+}
+
+func TestDocument_ObjectIdsComeFromTheCounterAndNeverGoBack(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.NextObjectID(); got != 42 {
+		t.Fatalf("NextObjectID is %d, want 42", got)
+	}
+	first, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 32, Y: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != 42 {
+		t.Errorf("first new object got id %d, want 42", first)
+	}
+	if err := doc.RemoveObject(first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 64, Y: 64})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Errorf("a deleted object's id was handed out again: %d", second)
+	}
+	if got := doc.NextObjectID(); got != 44 {
+		t.Errorf("NextObjectID is %d, want 44", got)
+	}
+	if !strings.Contains(string(doc.Bytes()), `nextobjectid="44"`) {
+		t.Error("the counter was not written back to the file")
+	}
+}
+
+func TestDocument_AMapWithNoCounterGetsOneAboveItsHighestObject(t *testing.T) {
+	const src = `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8">
+ <objectgroup id="1" name="spawns">
+  <object id="17" type="Goblin" x="0" y="8"/>
+ </objectgroup>
+</map>`
+	doc, err := tiled.ParseDocument([]byte(src), "n.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.NextObjectID(); got != 18 {
+		t.Fatalf("NextObjectID is %d, want 18", got)
+	}
+	id, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 0, Y: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 18 {
+		t.Errorf("got id %d, want 18", id)
+	}
+	if !strings.Contains(string(doc.Bytes()), `nextobjectid="19"`) {
+		t.Errorf("the counter was not added to the map: %s", doc.Bytes())
+	}
+}
+
+func TestDocument_AnAddedObjectIsASpawnTheEngineCanRead(t *testing.T) {
+	doc, err := tiled.ParseDocument(shippedLevel(t), "level1.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := doc.AddObject(0, tiled.Object{
+		Name: "watcher",
+		Type: "Goblin",
+		X:    96, Y: 128,
+		Width: 32, Height: 32,
+		Properties: tiled.Properties{
+			"Health.hp":        {Type: "int", Value: "3"},
+			"Sprite.animation": {Type: "string", Value: "goblin_idle"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *tiled.Object
+	for i, o := range m.ObjectGroups[0].Objects {
+		if o.ID == id {
+			found = &m.ObjectGroups[0].Objects[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the new object is not in the map: %s", doc.Bytes())
+	}
+	if found.Type != "Goblin" || found.X != 96 || found.Y != 128 {
+		t.Errorf("object came back as %+v", *found)
+	}
+	if got := found.Properties.Get("Health.hp"); got != "3" {
+		t.Errorf("Health.hp came back as %q", got)
+	}
+	if got := found.Properties["Health.hp"].Type; got != "int" {
+		t.Errorf("Health.hp is typed %q, want int", got)
+	}
+	if got := found.Properties["Sprite.animation"].Type; got != "string" {
+		t.Errorf("Sprite.animation is typed %q, want string", got)
+	}
+}
+
+func TestDocument_AddAndRemoveObjectRefuseWhatIsNotThere(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.AddObject(3, tiled.Object{Type: "Goblin"}); err == nil {
+		t.Error("adding to an object group that is not there was accepted")
+	}
+	if err := doc.RemoveObject(999); err == nil {
+		t.Error("removing an object that is not there was accepted")
+	}
+	if string(doc.Bytes()) != richTMX {
+		t.Error("a refused edit changed the document")
+	}
+}
+
+func TestDocument_RemovingAnObjectLeavesTheRestOfTheGroupAlone(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.RemoveObject(7); err != nil {
+		t.Fatal(err)
+	}
+	// The whole document, not a handful of substrings. A contains-check would
+	// pass with <editorsettings> dropped, the image layer gone or the
+	// indentation collapsed — which is exactly what this story exists to catch.
+	want := strings.Replace(richTMX, `  <object id="7" name="g" type="Goblin" x="32" y="64">
+   <polygon points="0,0 8,0 8,8"/>
+   <properties>
+    <property name="Health.hp" type="int" value="5"/>
+   </properties>
+  </object>
+`, "", 1)
+	if got := string(doc.Bytes()); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestNewDocument_WritesAMapTheEngineCanLoad(t *testing.T) {
+	doc, err := tiled.NewDocument("level2.tmx", tiled.NewMapSpec{
+		MapID: "level2", Width: 4, Height: 3, TileWidth: 32, TileHeight: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatalf("the map it wrote does not parse: %v\n%s", err, doc.Bytes())
+	}
+	if m.Width != 4 || m.Height != 3 || m.TileWidth != 32 {
+		t.Errorf("map is %dx%d at %dpx", m.Width, m.Height, m.TileWidth)
+	}
+	if got := m.Properties.Get(tiled.PropMapID); got != "level2" {
+		t.Errorf("mapId is %q, want level2", got)
+	}
+	if len(m.Layers) != 1 || len(m.Layers[0].Data) != 12 {
+		t.Errorf("layers: %+v", m.Layers)
+	}
+	if len(m.ObjectGroups) != 1 {
+		t.Errorf("object groups: %+v", m.ObjectGroups)
+	}
+	// It has to survive the round trip it will immediately be given.
+	if _, err := tiled.ParseDocument(doc.Bytes(), "level2.tmx"); err != nil {
+		t.Fatalf("re-reading the new map failed: %v", err)
+	}
+	id, err := doc.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 32})
+	if err != nil {
+		t.Fatalf("a new map cannot take a spawn: %v", err)
+	}
+	if id != 1 {
+		t.Errorf("first object of a new map got id %d, want 1", id)
+	}
+}
+
+func TestNewDocument_RefusesAMapThatWouldBeATrap(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec tiled.NewMapSpec
+		want string
+	}{
+		{"no mapId", tiled.NewMapSpec{Width: 2, Height: 2, TileWidth: 8, TileHeight: 8}, "mapId"},
+		{"no size", tiled.NewMapSpec{MapID: "a", TileWidth: 8, TileHeight: 8}, "size"},
+		{"no tile size", tiled.NewMapSpec{MapID: "a", Width: 2, Height: 2}, "pixels"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tiled.NewDocument("x.tmx", tc.spec)
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("refusal %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A new spawn has to land in the file looking like the ones already in it. This
+// caught a real defect: the <properties> block was filled before it was
+// attached, so every property — and the closing tag — was written hard against
+// the left margin of a file indented three levels in.
+func TestDocument_AnAddedObjectIsIndentedLikeTheOnesAlreadyThere(t *testing.T) {
+	const src = `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" nextobjectid="100">
+ <objectgroup id="1" name="spawns">
+  <object id="99" type="Player" x="0" y="8"/>
+ </objectgroup>
+</map>
+`
+	doc, err := tiled.ParseDocument([]byte(src), "p.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.AddObject(0, tiled.Object{
+		Type: "Goblin", X: 32, Y: 64,
+		Properties: tiled.Properties{"Health.hp": {Type: "int", Value: "5"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	want := `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" nextobjectid="101">
+ <objectgroup id="1" name="spawns">
+  <object id="99" type="Player" x="0" y="8"/>
+  <object id="100" type="Goblin" x="32" y="64">
+   <properties>
+    <property name="Health.hp" type="int" value="5"/>
+   </properties>
+  </object>
+ </objectgroup>
+</map>
+`
+	if got := string(doc.Bytes()); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Indentation is read from the file rather than assumed, so a tab-indented map
+// stays tab-indented. Tiled indents with a single space; a hand-written or
+// generated map need not.
+func TestDocument_AnAddedObjectTakesTheFilesOwnIndentation(t *testing.T) {
+	const src = "<map version=\"1.10\" width=\"1\" height=\"1\" tilewidth=\"8\" tileheight=\"8\" nextobjectid=\"100\">\n\t<objectgroup id=\"1\" name=\"spawns\">\n\t\t<object id=\"99\" type=\"Player\" x=\"0\" y=\"8\"/>\n\t</objectgroup>\n</map>\n"
+	doc, err := tiled.ParseDocument([]byte(src), "t.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.AddObject(0, tiled.Object{
+		Type:       "Goblin",
+		X:          32,
+		Y:          64,
+		Properties: tiled.Properties{"Health.hp": {Type: "int", Value: "5"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out := string(doc.Bytes())
+	if !strings.Contains(out, "\n\t\t\t\t<property name=\"Health.hp\"") {
+		t.Errorf("the new property is not four tabs in:\n%s", out)
+	}
+	if strings.Contains(out, "\n ") {
+		t.Errorf("a tab-indented map gained space indentation:\n%s", out)
+	}
+}
+
+// A stroke that paints a whole layer must not reshape the file around it. The
+// element form is the one where that is easy to get wrong, because the tiles
+// are elements rather than text.
+func TestDocument_TheElementFormKeepsTheFilesShape(t *testing.T) {
+	const src = `<map version="1.10" width="2" height="1" tilewidth="8" tileheight="8">
+ <layer id="1" name="l" width="2" height="1">
+  <data>
+   <tile gid="1"/>
+   <tile gid="0"/>
+  </data>
+ </layer>
+</map>
+`
+	doc, err := tiled.ParseDocument([]byte(src), "e.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetLayerData(0, []uint32{0, 3}); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, "   <tile gid=\"1\"/>\n   <tile gid=\"0\"/>\n", "   <tile gid=\"0\"/>\n   <tile gid=\"3\"/>\n", 1)
+	if got := string(doc.Bytes()); got != want {
+		t.Errorf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+func TestDocument_ASpawnWithNoPropertiesGetsNoPropertiesBlock(t *testing.T) {
+	const src = `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" nextobjectid="1">
+ <objectgroup id="1" name="spawns"/>
+</map>
+`
+	doc, err := tiled.ParseDocument([]byte(src), "p.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 0, Y: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(doc.Bytes()), "properties") {
+		t.Errorf("an object with nothing to say got a properties block:\n%s", doc.Bytes())
+	}
+}
+
+// The counter is bookkeeping and bookkeeping falls behind. Two branches each
+// place a spawn: the objects land on different lines and merge cleanly, while
+// nextobjectid is one line and git takes one side of it. The map then says 3
+// with an object 4 in it — and because spawns is keyed (map, object_id), a
+// second object 3 does not create an entity, it moves the one the first object
+// made.
+func TestDocument_ACounterThatHasFallenBehindDoesNotHandOutAnIdInUse(t *testing.T) {
+	const src = `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" nextobjectid="2">
+ <objectgroup id="1" name="spawns">
+  <object id="2" type="Player" x="0" y="8"/>
+  <object id="7" type="Goblin" x="0" y="8"/>
+ </objectgroup>
+</map>
+`
+	doc, err := tiled.ParseDocument([]byte(src), "stale.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := doc.NextObjectID(); got != 8 {
+		t.Errorf("NextObjectID is %d, want 8 — one past the highest object in the file", got)
+	}
+	id, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 8, Y: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 8 {
+		t.Fatalf("got id %d, want 8", id)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]bool{}
+	for _, o := range m.ObjectGroups[0].Objects {
+		if seen[o.ID] {
+			t.Fatalf("two objects share id %d:\n%s", o.ID, doc.Bytes())
+		}
+		seen[o.ID] = true
+	}
+}
+
+// The same claim tileLayers makes, for the other flattener: an object group
+// inside a layer folder is addressable, and it is addressable at the index
+// Map().ObjectGroups gives it.
+func TestDocument_ObjectGroupIndexMatchesTheFlattenedMap(t *testing.T) {
+	const src = `<map version="1.10" width="1" height="1" tilewidth="8" tileheight="8" nextobjectid="1">
+ <group id="9" name="folder">
+  <objectgroup id="1" name="spawns"/>
+ </group>
+</map>
+`
+	doc, err := tiled.ParseDocument([]byte(src), "f.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.ObjectGroups) != 1 || m.ObjectGroups[0].Name != "spawns" {
+		t.Fatalf("the fixture's only object group is inside a folder: %+v", m.ObjectGroups)
+	}
+	if _, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 0, Y: 8}); err != nil {
+		t.Fatal(err)
+	}
+	out := string(doc.Bytes())
+	if !strings.Contains(out, `<group id="9" name="folder">`) {
+		t.Errorf("the folder was unpacked:\n%s", out)
+	}
+	if !strings.Contains(out, "\n   <object id=\"1\" type=\"Goblin\"") {
+		t.Errorf("the spawn did not land inside the folder's group:\n%s", out)
+	}
+}
+
+func TestDocument_SetLayerDataRefusesALayerItCannotWriteTo(t *testing.T) {
+	t.Run("a layer with no data element", func(t *testing.T) {
+		// A 0x0 map is the one shape that reaches this: checkCells is satisfied
+		// by a layer with no tiles when the layer has no cells.
+		doc, err := tiled.ParseDocument([]byte(
+			`<map version="1.10" width="0" height="0" tilewidth="8" tileheight="8">`+
+				`<layer id="1" name="l" width="0" height="0"/></map>`), "z.tmx")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = doc.SetLayerData(0, nil)
+		if err == nil || !strings.Contains(err.Error(), "<data>") {
+			t.Errorf("refusal was %v", err)
+		}
+	})
+	t.Run("csv that claims to be compressed", func(t *testing.T) {
+		// decodeCSV ignores compression, so such a file reads; the encoder
+		// refuses rather than writing something the attributes contradict.
+		doc, err := tiled.ParseDocument([]byte(
+			`<map version="1.10" width="2" height="1" tilewidth="8" tileheight="8">`+
+				`<layer id="1" name="l" width="2" height="1">`+
+				`<data encoding="csv" compression="zlib">1,2</data></layer></map>`), "c.tmx")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = doc.SetLayerData(0, []uint32{3, 4})
+		if err == nil || !strings.Contains(err.Error(), "zlib") {
+			t.Errorf("refusal was %v", err)
+		}
+	})
+}
+
+// A coordinate is written as a number, at every magnitude. Go's 'g' verb
+// switches to exponent notation at a million — out of reach for any map this
+// engine draws, and the point of a format function is that it does not have a
+// range outside which it means something else.
+func TestDocument_ALargeCoordinateIsStillWrittenAsANumber(t *testing.T) {
+	doc, err := tiled.NewDocument("big.tmx", tiled.NewMapSpec{
+		MapID: "big", Width: 1, Height: 1, TileWidth: 32, TileHeight: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := doc.AddObject(0, tiled.Object{Type: "Goblin", X: 1000000, Y: 2500000.5}); err != nil {
+		t.Fatal(err)
+	}
+	out := string(doc.Bytes())
+	if !strings.Contains(out, `x="1000000" y="2500000.5"`) {
+		t.Errorf("coordinates were not written as numbers:\n%s", out)
+	}
+}

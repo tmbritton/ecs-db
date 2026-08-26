@@ -1,4 +1,5 @@
-// Package tiled reads the map and tileset formats the Tiled editor writes.
+// Package tiled reads the map and tileset formats the Tiled editor writes, and
+// writes maps back.
 //
 // It knows about files and nothing else: no entities, no database, no grid, no
 // images. That is what lets every one of its tests be a string, and it is why
@@ -7,6 +8,13 @@
 // Tiled writes two interchangeable serialisations of the same map — .tmx (XML)
 // and .tmj (JSON) — and both parse into the value below, so nothing above this
 // package learns which was on disk.
+//
+// **Reading and writing use different types, and that is the point.** Map is a
+// reading model: it keeps what the engine needs and drops the rest, which is
+// right for a loader and fatal for a writer — emitting a file from it deletes
+// every construct it did not keep. Editing goes through Document, which holds
+// the file's own bytes and rewrites only the elements an edit touched. Writing
+// is .tmx only; see Document.
 package tiled
 
 import (

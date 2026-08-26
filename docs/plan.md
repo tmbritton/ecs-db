@@ -623,7 +623,11 @@ This epic's stated engine touchpoint was "Epic 14's TMX writer path". **There is
 
 Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds by entity *type* from `schema.json` and no object property feeds it, so the prototype's per-spawn dropdown would write a value nothing reads. And saving a map does not hot-reload: the watcher watches behaviours directories, `animations.toml` and the sprites directory, so a map takes effect on the next `ecs-db run`. See the epic README.
 
-- [ ] **TMX writer & round-trip fidelity** — A writer that preserves everything Forge does not model, byte-for-byte, and maintains `nextobjectid` so an id is never reused.
+- [x] **TMX writer & round-trip fidelity** — A writer that preserves everything Forge does not model, byte-for-byte, and maintains `nextobjectid` so an id is never reused.
+  - A copy-on-write tree, not an emitter: every element keeps its source bytes and is written verbatim unless an edit reached it, so what this package does not model survives without it knowing the thing exists
+  - Painting one cell of the shipped level changes exactly one line of the file, comment and all
+  - Found by review: a `nextobjectid` that had fallen behind was believed, and handed out an id already in use — which under `spawns`' `(map, object_id)` key moves a live entity rather than creating one, and needs no hand-editing to happen, only a git merge
+  - Found by review: `xml:space` lost its prefix on the root, which every edit re-renders
 
 - [ ] **Map editing session** — Which maps a project has; open, save, discard, reload, conflict. `project.Project` does not currently carry the map path at all.
 
