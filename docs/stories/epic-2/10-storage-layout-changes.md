@@ -1,10 +1,10 @@
 # Story 10: A component that changes shape is rebuilt, not patched
 
-**Epic:** 1 — Schema-driven data foundation
+**Epic:** 2 — Schema versioning & migrations
 **Status:** ✅ Complete
 **Priority:** High — one schema edit wedges the database it is edited against
 
-**Depends on:** Story 9, which is where this surfaced
+**Depends on:** Epic 1 Story 9, which is where this surfaced
 
 ## Context
 

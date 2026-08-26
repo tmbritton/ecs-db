@@ -1,6 +1,6 @@
 # Story 13: A rename keeps its data
 
-**Epic:** 1 — Schema-driven data foundation
+**Epic:** 2 — Schema versioning & migrations
 **Status:** ✅ Complete
 **Priority:** High — the most ordinary edit there is silently destroys a table
 

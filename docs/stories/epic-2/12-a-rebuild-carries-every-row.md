@@ -1,11 +1,11 @@
 # Story 12: A rebuild carries every row, and nullability is part of a column's shape
 
-**Epic:** 1 — Schema-driven data foundation
+**Epic:** 2 — Schema versioning & migrations
 **Status:** ✅ Complete
 **Priority:** High — one schema edit still makes a database refuse to open, and
 Story 11 removed the last thing that made it hard to reach
 
-**Depends on:** Story 9 (which made one property kind nullable), Story 11 (which
+**Depends on:** Epic 1 Story 9 (which made one property kind nullable), Story 11 (which
 made a rebuild happen without a version bump)
 
 ## Context
@@ -13,7 +13,7 @@ made a rebuild happen without a version bump)
 ### The wedge
 
 An `entity-ref` property is the one column the generator declares nullable, for
-the reason Story 9 records: a reference is the whole of a `Carrier` and only part
+the reason Epic 1 Story 9 records: a reference is the whole of a `Carrier` and only part
 of a `Holder`, so "no owner yet" is a state a Holder can legitimately be in — and
 it is the state every existing row is in the moment somebody adds the property,
 because `ALTER TABLE ADD COLUMN` has no value to backfill with.
@@ -140,7 +140,7 @@ change.
 
 A `NOT NULL` column whose default is `NULL` has nothing to substitute. That is
 only the `target_entity_id` of an entity-ref *component*, and there is no honest
-value for it — Story 9's rule is that a Carrier pointing at nothing is not a
+value for it — Epic 1 Story 9's rule is that a Carrier pointing at nothing is not a
 Carrier. It keeps the Story 11 hint rather than inventing an entity id.
 
 **This was written as "the engine cannot produce such a row, so it needs a

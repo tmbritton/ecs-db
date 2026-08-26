@@ -1,15 +1,15 @@
 # Story 11: A database is repaired when the generator changes, not only when the version does
 
-**Epic:** 1 — Schema-driven data foundation
+**Epic:** 2 — Schema versioning & migrations
 **Status:** ✅ Complete
-**Priority:** High — Story 9 changed the DDL the engine emits and no existing database gets it
+**Priority:** High — Epic 1 Story 9 changed the DDL the engine emits and no existing database gets it
 
-**Depends on:** Story 9 (which is what changed), Story 10 (a rebuild can now
+**Depends on:** Epic 1 Story 9 (which is what changed), Story 10 (a rebuild can now
 find the column it copies)
 
 ## Context
 
-Story 9 put `ON DELETE CASCADE` on every reference to an entity. Story 10 made a
+Epic 1 Story 9 put `ON DELETE CASCADE` on every reference to an entity. Story 10 made a
 shape change rebuild rather than fail. Both changed **what the generator emits
 for the same schema file** — and a database built before either change keeps
 what it was built with, because there are two gates between "the generator
@@ -47,7 +47,7 @@ gate 2, version bumped: 1 changes: [added_entity_type Thing]
 `SELECT DISTINCT entity_type FROM entities`, so an empty database reports every
 type as new). Nothing about `comp_carrier` appears.
 
-What each gate leaves behind, for a database built before Story 9:
+What each gate leaves behind, for a database built before Epic 1 Story 9:
 
 | form | as built | as the generator now emits it | consequence |
 |---|---|---|---|

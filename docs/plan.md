@@ -74,36 +74,7 @@ Establish `schema.json` as the declarative source of truth for components and en
   - The three paths now agree that a property reference is nullable: declaring it `NOT NULL` on create and rebuild wedged any database where the property had been added to a populated component
   - An existing database is not migrated — constraints are not in the shape the diff introspects — and the gap is pinned as a test rather than left as prose
 
-- [x] **A component that changes shape is rebuilt, not patched** — the diff asks whether the columns a table has can be altered into the ones the file wants, rather than comparing a type the database does not record.
-  - Changing a component between `entity-ref` and any other scalar type used to fail the migration and then fail every subsequent open
-  - An object whose one property is called `value` builds a table a string component would; the old comparison guessed "number" and dropped it — on an unchanged schema, and it is the shape Forge gives every new component
-  - A scalar becoming an object now keeps its rows; the reverse still cannot
-  - A statement the generator refused was committed around, because its SQL was empty and `tx.Exec("")` succeeds
-  - Destructive statements are warnings, and the confirmation says the shape changed rather than just naming a drop
-
-- [x] **A database is repaired when the generator changes, not only when the version does** — foreign keys are introspected and diffed, and a constraint that differs from what the generator would emit is answered with a table rebuild.
-  - Two gates stood between "the generator changed" and "the table is rebuilt": `checkAndMigrate` returned the moment `meta.schema_version` matched the file's, and introspection never read `pragma_foreign_key_list`
-  - So Story 9's cascade reached no existing database, and a schema edit saved without a version bump did nothing — which Forge had to warn about rather than rely on
-  - One statement of what a reference is: `schema.EntityReference`, written in the form the pragma reports, with the generator's DDL derived from it and a test building a real table for every component and property type
-  - `MigrationRunner` splits into `Plan` and `Apply`, so the backup happens between deciding there is work and doing it; a plan is empty on statements rather than changes, because an entity-less database reports every entity type as new
-  - One rebuild per component rather than one per change that wants one, carrying every reason
-  - Found by review: `LIKE 'comp_%'` has an unescaped wildcard, so a table merely *starting* with "comp" made the migration repeat on every open forever; and `.bak.v{version}` is no longer unique, so a second repair was overwriting the first one's restore point
-
-- [x] **A rebuild carries every row, and nullability is part of a column's shape** — the copy substitutes a column's default where a NULL cannot come across, and a column whose nullability drifted is repaired.
-  - An entity-ref property is the only column the generator declares nullable, so retyping one made the rebuild's copy fail — and `NewSQLiteStore` returns that error on *every* subsequent open, so the database never opened again until `schema.json` was edited back
-  - The engine already invents a value for exactly this: `ALTER TABLE ADD COLUMN … NOT NULL DEFAULT 0` gives every existing row a `0`. The copy now uses the same function, so adding a property and retyping one cannot disagree
-  - `notnull` is introspected and diffed, so a column that should refuse NULLs and does not is repaired — the half Story 11 left open. The primary key is excluded: SQLite reports every `INTEGER PRIMARY KEY` as nullable
-  - Loud, because it invents data: the log names the column, the value and how many rows
-  - Found by review: the one case documented as needing a hand-edited database was reachable in one save, because a component's *type* can change into the shape whose column it collides with — `target_entity_id` is now a reserved property name
-  - Found by review: the nullability rule was written out in five places and derived in none, so the rebuild's belief about a column could contradict the DDL it emitted for it with no test failing
-
-- [x] **A rename keeps its data** — `renamedFrom` on a component, a property or an entity type migrates the table, the column or the rows instead of dropping them.
-  - Renaming a component dropped its table and built an empty one; renaming a property dropped the column; renaming an entity type produced no statements at all and stranded every existing row under the old string. All three reported success
-  - A rename cannot be inferred — `x → col_x` and "delete x, add col_x" are the same diff — so the author says it, and the format had nowhere to. Unknown property keys already parse, so the field breaks no existing file
-  - The diff *applies* the declared renames to the introspected schema before comparing anything, so types, foreign keys and nullability all compare like for like rather than against a column believed dropped
-  - A rename nobody declared is still reported: every dropped table and column says what it takes, and an unambiguous one-for-one swap names `renamedFrom` as the fix
-  - Found by review: the generator was handed the pre-rename snapshot, so a rename plus any rebuild on the same thing failed the migration and made the database unopenable — reopening the wedge story 12 closed
-  - Found by review: an entity-type rename was skipped when the new name already had rows, which is a guard that belongs to tables and not to an `UPDATE`; and a declared rename that could not be applied dropped the table without saying the declaration had been ignored
+Stories 10–13 were written here and belong to Epic 2 — they are introspection, diff and DDL generation, not the schema foundation. They have moved; their numbers have not, because the code refers to them by number and Epic 1 already has a Story 10's worth of its own.
 
 ## Epic 2: Schema versioning & migrations
 
@@ -145,6 +116,39 @@ Refined into stories: See [`docs/stories/epic-2/`](docs/stories/epic-2/).
   - Configurable retention (keep last N backups)
   - Backup failure → warning logged, migration proceeds
   - Coverage: `storage` 89.3%
+
+**Reopened.** The six stories above were complete in the sense that their acceptance criteria were met. They were not correct: nothing had yet run the migration path against adversarial schemas, and Forge — which generates schema edits by the click rather than by hand — found several ways to make a database refuse to open, or to drop data and report success. The four below are the repairs. Numbering continues Epic 1's sequence because that is where they were written and because the code cites them by number.
+
+- [x] **A component that changes shape is rebuilt, not patched** — the diff asks whether the columns a table has can be altered into the ones the file wants, rather than comparing a type the database does not record.
+  - Changing a component between `entity-ref` and any other scalar type used to fail the migration and then fail every subsequent open
+  - An object whose one property is called `value` builds a table a string component would; the old comparison guessed "number" and dropped it — on an unchanged schema, and it is the shape Forge gives every new component
+  - A scalar becoming an object now keeps its rows; the reverse still cannot
+  - A statement the generator refused was committed around, because its SQL was empty and `tx.Exec("")` succeeds
+  - Destructive statements are warnings, and the confirmation says the shape changed rather than just naming a drop
+
+- [x] **A database is repaired when the generator changes, not only when the version does** — foreign keys are introspected and diffed, and a constraint that differs from what the generator would emit is answered with a table rebuild.
+  - Two gates stood between "the generator changed" and "the table is rebuilt": `checkAndMigrate` returned the moment `meta.schema_version` matched the file's, and introspection never read `pragma_foreign_key_list`
+  - So Story 9's cascade reached no existing database, and a schema edit saved without a version bump did nothing — which Forge had to warn about rather than rely on
+  - One statement of what a reference is: `schema.EntityReference`, written in the form the pragma reports, with the generator's DDL derived from it and a test building a real table for every component and property type
+  - `MigrationRunner` splits into `Plan` and `Apply`, so the backup happens between deciding there is work and doing it; a plan is empty on statements rather than changes, because an entity-less database reports every entity type as new
+  - One rebuild per component rather than one per change that wants one, carrying every reason
+  - Found by review: `LIKE 'comp_%'` has an unescaped wildcard, so a table merely *starting* with "comp" made the migration repeat on every open forever; and `.bak.v{version}` is no longer unique, so a second repair was overwriting the first one's restore point
+
+- [x] **A rebuild carries every row, and nullability is part of a column's shape** — the copy substitutes a column's default where a NULL cannot come across, and a column whose nullability drifted is repaired.
+  - An entity-ref property is the only column the generator declares nullable, so retyping one made the rebuild's copy fail — and `NewSQLiteStore` returns that error on *every* subsequent open, so the database never opened again until `schema.json` was edited back
+  - The engine already invents a value for exactly this: `ALTER TABLE ADD COLUMN … NOT NULL DEFAULT 0` gives every existing row a `0`. The copy now uses the same function, so adding a property and retyping one cannot disagree
+  - `notnull` is introspected and diffed, so a column that should refuse NULLs and does not is repaired — the half Story 11 left open. The primary key is excluded: SQLite reports every `INTEGER PRIMARY KEY` as nullable
+  - Loud, because it invents data: the log names the column, the value and how many rows
+  - Found by review: the one case documented as needing a hand-edited database was reachable in one save, because a component's *type* can change into the shape whose column it collides with — `target_entity_id` is now a reserved property name
+  - Found by review: the nullability rule was written out in five places and derived in none, so the rebuild's belief about a column could contradict the DDL it emitted for it with no test failing
+
+- [x] **A rename keeps its data** — `renamedFrom` on a component, a property or an entity type migrates the table, the column or the rows instead of dropping them.
+  - Renaming a component dropped its table and built an empty one; renaming a property dropped the column; renaming an entity type produced no statements at all and stranded every existing row under the old string. All three reported success
+  - A rename cannot be inferred — `x → col_x` and "delete x, add col_x" are the same diff — so the author says it, and the format had nowhere to. Unknown property keys already parse, so the field breaks no existing file
+  - The diff *applies* the declared renames to the introspected schema before comparing anything, so types, foreign keys and nullability all compare like for like rather than against a column believed dropped
+  - A rename nobody declared is still reported: every dropped table and column says what it takes, and an unambiguous one-for-one swap names `renamedFrom` as the fix
+  - Found by review: the generator was handed the pre-rename snapshot, so a rename plus any rebuild on the same thing failed the migration and made the database unopenable — reopening the wedge story 12 closed
+  - Found by review: an entity-type rename was skipped when the new name already had rows, which is a guard that belongs to tables and not to an `UPDATE`; and a declared rename that could not be applied dropped the table without saying the declaration had been ignored
 
 ---
 
