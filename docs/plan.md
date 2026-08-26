@@ -615,25 +615,41 @@ One bullet from the first draft is gone: "passability from tile properties" poin
 
 ## Epic 15: Forge — MAP mode (AUTHORED)
 
+**Refined into stories:** See [`docs/stories/epic-15/`](stories/epic-15/).
+
 The core map editor: layers, tile painting, spawn placement and spawn editing. The paint canvas is the second and last hand-written client-JS surface.
 
-- [ ] **Layer panel & tileset palette** — Visibility toggles, active row, tile selection.
+This epic's stated engine touchpoint was "Epic 14's TMX writer path". **There is no writer** — Epic 14's nine stories are all read-side, and `tiled.Map` is a reading model that drops most of a real Tiled file: `nextobjectid`, image layers, `<group>` folder nesting, object polygons and text, layer offsets and tint, `<editorsettings>`. Emitting from it would hand an author back a mangled file, and losing `nextobjectid` silently retargets a live entity, because `spawns` is keyed `(map, object_id)`. That is Story 1, for the reason Epic 13 made round-trip fidelity Story 1: every story after it ships a save button.
 
-- [ ] **Paint canvas** — Stamp / rect / eraser / select, rotate and flip, grid and snap toggles.
+Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds by entity *type* from `schema.json` and no object property feeds it, so the prototype's per-spawn dropdown would write a value nothing reads. And saving a map does not hot-reload: the watcher watches behaviours directories, `animations.toml` and the sprites directory, so a map takes effect on the next `ecs-db run`. See the epic README.
 
-- [ ] **Spawn placement** — Drag from the entity-type palette onto the canvas; serialized as TMX objects.
+- [ ] **TMX writer & round-trip fidelity** — A writer that preserves everything Forge does not model, byte-for-byte, and maintains `nextobjectid` so an id is never reused.
 
-- [ ] **Spawn inspector** — Behavior dropdown, component list with required locks and context-seed badges, attach/detach.
+- [ ] **Map editing session** — Which maps a project has; open, save, discard, reload, conflict. `project.Project` does not currently carry the map path at all.
 
-- [ ] **Context menus** — Layers, tiles, spawns.
+- [ ] **The map renders** — Tile layers drawn from tileset images, layer panel in file order, tileset palette, map tabs, and the AUTHORED/LIVE/REPLAY lens with the two later lenses disabled. Needs Forge's first route that serves a project file, with the traversal check that implies.
+
+- [ ] **Painting, server-side** — Stamp, rect, eraser, rotate and flip as operations on the session, proven in Go against map values.
+
+- [ ] **Painting, the pointer surface** — The second hand-written JS file, on `canvas.js`'s contract: pointer state only, one event per stroke, no model of the map.
+
+- [ ] **Spawn placement** — Drag from the entity-type palette; move and delete. An object id is a spawn's identity, so allocation is a correctness concern, not a formality.
+
+- [ ] **Spawn inspector** — Components with required locks and `ƒ ctx` badges, property editing as `Component.property`. Behaviour is read-only and comes from the entity type; `Position` comes from where the object sits.
+
+- [ ] **Context menus** — Layers, tiles and spawns, on Epic 13's server-state menu pattern.
+
+- [ ] **Inline validation** — Every reason the engine would refuse this map, including the one it cannot make itself: two maps in a project sharing a `mapId`.
 
 ---
 
 ## Epic 16: Forge — TILES & SPRT modes
 
-Tileset metadata authoring and sprite-sheet slicing. Both write formats the engine already hot-reloads.
+Tileset metadata authoring and sprite-sheet slicing.
 
-- [ ] **TILES mode** — Tileset grid and enlarged tile with Collision / Animation / Terrain / Class tabs, written as TSX per-tile properties.
+Two claims here were checked while planning Epic 15 and are false. **There is no TSX writer** — `internal/tiled` parses `.tsx`/`.tsj` and emits nothing, so TILES needs the same fidelity work Epic 15 Story 1 does for maps, against a format that also carries wangsets, terrains and per-tile collision object groups. And **the engine does not hot-reload tilesets**: the watcher covers behaviours directories, `animations.toml` and `mods/*/assets/sprites`, which is where SPRT writes and is not where a tileset lives. SPRT hot-reloads; TILES takes effect on the next `ecs-db run`, and the mode must say so. Re-plan this epic against the code before starting it, as Epics 12–15 each did.
+
+- [ ] **TILES mode** — Tileset grid and enlarged tile with Collision / Animation / Terrain / Class tabs, written as TSX per-tile properties. Needs a TSX writer first.
 
 - [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
   - Constrain the UI to what the renderer supports: 1×N horizontal strips of `tileSize` squares, frames as column indices. Multi-row grids are renderer work.
