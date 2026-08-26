@@ -70,15 +70,15 @@ type SpawnResult struct {
 // exactly as a door opened by setTilePassable closes again. Re-import happens on
 // load, so this is a level load and not a per-tick correction.
 //
-// mapPath identifies the map, because object ids are numbered per file and two
-// maps may both hold an object 1.
+// Which map this is comes from the map's own tiled.PropMapID property, and falls
+// back to mapPath when it declares none — object ids are numbered per file, so
+// two maps may both hold an object 1 and the rows have to be told apart somehow.
 //
-// It is a path, and therefore a key that a human can re-spell. LoadMap cleans it
-// so "mods/map/l.tmx" and "./mods/map/l.tmx" are one map, but renaming or moving
-// the file is still a new map, and its objects spawn again beside the ones that
-// are already there. Nothing deletes the old rows. That is the cost of the only
-// stable handle Tiled offers, and it is worth knowing before Forge's MAP mode
-// makes moving a map a normal thing to do.
+// A path is not an identity: renaming or moving the file made it a different map,
+// spawning its objects again beside the ones already there and leaving the
+// originals where deletion could not reach them. A map that says which map it is
+// survives being renamed, moved and re-spelled. One that does not is warned
+// about, because the trap only springs later.
 func SyncSpawns(
 	ctx context.Context,
 	svc *world.EntityService,
@@ -98,7 +98,19 @@ func SyncSpawns(
 	// map with nothing left in it is exactly the case where everything it
 	// spawned should go. Loading a Tiled map needs the engine's tables.
 
-	done, err := spawnedObjects(ctx, db, mapPath)
+	// Which map this is, which is not the same question as where its file is.
+	key := m.Properties.Get(tiled.PropMapID)
+	if key == "" {
+		key = mapPath
+		res.Warnings = append(res.Warnings, fmt.Sprintf(
+			"%s declares no %q property, so its spawns are filed under its path; "+
+				"renaming or moving the file will spawn them again and leave the originals "+
+				"where nothing can reach them", mapPath, tiled.PropMapID))
+	} else if err := adoptSpawns(ctx, svc, db, mapPath, key); err != nil {
+		return res, err
+	}
+
+	done, err := spawnedObjects(ctx, db, key)
 	if err != nil {
 		return res, err
 	}
@@ -173,7 +185,7 @@ func SyncSpawns(
 			// the old entity goes and a new one takes its place — and its id
 			// changes, because it is not the same thing any more.
 			if live && !strings.EqualFold(existing.EntityType, obj.Type) {
-				if err := deleteSpawn(ctx, svc, mapPath, obj.ID, existing.EntityID); err != nil {
+				if err := deleteSpawn(ctx, svc, key, obj.ID, existing.EntityID); err != nil {
 					res.Refused = append(res.Refused, describeRefusal(obj, m, err))
 					continue
 				}
@@ -198,7 +210,7 @@ func SyncSpawns(
 				continue
 			}
 
-			if err := createSpawn(ctx, svc, mapPath, obj, components); err != nil {
+			if err := createSpawn(ctx, svc, key, obj, components); err != nil {
 				res.Refused = append(res.Refused, describeRefusal(obj, m, err))
 				continue
 			}
@@ -232,14 +244,14 @@ func SyncSpawns(
 				if err := tx.DeleteEntity(ctx, done[objectID].EntityID); err != nil {
 					return err
 				}
-				if err := tx.ForgetSpawn(ctx, mapPath, objectID); err != nil {
+				if err := tx.ForgetSpawn(ctx, key, objectID); err != nil {
 					return err
 				}
 			}
 			return nil
 		})
 		if err != nil {
-			return res, fmt.Errorf("tilemap: removing spawns %q no longer has: %w", mapPath, err)
+			return res, fmt.Errorf("tilemap: removing spawns %q no longer has: %w", key, err)
 		}
 		res.Deleted += len(gone)
 	}
@@ -462,6 +474,57 @@ func createSpawn(
 // This is the rule Forge's MAP mode inherits: to place a spawn, give the object
 // a class naming an entity type; to place anything else, leave the class empty.
 func spawnable(obj tiled.Object) bool { return obj.Type != "" }
+
+// adoptSpawns re-keys a map's rows from its path to its id.
+//
+// Every database built before a map declared an id has its spawns filed under a
+// path. Without this, adding the property is itself a rename: the map looks
+// unspawned, the world is created a second time, and the first copy becomes
+// unreachable — the fix introducing the bug it fixes.
+//
+// Where an object has a row under both keys, the id-keyed one is the live one
+// and the path-keyed entity is a duplicate of the same object, so it goes. That
+// happens when a map gained an id on a database that had already loaded it both
+// ways round.
+func adoptSpawns(ctx context.Context, svc *world.EntityService, db *sql.DB, mapPath, key string) error {
+	if mapPath == key {
+		return nil
+	}
+	old, err := spawnedObjects(ctx, db, mapPath)
+	if err != nil {
+		return err
+	}
+	if len(old) == 0 {
+		return nil
+	}
+	claimed, err := spawnedObjects(ctx, db, key)
+	if err != nil {
+		return err
+	}
+
+	return svc.InTx(ctx, func(tx world.Tx) error {
+		for _, objectID := range sortedIDs(old) {
+			if _, taken := claimed[objectID]; taken {
+				// The id-keyed row already speaks for this object; this one is
+				// a duplicate spawn of it.
+				if err := tx.DeleteEntity(ctx, old[objectID].EntityID); err != nil {
+					return err
+				}
+				if err := tx.ForgetSpawn(ctx, mapPath, objectID); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := tx.RecordSpawn(ctx, key, objectID, old[objectID].EntityID); err != nil {
+				return err
+			}
+			if err := tx.ForgetSpawn(ctx, mapPath, objectID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
 // spawned is an entity one of this map's objects has already made.
 type spawned struct {

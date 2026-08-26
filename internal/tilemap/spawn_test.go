@@ -1368,11 +1368,8 @@ func TestSyncSpawns_ClearingAClassSaysTheEntityIsGoing(t *testing.T) {
 	if res.Deleted != 1 {
 		t.Fatalf("result = %+v, want the entity deleted", res)
 	}
-	if len(res.Warnings) != 1 {
-		t.Fatalf("result = %+v, want it said out loud", res)
-	}
-	if !strings.Contains(res.Warnings[0], "no class") {
-		t.Errorf("the warning does not say why: %q", res.Warnings[0])
+	if !strings.Contains(strings.Join(res.Warnings, "\n"), "no class") {
+		t.Errorf("nothing said the entity was going: %v", res.Warnings)
 	}
 }
 
@@ -1434,5 +1431,238 @@ func TestSyncSpawns_AScalarComponentIsAddressedByItsColumn(t *testing.T) {
 		if !strings.Contains(res.Refused[0], want) {
 			t.Errorf("the refusal does not mention %q: %q", want, res.Refused[0])
 		}
+	}
+}
+
+// ── Story 9: a map says which map it is ──────────────────────────────
+
+func withMapID(m *tiled.Map, id string) *tiled.Map {
+	m.Properties = tiled.Properties{tiled.PropMapID: {Value: id}}
+	return m
+}
+
+func spawnRowMaps(t *testing.T, db *sql.DB) []string {
+	t.Helper()
+	rows, err := db.Query(`SELECT DISTINCT map FROM spawns ORDER BY map`)
+	if err != nil {
+		t.Fatalf("reading spawn maps: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			t.Fatalf("scanning: %v", err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// A map with an id is keyed by it, so the path is not part of its identity.
+func TestSyncSpawns_AMapWithAnIDIsKeyedByIt(t *testing.T) {
+	svc, db := spawnFixture(t)
+
+	mustSpawn(t, svc, db, withMapID(spawnMap(goblinAt(1, 0, 0)), "level1"))
+
+	if got := spawnRowMaps(t, db); len(got) != 1 || got[0] != "level1" {
+		t.Errorf("spawns are filed under %v, want [level1]", got)
+	}
+}
+
+// Renaming or moving a map changes nothing about its world.
+func TestSyncSpawns_RenamingAMapWithAnIDChangesNothing(t *testing.T) {
+	svc, db := spawnFixture(t)
+	m := func() *tiled.Map { return withMapID(spawnMap(goblinAt(1, 0, 0)), "level1") }
+
+	if _, err := SyncSpawns(context.Background(), svc, db, "mods/map/level1.tmx", m()); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	before := entityRows(t, db)
+
+	// The same map, renamed and moved.
+	res, err := SyncSpawns(context.Background(), svc, db, "mods/levels/first.tmx", m())
+	if err != nil {
+		t.Fatalf("after renaming: %v", err)
+	}
+	if res.Created != 0 {
+		t.Errorf("result = %+v — renaming the file spawned the world again", res)
+	}
+	after := entityRows(t, db)
+	if len(after) != 1 {
+		t.Fatalf("%d entities after a rename, want 1", len(after))
+	}
+	if after[0].ID != before[0].ID {
+		t.Errorf("the entity id changed from %d to %d across a rename", before[0].ID, after[0].ID)
+	}
+
+	// And the author can still delete it from the renamed file.
+	res, err = SyncSpawns(context.Background(), svc, db, "mods/levels/first.tmx",
+		withMapID(spawnMap(), "level1"))
+	if err != nil {
+		t.Fatalf("deleting: %v", err)
+	}
+	if res.Deleted != 1 {
+		t.Errorf("result = %+v — the entity is unreachable from the renamed file", res)
+	}
+	if n := len(entityRows(t, db)); n != 0 {
+		t.Errorf("%d entities remain", n)
+	}
+}
+
+// A map with no id keys by its path, as it did before.
+func TestSyncSpawns_AMapWithNoIDKeysByItsPath(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	if got := spawnRowMaps(t, db); len(got) != 1 || got[0] != "mods/map/level.tmx" {
+		t.Errorf("spawns are filed under %v, want the path", got)
+	}
+}
+
+// ...and says so, because the trap only springs on a rename and by then the
+// duplicates cannot be reached.
+func TestSyncSpawns_AMapWithNoIDSaysSo(t *testing.T) {
+	svc, db := spawnFixture(t)
+
+	res := mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+	if len(res.Warnings) != 1 {
+		t.Fatalf("result = %+v, want one warning about the missing id", res)
+	}
+	for _, want := range []string{"mapId", "renam"} {
+		if !strings.Contains(res.Warnings[0], want) {
+			t.Errorf("the warning does not mention %q: %q", want, res.Warnings[0])
+		}
+	}
+
+	// Once for the map, not once per object.
+	res = mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0), goblinAt(3, 64, 0)))
+	if len(res.Warnings) != 1 {
+		t.Errorf("result = %+v, want the warning once for the map", res)
+	}
+}
+
+// A map that gains an id adopts the rows it had under its path. Without this,
+// adding the property is itself a rename and spawns the world twice — the fix
+// introducing the bug it fixes.
+func TestSyncSpawns_AMapThatGainsAnIDAdoptsItsRows(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
+	before := entityRows(t, db)
+
+	res := mustSpawn(t, svc, db, withMapID(spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)), "level1"))
+
+	if res.Created != 0 {
+		t.Errorf("result = %+v — adding an id spawned the world again", res)
+	}
+	after := entityRows(t, db)
+	if len(after) != 2 {
+		t.Fatalf("%d entities, want 2", len(after))
+	}
+	for i := range before {
+		if after[i].ID != before[i].ID {
+			t.Errorf("entity %d changed id from %d to %d", i, before[i].ID, after[i].ID)
+		}
+	}
+	if got := spawnRowMaps(t, db); len(got) != 1 || got[0] != "level1" {
+		t.Errorf("spawns are filed under %v, want [level1] — the old rows were left behind", got)
+	}
+}
+
+// Where both keys hold the same object, the id-keyed row is the live one and the
+// path-keyed entity is a duplicate of it.
+func TestSyncSpawns_AdoptionRemovesDuplicates(t *testing.T) {
+	svc, db := spawnFixture(t)
+
+	// Reaching a state where one object has a row under both keys takes a
+	// second path, because adoption clears the first one on sight:
+	//
+	//   a.tmx with no id      → rows under "a.tmx"
+	//   a.tmx with id "level1" → adopted to "level1"
+	//   b.tmx with no id      → a second, duplicate world under "b.tmx"
+	//   b.tmx with id "level1" → both keys hold object 1
+	load := func(path string, m *tiled.Map) {
+		t.Helper()
+		if _, err := SyncSpawns(context.Background(), svc, db, path, m); err != nil {
+			t.Fatalf("loading %s: %v", path, err)
+		}
+	}
+	load("a.tmx", spawnMap(goblinAt(1, 0, 0)))
+	load("a.tmx", withMapID(spawnMap(goblinAt(1, 0, 0)), "level1"))
+	load("b.tmx", spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
+	if n := len(entityRows(t, db)); n != 3 {
+		t.Fatalf("%d entities before adoption, want 3", n)
+	}
+
+	res, err := SyncSpawns(context.Background(), svc, db, "b.tmx",
+		withMapID(spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)), "level1"))
+	if err != nil {
+		t.Fatalf("adopting: %v", err)
+	}
+
+	if res.Created != 0 {
+		t.Errorf("result = %+v, want nothing created", res)
+	}
+	if n := len(entityRows(t, db)); n != 2 {
+		t.Errorf("%d entities after adoption, want 2 — the duplicate survived", n)
+	}
+	if got := spawnRowMaps(t, db); len(got) != 1 || got[0] != "level1" {
+		t.Errorf("spawns are filed under %v, want [level1]", got)
+	}
+}
+
+// An id is not adopted from a path that never spawned anything, so a fresh
+// database is not touched by the adoption path.
+func TestSyncSpawns_AdoptionDoesNothingOnAFreshDatabase(t *testing.T) {
+	svc, db := spawnFixture(t)
+
+	res := mustSpawn(t, svc, db, withMapID(spawnMap(goblinAt(1, 0, 0)), "level1"))
+	if res.Created != 1 {
+		t.Fatalf("result = %+v, want one create", res)
+	}
+	if got := spawnRowMaps(t, db); len(got) != 1 || got[0] != "level1" {
+		t.Errorf("spawns are filed under %v", got)
+	}
+}
+
+// A map whose id happens to be its path is not adopted from itself.
+//
+// Adoption reads the rows under the old key and the new one and treats an object
+// present in both as a duplicate to delete. When the two keys are the same
+// string every object is its own duplicate, and the map deletes its whole world
+// on load. Nothing sensible sets mapId to a path, which is exactly why the guard
+// against it needs a test rather than a reader's good intentions.
+func TestSyncSpawns_AMapWhoseIDIsItsPathIsNotAdoptedFromItself(t *testing.T) {
+	svc, db := spawnFixture(t)
+	const path = "mods/map/level.tmx"
+
+	m := func() *tiled.Map { return withMapID(spawnMap(goblinAt(1, 0, 0)), path) }
+	if _, err := SyncSpawns(context.Background(), svc, db, path, m()); err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	before := entityRows(t, db)
+	if len(before) != 1 {
+		t.Fatalf("%d entities after the first load, want 1", len(before))
+	}
+
+	res, err := SyncSpawns(context.Background(), svc, db, path, m())
+	if err != nil {
+		t.Fatalf("second load: %v", err)
+	}
+
+	// The count is the wrong thing to look at: self-adoption deletes the entity
+	// and the ordinary create path immediately makes another, so one goes in and
+	// one comes out. What it destroys is the entity's *identity* — the goblin a
+	// machine and every transition row were pointing at.
+	if res.Unchanged != 1 {
+		t.Errorf("result = %+v, want the object unchanged", res)
+	}
+	after := entityRows(t, db)
+	if len(after) != 1 {
+		t.Fatalf("%d entities after the second load, want 1", len(after))
+	}
+	if after[0].ID != before[0].ID {
+		t.Errorf("the entity id changed from %d to %d — the map adopted itself, deleting its own world and rebuilding it",
+			before[0].ID, after[0].ID)
 	}
 }

@@ -203,6 +203,19 @@ func (m *Map) TilesetFor(gid uint32) (TilesetRef, uint32, bool) {
 // type this package does not model survives rather than being dropped — the
 // same argument the machine parser makes about unknown fields. The accessors
 // are what read them back as something typed.
+// PropMapID is the property a map uses to say which map it is, independently of
+// what its file is called.
+//
+// A convention this engine invents — Tiled has no stable map identity of its own
+// — and named here for the reason PropPassable is: the map that declares it and
+// the importer that reads it must not drift.
+//
+// Without it a map is identified by its path, and renaming or moving the file
+// makes it a different map: its spawns are created again beside the ones already
+// there, and the originals become unreachable, because deletion is scoped to the
+// map being loaded.
+const PropMapID = "mapId"
+
 type Properties map[string]Property
 
 // Property is one custom property.

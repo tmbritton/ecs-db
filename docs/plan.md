@@ -595,6 +595,12 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - What the file says nothing about is left alone — the update is partial
   - Found by review: no migration, so every existing database was permanently broken; the update path validated nothing, so the same file made a different world depending on history; "`Tx` has no reader" was a rationalisation for not diffing, and an unedited map wrote six times per load; a scalar component could never be given a value at all
 
+- [x] **A map says which map it is** — spawns are keyed by a `mapId` map property rather than by the file's path.
+  - A path is not an identity: renaming or moving a level spawned its world a second time, and the story above made the originals unreachable, because deletion is scoped to the map being loaded
+  - A map that gains an id adopts the rows it had under its path, or adding the property would be another rename
+  - A map with no id still works and is warned about, because the trap only springs later
+  - The engine cannot tell two maps sharing an id from a rename — it sees one map at a time. Forge can, across a project
+
 - [ ] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
 
 - [ ] **Migrate `level1.toml` → `level1.tmx`** — Plus a starter tileset and a `game.toml` update.
