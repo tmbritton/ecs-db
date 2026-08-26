@@ -370,7 +370,11 @@ func (t *sqliteTx) exactlyOneRow(ctx context.Context, tableName string, entityID
 		return fmt.Errorf("checking rows affected on update of %s: %w", tableName, err)
 	}
 	if n == 0 {
-		return fmt.Errorf("entity %d has no %s component to update", entityID, tableName)
+		// Wrapped around a sentinel so a caller can act on it. The map
+		// re-import sets what an object describes, and an object that has
+		// started describing a component the entity lacks means "attach it".
+		return fmt.Errorf("entity %d has no %s component to update: %w",
+			entityID, tableName, world.ErrNoSuchComponent)
 	}
 	return nil
 }
@@ -416,11 +420,27 @@ func (t *sqliteTx) exactlyOneRow(ctx context.Context, tableName string, entityID
 // objects claiming one id is a bad map, and the spawner refuses the second
 // before it gets here.
 func (t *sqliteTx) RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error {
+	// An upsert, not a plain insert. A row can outlive the entity it named —
+	// a connection opened without foreign keys enforced deletes one without the
+	// cascade, and a database created before the key was a cascade holds NULLs
+	// by design — and the importer correctly reads those as "not spawned". A
+	// plain insert then collided with the row still occupying the primary key,
+	// and refused the object on every load, forever.
 	_, err := t.tx.ExecContext(ctx,
-		`INSERT INTO spawns (map, object_id, entity_id) VALUES (?, ?, ?)`,
+		`INSERT INTO spawns (map, object_id, entity_id) VALUES (?, ?, ?)
+		 ON CONFLICT(map, object_id) DO UPDATE SET entity_id = excluded.entity_id`,
 		mapPath, objectID, entityID)
 	if err != nil {
 		return fmt.Errorf("recording spawn %d of %q: %w", objectID, mapPath, err)
+	}
+	return nil
+}
+
+// ForgetSpawn removes the record of an object having been spawned.
+func (t *sqliteTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
+	if _, err := t.tx.ExecContext(ctx,
+		`DELETE FROM spawns WHERE map = ? AND object_id = ?`, mapPath, objectID); err != nil {
+		return fmt.Errorf("forgetting spawn %d of %q: %w", objectID, mapPath, err)
 	}
 	return nil
 }

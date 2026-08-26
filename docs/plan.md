@@ -589,6 +589,12 @@ One bullet from the first draft is gone: "passability from tile properties" poin
   - Found by review: a duplicate object id left an entity no spawn row pointed at and then hid it forever; entity and record were two transactions; `validationLevel: "warning"` built half an entity in silence; pixel→cell truncated instead of flooring and checked no bounds
   - Not verified on screen — the configured map is still the character format, and Story 7 migrates it
 
+- [x] **A spawn is re-imported like a tile** — supersedes the rule above: the file wins for what the file describes, so an edit in the editor lands in the world.
+  - Story 6 said create-once-never-touch and argued it as "an entity stops being the file's the moment the game runs" — which is the sentence `SyncTiles` had already rejected with "corridor" in place of "goblin". People editing map files are making a game, not playing one
+  - An object that moved moves its entity, a changed property is re-applied, an object removed from the map deletes its entity, and the entity id survives an update so a running machine keeps pointing at it
+  - What the file says nothing about is left alone — the update is partial
+  - Found by review: no migration, so every existing database was permanently broken; the update path validated nothing, so the same file made a different world depending on history; "`Tx` has no reader" was a rationalisation for not diffing, and an unedited map wrote six times per load; a scalar component could never be given a value at all
+
 - [ ] **Entity-type `behavior` honoured at spawn** — Removes `ensureGoblinBehavior`; `Goblin` declares `"behavior": "goblin"` in `schema.json`.
 
 - [ ] **Migrate `level1.toml` → `level1.tmx`** — Plus a starter tileset and a `game.toml` update.

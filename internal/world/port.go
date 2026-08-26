@@ -75,6 +75,10 @@ type Tx interface {
 	// a duplicate object id, a killed process — left an entity that no spawn
 	// row pointed at, which the next load duplicated and never mentioned.
 	RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error
+	// ForgetSpawn removes the record of a map's object having been spawned, for
+	// an object the map no longer has. The entity goes with it — separately,
+	// because a row may outlive nothing at all when the entity is already gone.
+	ForgetSpawn(ctx context.Context, mapPath string, objectID int) error
 	// Commit commits the transaction.
 	Commit() error
 	// Rollback rolls back the transaction.
@@ -83,6 +87,16 @@ type Tx interface {
 
 // ErrAlreadyAttached is returned when an attach would duplicate a component.
 var ErrAlreadyAttached = errors.New("component already attached")
+
+// ErrNoSuchComponent is returned when an update names a component the entity
+// does not have.
+//
+// A sentinel rather than a sentence, because a caller can act on it: the map
+// re-import sets the components an object describes, and an object that has
+// started describing a new one means "attach it", not "fail". Without this the
+// only way to tell that case from a genuine failure is to match on the text of
+// an error message.
+var ErrNoSuchComponent = errors.New("entity does not have that component")
 
 // EntityStore is the port the entity service uses for persistence.
 // The SQLite adapter implements this interface.

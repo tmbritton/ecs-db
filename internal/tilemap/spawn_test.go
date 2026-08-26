@@ -3,6 +3,8 @@ package tilemap
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -296,67 +298,9 @@ func TestSyncSpawns_DoesNotSpawnTheSameObjectTwice(t *testing.T) {
 	}
 }
 
-// An entity that has moved is not moved back. The file says where a world
-// starts, not what it currently is.
-func TestSyncSpawns_DoesNotMoveAnEntityThatHasMoved(t *testing.T) {
-	svc, db := spawnFixture(t)
-	m := spawnMap(goblinAt(1, 32, 48))
-	mustSpawn(t, svc, db, m)
-
-	if _, err := db.Exec(`UPDATE comp_position SET x = 9, y = 9`); err != nil {
-		t.Fatalf("moving the goblin: %v", err)
-	}
-	// The map moves it too, which must not follow.
-	moved := spawnMap(goblinAt(1, 0, 0))
-	mustSpawn(t, svc, db, moved)
-
-	rows := entityRows(t, db)
-	if len(rows) != 1 {
-		t.Fatalf("stored %d entities, want 1", len(rows))
-	}
-	if rows[0].X != 9 || rows[0].Y != 9 {
-		t.Errorf("the goblin is at (%d,%d), want (9,9) — the map moved an entity that had walked away",
-			rows[0].X, rows[0].Y)
-	}
-}
-
-// A spawn removed from the map does not delete the entity it made. Deleting is
-// a level reset, which is a different operation from re-importing a file.
-func TestSyncSpawns_DoesNotDeleteAnEntityWhoseSpawnIsGone(t *testing.T) {
-	svc, db := spawnFixture(t)
-	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
-
-	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
-
-	if n := len(entityRows(t, db)); n != 2 {
-		t.Errorf("%d entities remain, want 2 — removing a spawn killed its entity", n)
-	}
-}
-
-// A spawned entity that has died does not come back. The row records that the
-// import happened, which stays true after the entity is gone.
-func TestSyncSpawns_DoesNotRespawnAnEntityThatDied(t *testing.T) {
-	svc, db := spawnFixture(t)
-	m := spawnMap(goblinAt(1, 0, 0))
-	mustSpawn(t, svc, db, m)
-
-	if _, err := db.Exec(`DELETE FROM entities`); err != nil {
-		t.Fatalf("killing the goblin: %v", err)
-	}
-
-	res := mustSpawn(t, svc, db, m)
-	if res.Created != 0 {
-		t.Errorf("a dead spawn came back: %+v", res)
-	}
-	// And the record of it says its entity is gone rather than pointing at one.
-	var entityID sql.NullInt64
-	if err := db.QueryRow(`SELECT entity_id FROM spawns WHERE object_id = 1`).Scan(&entityID); err != nil {
-		t.Fatalf("reading the spawn row: %v", err)
-	}
-	if entityID.Valid {
-		t.Errorf("the spawn still points at entity %d, which no longer exists", entityID.Int64)
-	}
-}
+// Story 6 had three tests here asserting that a re-import never moves, never
+// deletes and never recreates. Story 8 reversed that rule — the file wins, as it
+// does for tiles — and their opposites are in the Story 8 block below.
 
 // Two maps can hold objects with the same id, because Tiled numbers them per
 // file.
@@ -920,9 +864,15 @@ func TestSyncSpawns_RefusesTextThatIsNotJSONForAJSONColumn(t *testing.T) {
 	}
 }
 
-// A map with objects but no engine tables is a caller's mistake; a map with no
-// objects must not need them at all.
-func TestSyncSpawns_AMapWithNoObjectsDoesNotNeedTheSpawnsTable(t *testing.T) {
+// Loading a Tiled map needs the engine's tables, and says so rather than
+// failing somewhere further in.
+//
+// Story 6 had this test the other way round — a map with no objects must not
+// need them — which was reachable while a re-import only ever created. It is not
+// reachable now: deleting the entity of an object the map no longer has means
+// reading what this map spawned, and an empty map is exactly the case where
+// everything it spawned should go.
+func TestSyncSpawns_ATiledMapNeedsTheEngineTables(t *testing.T) {
 	ds := spawnSchema()
 	store, err := storage.NewSQLiteStore(t.TempDir()+"/test.sqlite", ds, "")
 	if err != nil {
@@ -933,8 +883,556 @@ func TestSyncSpawns_AMapWithNoObjectsDoesNotNeedTheSpawnsTable(t *testing.T) {
 	svc.SetSchema(ds)
 
 	// EnsureInterpreterTables deliberately not called.
-	if _, err := SyncSpawns(context.Background(), svc, store.DB(), "level.tmx",
-		&tiled.Map{Name: "level.tmx", Width: 4, Height: 4, TileWidth: 16, TileHeight: 16}); err != nil {
-		t.Errorf("a map with no objects asked for the spawns table: %v", err)
+	_, err = SyncSpawns(context.Background(), svc, store.DB(), "level.tmx",
+		&tiled.Map{Name: "level.tmx", Width: 4, Height: 4, TileWidth: 16, TileHeight: 16})
+	if err == nil {
+		t.Fatal("spawning against a store with no engine tables did not say so")
+	}
+	// The wrapper's own words as well as the driver's, so this passes for a
+	// reason this package owns rather than for one SQLite happens to phrase
+	// with the table's name in it.
+	if !strings.Contains(err.Error(), "reading spawns for") {
+		t.Errorf("the error does not say what this package was doing: %v", err)
+	}
+}
+
+// ── Story 8: the file wins, as it does for tiles ─────────────────────
+
+func spawnRow(t *testing.T, db *sql.DB, objectID int) (int64, bool) {
+	t.Helper()
+	var id sql.NullInt64
+	err := db.QueryRow(`SELECT entity_id FROM spawns WHERE object_id = ?`, objectID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false
+	}
+	if err != nil {
+		t.Fatalf("reading the spawn row: %v", err)
+	}
+	return id.Int64, id.Valid
+}
+
+// An object that moved moves its entity. Story 6 left it where it was, which is
+// the one thing an author dragging a goblin in the editor is trying to change.
+func TestSyncSpawns_AnObjectThatMovedMovesItsEntity(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 32, 48)))
+
+	before := entityRows(t, db)
+	res := mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 16)))
+
+	if res.Updated != 1 || res.Created != 0 {
+		t.Fatalf("result = %+v, want one update", res)
+	}
+	after := entityRows(t, db)
+	if len(after) != 1 {
+		t.Fatalf("stored %d entities, want 1", len(after))
+	}
+	if after[0].X != 0 || after[0].Y != 1 {
+		t.Errorf("the goblin is at (%d,%d), want (0,1)", after[0].X, after[0].Y)
+	}
+	// The id survives: behavior_components and transitions name it, and a
+	// machine's running state hangs off it.
+	if after[0].ID != before[0].ID {
+		t.Errorf("the entity id changed from %d to %d — a move became a delete and an insert",
+			before[0].ID, after[0].ID)
+	}
+}
+
+// A property that changed is re-applied.
+func TestSyncSpawns_AChangedPropertyIsReapplied(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	edited := goblinAt(1, 0, 0)
+	edited.Properties["Health.maxHp"] = tiled.Property{Value: "50"}
+	res := mustSpawn(t, svc, db, spawnMap(edited))
+
+	if res.Updated != 1 {
+		t.Fatalf("result = %+v, want one update", res)
+	}
+	var maxHp int
+	if err := db.QueryRow(`SELECT maxHp FROM comp_health`).Scan(&maxHp); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if maxHp != 50 {
+		t.Errorf("maxHp = %d, want 50 — the file's value did not win", maxHp)
+	}
+}
+
+// What the file says nothing about is left alone. The object names hp, so hp is
+// overwritten; it says nothing about the Speed somebody attached at runtime, so
+// Speed keeps its value.
+func TestSyncSpawns_LeavesWhatTheFileDoesNotDescribe(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	rows := entityRows(t, db)
+	if err := svc.AttachComponent(context.Background(), rows[0].ID, "Speed",
+		world.ComponentValues{"value": 3.5}); err != nil {
+		t.Fatalf("attaching Speed at runtime: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE comp_health SET hp = 1`); err != nil {
+		t.Fatalf("wounding the goblin: %v", err)
+	}
+
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	var speed float64
+	if err := db.QueryRow(`SELECT value FROM comp_speed`).Scan(&speed); err != nil {
+		t.Fatalf("Speed did not survive the re-import: %v", err)
+	}
+	if speed != 3.5 {
+		t.Errorf("speed = %v, want 3.5 — a component the file never mentioned was overwritten", speed)
+	}
+	// hp *is* described by the object, so it goes back to what the file says.
+	var hp int
+	if err := db.QueryRow(`SELECT hp FROM comp_health`).Scan(&hp); err != nil {
+		t.Fatalf("reading hp: %v", err)
+	}
+	if hp != 5 {
+		t.Errorf("hp = %d, want the file's 5", hp)
+	}
+}
+
+// A component the object newly mentions is attached to the entity that is
+// already there.
+func TestSyncSpawns_AttachesAComponentTheObjectNewlyMentions(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	edited := goblinAt(1, 0, 0)
+	edited.Properties["Speed.value"] = tiled.Property{Value: "2.5"}
+	if res := mustSpawn(t, svc, db, spawnMap(edited)); res.Updated != 1 {
+		t.Fatalf("result = %+v, want one update", res)
+	}
+
+	var speed float64
+	if err := db.QueryRow(`SELECT value FROM comp_speed`).Scan(&speed); err != nil {
+		t.Fatalf("the newly declared component was not attached: %v", err)
+	}
+	if speed != 2.5 {
+		t.Errorf("speed = %v, want 2.5", speed)
+	}
+}
+
+// An object removed from the map deletes the entity it made. The half Story 6
+// got most wrong: an author deleting a goblin in the editor has no other gesture.
+func TestSyncSpawns_AnObjectRemovedFromTheMapDeletesItsEntity(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
+
+	res := mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	if res.Deleted != 1 {
+		t.Fatalf("result = %+v, want one delete", res)
+	}
+	rows := entityRows(t, db)
+	if len(rows) != 1 {
+		t.Fatalf("%d entities remain, want 1", len(rows))
+	}
+	if _, ok := spawnRow(t, db, 2); ok {
+		t.Error("the deleted spawn's row is still there")
+	}
+}
+
+// An entity killed at runtime comes back while its object is still in the map,
+// for the same reason a door opened at runtime closes again.
+func TestSyncSpawns_RecreatesAnEntityThatDiedWhileItsObjectRemains(t *testing.T) {
+	svc, db := spawnFixture(t)
+	m := spawnMap(goblinAt(1, 0, 0))
+	mustSpawn(t, svc, db, m)
+
+	if _, err := db.Exec(`DELETE FROM entities`); err != nil {
+		t.Fatalf("killing the goblin: %v", err)
+	}
+
+	res := mustSpawn(t, svc, db, m)
+	if res.Created != 1 {
+		t.Fatalf("result = %+v, want the goblin back", res)
+	}
+	if n := len(entityRows(t, db)); n != 1 {
+		t.Errorf("%d entities, want 1", n)
+	}
+	if _, ok := spawnRow(t, db, 1); !ok {
+		t.Error("the spawn row does not point at the recreated entity")
+	}
+}
+
+// Entities nobody spawned are never touched, whatever the map says.
+func TestSyncSpawns_LeavesEntitiesNobodySpawned(t *testing.T) {
+	svc, db := spawnFixture(t)
+
+	hand, err := svc.CreateEntity(context.Background(), "Goblin", []world.EntityComponent{
+		{Name: "Position", Values: world.ComponentValues{"x": 7, "y": 7}},
+		{Name: "Health", Values: world.ComponentValues{"hp": 3, "maxHp": 3}},
+		{Name: "Sprite", Values: world.ComponentValues{"sheet": "", "animation": "a", "flip_x": false}},
+	})
+	if err != nil {
+		t.Fatalf("creating an entity by hand: %v", err)
+	}
+
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+	// And now a map that describes nothing at all.
+	res := mustSpawn(t, svc, db, spawnMap())
+
+	if res.Deleted != 1 {
+		t.Errorf("result = %+v, want only the spawned one deleted", res)
+	}
+	var alive int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM entities WHERE id = ?`, hand.ID).Scan(&alive); err != nil {
+		t.Fatalf("counting: %v", err)
+	}
+	if alive != 1 {
+		t.Error("an entity nobody spawned was deleted by a map that never mentioned it")
+	}
+}
+
+// Loading a map that has not changed writes nothing at all — SyncTiles'
+// promise that "a restart with no edit to the map is a read", which this had
+// better keep too, since the whole story is that the two follow one rule.
+//
+// Asserted through triggers rather than through the result, because the result
+// is what would be wrong if the code re-applied everything and called it
+// unchanged. A trigger fires on a write or it does not.
+func TestSyncSpawns_AnUnchangedMapWritesNothing(t *testing.T) {
+	svc, db := spawnFixture(t)
+	m := spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0))
+	mustSpawn(t, svc, db, m)
+
+	if _, err := db.Exec(`CREATE TABLE writes (what TEXT)`); err != nil {
+		t.Fatalf("creating the witness table: %v", err)
+	}
+	for _, table := range []string{"comp_position", "comp_health", "comp_sprite"} {
+		for _, verb := range []string{"UPDATE", "INSERT", "DELETE"} {
+			if _, err := db.Exec(fmt.Sprintf(
+				`CREATE TRIGGER w_%s_%s AFTER %s ON %s BEGIN INSERT INTO writes VALUES ('%s %s'); END`,
+				table, strings.ToLower(verb), verb, table, verb, table)); err != nil {
+				t.Fatalf("creating a trigger: %v", err)
+			}
+		}
+	}
+
+	res := mustSpawn(t, svc, db, m)
+
+	if res.Unchanged != 2 {
+		t.Errorf("result = %+v, want two unchanged", res)
+	}
+	if res.Created != 0 || res.Updated != 0 || res.Deleted != 0 {
+		t.Errorf("result = %+v, want nothing created, updated or deleted", res)
+	}
+
+	var writes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM writes`).Scan(&writes); err != nil {
+		t.Fatalf("counting writes: %v", err)
+	}
+	if writes != 0 {
+		var what string
+		_ = db.QueryRow(`SELECT group_concat(what, ", ") FROM writes`).Scan(&what)
+		t.Errorf("loading an unedited map wrote %d time(s): %s", writes, what)
+	}
+}
+
+// A spawn deleted because its object went takes its whole entity, not just the
+// components the object described.
+func TestSyncSpawns_ADeletedSpawnTakesItsComponents(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	mustSpawn(t, svc, db, spawnMap())
+
+	for _, table := range []string{"comp_position", "comp_health", "comp_sprite"} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatalf("counting %s: %v", table, err)
+		}
+		if n != 0 {
+			t.Errorf("%s still has %d row(s) after its entity was deleted", table, n)
+		}
+	}
+}
+
+// ForgetSpawn's own contract, which the cascade normally satisfies before it is
+// reached: deleting the entity takes the row with it, so a test that only ever
+// deletes through SyncSpawns cannot tell whether this does anything. It matters
+// on a database opened without foreign keys enforced, where the cascade does not
+// fire and the object would look spawned forever.
+func TestTx_ForgetSpawnRemovesTheRow(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
+
+	if err := svc.InTx(context.Background(), func(tx world.Tx) error {
+		return tx.ForgetSpawn(context.Background(), "mods/map/level.tmx", 1)
+	}); err != nil {
+		t.Fatalf("ForgetSpawn: %v", err)
+	}
+
+	if _, ok := spawnRow(t, db, 1); ok {
+		t.Error("the row is still there")
+	}
+	if _, ok := spawnRow(t, db, 2); !ok {
+		t.Error("the other map object's row went too")
+	}
+	// The entity is untouched: forgetting a spawn is not deleting one.
+	if n := len(entityRows(t, db)); n != 2 {
+		t.Errorf("%d entities remain, want 2 — ForgetSpawn deleted one", n)
+	}
+}
+
+// ── The review's findings ────────────────────────────────────────────
+
+// An object that could not be read is refused, and refusing it must not be the
+// same as the map no longer having it. Without the guard that marks it seen, a
+// typo in one property deletes the entity instead of complaining about it —
+// which is the whole difference between a diagnostic and data loss.
+func TestSyncSpawns_ARefusedObjectIsNotDeleted(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0), goblinAt(2, 32, 0)))
+
+	broken := goblinAt(1, 0, 0)
+	broken.Properties["Health.hp"] = tiled.Property{Value: "plenty"}
+	res := mustSpawn(t, svc, db, spawnMap(broken, goblinAt(2, 32, 0)))
+
+	if len(res.Refused) != 1 {
+		t.Fatalf("result = %+v, want one refusal", res)
+	}
+	if res.Deleted != 0 {
+		t.Errorf("result = %+v — a refused object was treated as one the map no longer has", res)
+	}
+	if n := len(entityRows(t, db)); n != 2 {
+		t.Errorf("%d entities remain, want 2 — a typo deleted a goblin", n)
+	}
+}
+
+// The update path validates what the create path validates, so the same file
+// makes the same world whether or not it has been loaded before.
+func TestSyncSpawns_AnUpdateIsValidatedLikeACreate(t *testing.T) {
+	cases := map[string]func(tiled.Object) tiled.Object{
+		"a component the type does not allow": func(o tiled.Object) tiled.Object {
+			o.Properties["Tile.x"] = tiled.Property{Value: "1"}
+			return o
+		},
+		"a required component the object stopped naming": func(o tiled.Object) tiled.Object {
+			delete(o.Properties, "Health.hp")
+			delete(o.Properties, "Health.maxHp")
+			return o
+		},
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc, db := spawnFixture(t)
+			mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+			res := mustSpawn(t, svc, db, spawnMap(edit(goblinAt(1, 0, 0))))
+			if len(res.Refused) != 1 {
+				t.Fatalf("result = %+v, want one refusal — an update skipped the contract", res)
+			}
+			if res.Updated != 0 {
+				t.Errorf("result = %+v, want nothing updated", res)
+			}
+		})
+	}
+}
+
+// The same edits are refused on a database that has never seen the map, which
+// is the property the two paths together are for.
+func TestSyncSpawns_TheSameFileIsRefusedWhetherOrNotItRanBefore(t *testing.T) {
+	obj := goblinAt(1, 0, 0)
+	obj.Properties["Tile.x"] = tiled.Property{Value: "1"}
+
+	fresh, freshDB := spawnFixture(t)
+	first := mustSpawn(t, fresh, freshDB, spawnMap(obj))
+
+	used, usedDB := spawnFixture(t)
+	mustSpawn(t, used, usedDB, spawnMap(goblinAt(1, 0, 0)))
+	second := mustSpawn(t, used, usedDB, spawnMap(obj))
+
+	if len(first.Refused) != len(second.Refused) {
+		t.Errorf("a fresh database refused %d and a used one %d:\n %v\n %v",
+			len(first.Refused), len(second.Refused), first.Refused, second.Refused)
+	}
+}
+
+// Retyping an object is a different entity, not a changed one: the class decides
+// which components are required, so writing the new class's components onto an
+// entity still typed as the old one makes a row that breaks its own contract.
+func TestSyncSpawns_AChangedClassReplacesTheEntity(t *testing.T) {
+	ds := spawnSchema()
+	ds.EntityTypes["Orc"] = ds.EntityTypes["Goblin"]
+	store, err := storage.NewSQLiteStore(t.TempDir()+"/test.sqlite", ds, "")
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := storage.EnsureInterpreterTables(store.DB()); err != nil {
+		t.Fatalf("EnsureInterpreterTables: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := world.NewEntityService(store)
+	svc.SetSchema(ds)
+	db := store.DB()
+
+	if _, err := SyncSpawns(context.Background(), svc, db, "level.tmx",
+		spawnMap(goblinAt(1, 0, 0))); err != nil {
+		t.Fatalf("SyncSpawns: %v", err)
+	}
+	before := entityRows(t, db)
+
+	orc := goblinAt(1, 0, 0)
+	orc.Type = "Orc"
+	res, err := SyncSpawns(context.Background(), svc, db, "level.tmx", spawnMap(orc))
+	if err != nil {
+		t.Fatalf("SyncSpawns: %v", err)
+	}
+	if res.Created != 1 || res.Deleted != 1 {
+		t.Fatalf("result = %+v, want the goblin replaced by an orc", res)
+	}
+
+	after := entityRows(t, db)
+	if len(after) != 1 {
+		t.Fatalf("%d entities, want 1", len(after))
+	}
+	if after[0].Type != "Orc" {
+		t.Errorf("the entity is a %s, want an Orc — the class was not re-applied", after[0].Type)
+	}
+	if after[0].ID == before[0].ID {
+		t.Error("the entity kept its id through a class change; it is not the same entity")
+	}
+}
+
+// A component that is not an object keeps its value under the name its single
+// column has. The insert path takes a lone key of any name and
+// SetComponentValues does not, so a scalar component spawned once and was then
+// refused on every load.
+func TestSyncSpawns_AScalarComponentSurvivesAReimport(t *testing.T) {
+	ds := spawnSchema()
+	ds.Components["Label"] = schema.Component{Type: "string"}
+	gob := ds.EntityTypes["Goblin"]
+	gob.OptionalComponents = append(gob.OptionalComponents, "Label")
+	ds.EntityTypes["Goblin"] = gob
+
+	store, err := storage.NewSQLiteStore(t.TempDir()+"/test.sqlite", ds, "")
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := storage.EnsureInterpreterTables(store.DB()); err != nil {
+		t.Fatalf("EnsureInterpreterTables: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := world.NewEntityService(store)
+	svc.SetSchema(ds)
+	db := store.DB()
+
+	withLabel := func(v string) *tiled.Map {
+		o := goblinAt(1, 0, 0)
+		o.Properties["Label.value"] = tiled.Property{Value: v}
+		return spawnMap(o)
+	}
+
+	if _, err := SyncSpawns(context.Background(), svc, db, "level.tmx", withLabel("boss")); err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	res, err := SyncSpawns(context.Background(), svc, db, "level.tmx", withLabel("boss"))
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if len(res.Refused) != 0 {
+		t.Fatalf("re-importing a scalar component was refused: %v", res.Refused)
+	}
+	if res.Unchanged != 1 {
+		t.Errorf("result = %+v, want it unchanged", res)
+	}
+
+	// And an edit to it lands.
+	if _, err := SyncSpawns(context.Background(), svc, db, "level.tmx", withLabel("minion")); err != nil {
+		t.Fatalf("third import: %v", err)
+	}
+	var label string
+	if err := db.QueryRow(`SELECT value FROM comp_label`).Scan(&label); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if label != "minion" {
+		t.Errorf("label = %q, want minion", label)
+	}
+}
+
+// Clearing an object's class deletes its entity, which is right under the rule
+// and is a lot of consequence for emptying a field. It is said rather than done
+// quietly.
+func TestSyncSpawns_ClearingAClassSaysTheEntityIsGoing(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	declassed := goblinAt(1, 0, 0)
+	declassed.Type = ""
+	res := mustSpawn(t, svc, db, spawnMap(declassed))
+
+	if res.Deleted != 1 {
+		t.Fatalf("result = %+v, want the entity deleted", res)
+	}
+	if len(res.Warnings) != 1 {
+		t.Fatalf("result = %+v, want it said out loud", res)
+	}
+	if !strings.Contains(res.Warnings[0], "no class") {
+		t.Errorf("the warning does not say why: %q", res.Warnings[0])
+	}
+}
+
+// A row whose entity is not there does not count as spawned. The foreign key
+// should make that impossible; a connection opened without foreign keys enforced
+// can produce it, and every load then reported success for a goblin that did not
+// exist.
+func TestSyncSpawns_ARowWithNoEntityIsNotSpawned(t *testing.T) {
+	svc, db := spawnFixture(t)
+	mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatalf("disabling foreign keys: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM entities`); err != nil {
+		t.Fatalf("deleting the entity without the cascade: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatalf("re-enabling: %v", err)
+	}
+
+	res := mustSpawn(t, svc, db, spawnMap(goblinAt(1, 0, 0)))
+	if res.Created != 1 {
+		t.Errorf("result = %+v, want the goblin created — a row pointing at nothing counted as spawned", res)
+	}
+}
+
+// A component that is not an object holds its value in one column, so
+// "Label.value" addresses it and "Label.text" does not — the property half of
+// the name is the column, not something the schema declares.
+func TestSyncSpawns_AScalarComponentIsAddressedByItsColumn(t *testing.T) {
+	ds := spawnSchema()
+	ds.Components["Label"] = schema.Component{Type: "string"}
+	gob := ds.EntityTypes["Goblin"]
+	gob.OptionalComponents = append(gob.OptionalComponents, "Label")
+	ds.EntityTypes["Goblin"] = gob
+
+	store, err := storage.NewSQLiteStore(t.TempDir()+"/test.sqlite", ds, "")
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := storage.EnsureInterpreterTables(store.DB()); err != nil {
+		t.Fatalf("EnsureInterpreterTables: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	svc := world.NewEntityService(store)
+	svc.SetSchema(ds)
+
+	obj := goblinAt(1, 0, 0)
+	obj.Properties["Label.text"] = tiled.Property{Value: "boss"}
+	res, err := SyncSpawns(context.Background(), svc, store.DB(), "level.tmx", spawnMap(obj))
+	if err != nil {
+		t.Fatalf("SyncSpawns: %v", err)
+	}
+	if len(res.Refused) != 1 {
+		t.Fatalf("result = %+v, want the wrong column name refused", res)
+	}
+	for _, want := range []string{"Label.text", `"value"`} {
+		if !strings.Contains(res.Refused[0], want) {
+			t.Errorf("the refusal does not mention %q: %q", want, res.Refused[0])
+		}
 	}
 }

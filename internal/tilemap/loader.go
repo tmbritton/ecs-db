@@ -27,6 +27,11 @@ type mapDef struct {
 // run and the file decoration. A map edited afterwards loaded without error and
 // changed nothing. Loading now diffs — see SyncTiles for what the file owns and
 // what survives it.
+//
+// Loading a Tiled map needs storage.EnsureInterpreterTables to have run: the
+// spawns table is how an object that has left the map takes its entity with it.
+// The character format has no objects and does not.
+//
 // The second result is the parsed map, for callers that need the file rather
 // than the grid — the renderer, which draws layers and tilesets that
 // comp_tile has no room for. Nil for the character format, which has neither.

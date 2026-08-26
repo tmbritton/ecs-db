@@ -53,6 +53,10 @@ func (m *mockTx) RecordSpawn(ctx context.Context, mapPath string, objectID int, 
 	return nil
 }
 
+func (m *mockTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
+	return nil
+}
+
 func (m *mockTx) DeleteEntity(ctx context.Context, entityID int64) error {
 	return m.deleteEntityErr
 }
