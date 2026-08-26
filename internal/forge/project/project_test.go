@@ -19,6 +19,7 @@ type fixture struct {
 	// project root.
 	assetsOnly []string
 	extra      map[string]string // stray files at the project root
+	mapPath    string            // [map].path, relative to the config file
 }
 
 const validSchema = `{
@@ -64,6 +65,9 @@ func (f fixture) write(t *testing.T) string {
 
 	var toml strings.Builder
 	toml.WriteString("[database]\npath = \"./ecs.db\"\n\n[schema]\npath = \"./schema.json\"\n")
+	if f.mapPath != "" {
+		toml.WriteString("\n[map]\npath = \"" + f.mapPath + "\"\n")
+	}
 	for _, mod := range f.mods {
 		toml.WriteString("\n[[mods]]\nname = \"" + mod + "\"\n")
 		if assets[mod] {
@@ -486,5 +490,34 @@ behaviors = "./shared/"
 	}
 	if len(p.Problems) != 0 {
 		t.Errorf("Problems = %+v, want none", p.Problems)
+	}
+}
+
+// The map path is what MAP mode opens and what decides whether the pathfinding
+// builtins exist. It was read for the second question and dropped, so Forge
+// knew a project had a map and not which one.
+func TestOpen_CarriesTheConfiguredMapPath(t *testing.T) {
+	cfg := fixture{mapPath: "./maps/level1.tmx"}.write(t)
+
+	p, err := Open(cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	want := filepath.Join(filepath.Dir(cfg), "maps", "level1.tmx")
+	if p.MapPath != want {
+		t.Errorf("MapPath = %q, want %q", p.MapPath, want)
+	}
+}
+
+// Resolved by config.Load against the file that declared it, once — the same
+// rule every other path follows, so the engine and Forge cannot disagree about
+// which file a config means.
+func TestOpen_AProjectWithNoMapHasNoMapPath(t *testing.T) {
+	p, err := Open(fixture{}.write(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if p.MapPath != "" {
+		t.Errorf("MapPath = %q, want empty", p.MapPath)
 	}
 }

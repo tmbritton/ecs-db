@@ -20,19 +20,19 @@ templ SaveReports(props SaveReportsProps) {
 				>
 					<span class="save-report__file mono">{ baseName(r.Path) }</span>
 					<span class="save-report__summary mono" data-testid="save-report-summary">{ r.Summary() }</span>
-					if r.Outcome == savereport.OutcomeConflict {
+					if r.Outcome == savereport.OutcomeConflict && r.ReloadAction != "" {
 						<div class="save-report__resolutions">
 							<button
 								type="button"
 								class="btn--outline save-report__resolution"
 								data-testid="conflict-reload"
-								data-on:click="@post('/forge/schema/reload')"
+								data-on:click={ r.ReloadAction }
 							>Use theirs</button>
 							<button
 								type="button"
 								class="btn--danger save-report__resolution"
 								data-testid="conflict-overwrite"
-								data-on:click="@post('/forge/schema/overwrite')"
+								data-on:click={ r.OverwriteAction }
 							>Keep mine</button>
 						</div>
 					}

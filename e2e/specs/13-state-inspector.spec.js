@@ -84,8 +84,12 @@ test("selecting a node fills the inspector with that node's values", async ({ pa
 });
 
 // The claim this story rests on: the list is the engine's vocabulary for this
-// project, not a list someone typed. The fixture has no map, so the engine
-// would not register computePath — and a machine using it would not load.
+// project, not a list someone typed. The gate is buildRegistry's — the engine
+// registers the pathfinding builtins only when a map is configured — and this
+// fixture gained a [map] in Epic 15 Story 2, so the assertion is that the gate
+// *opens*, not that it is shut. The closed side is covered in Go, four times
+// over (project_test.go, inspector_test.go, canvasedit_test.go,
+// transitionedit_test.go), where a project can be built without one.
 test("the action catalogue is the registry's, gated as the engine gates it", async ({ page }) => {
   await selectState(page, "idle");
   const options = byTestId(page, "add-entry-action").locator("option");
@@ -93,8 +97,8 @@ test("the action catalogue is the registry's, gated as the engine gates it", asy
   const values = await options.evaluateAll((els) => els.map((e) => e.value));
   expect(values).toContain("dealDamage");
   expect(values).toContain("setAnimation");
-  expect(values, "computePath needs a map this project has not got").not.toContain("computePath");
-  expect(values, "and so does the line-of-sight guard's companion").not.toContain("stepAlongPath");
+  expect(values, "this project has a map, so pathfinding registers").toContain("computePath");
+  expect(values, "and so does the action that walks the path it found").toContain("stepAlongPath");
 
   // Each with its description, so what an action does is there while you are
   // choosing it.

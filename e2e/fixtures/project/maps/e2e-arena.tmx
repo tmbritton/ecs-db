@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ A second map, so the map list has more than one row and the "loaded" marker
+ means something. game.toml does NOT name this one: it is a level the project
+ holds and the engine does not read, which is the distinction MAP mode exists to
+ make visible.
+-->
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="24" tileheight="24" infinite="0" nextlayerid="3" nextobjectid="1">
+ <properties>
+  <property name="mapId" value="e2e-arena"/>
+ </properties>
+ <tileset firstgid="1" source="e2e-tiles.tsx"/>
+ <layer id="1" name="ground" width="6" height="4">
+  <data encoding="csv">
+1,1,1,1,1,1,
+1,1,1,1,1,1,
+1,1,1,1,1,1,
+1,1,1,1,1,1
+</data>
+ </layer>
+ <objectgroup id="2" name="spawns"/>
+</map>

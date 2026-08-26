@@ -12,6 +12,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
+	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/server"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
@@ -62,6 +63,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	}
 	var editing *session.Session
 	var machineSession *machines.Session
+	var mapSession *maps.Session
 	var resolved []project.Machine
 	var behaviorDirs []string
 	var problems []project.Problem
@@ -116,6 +118,12 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			slog.Warn("starting the machine editing session", "err", err)
 		}
+
+		// The editing session for the project's maps. A project with no [map]
+		// opens one holding nothing, which is a state MAP mode renders rather
+		// than a failure — the map is the one thing a project can legitimately
+		// not have and still be worth editing.
+		mapSession = maps.Open(maps.Config{MapPath: proj.MapPath})
 	}
 
 	srv := server.New(server.Config{
@@ -125,6 +133,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		PollInterval:   cfg.Forge.PollInterval(),
 		Machines:       resolved,
 		MachineSession: machineSession,
+		MapSession:     mapSession,
 		BehaviorDirs:   behaviorDirs,
 		Problems:       problems,
 	}, web.Static)

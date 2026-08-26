@@ -13,6 +13,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 )
 
 func renderShell(t *testing.T, active mode.Mode) string {
@@ -137,11 +138,11 @@ func TestShell_RendersTheSaveReportTarget(t *testing.T) {
 func TestShell_RendersTheReportsItIsGiven(t *testing.T) {
 	var buf bytes.Buffer
 	body := templ.ComponentFunc(func(_ context.Context, w io.Writer) error { return nil })
-	reports := []savereport.Report{{
+	reports := []components.SaveReportView{{Report: savereport.Report{
 		Path:     "/p/goblin.json",
 		Outcome:  savereport.OutcomeRejected,
 		Problems: []string{"unknown action alpha"},
-	}}
+	}}}
 	if err := Shell(mode.Default, "", status.Status{}, reports, NoFooter(), body, nil).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}

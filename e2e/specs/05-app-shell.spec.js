@@ -45,7 +45,7 @@ test.describe("app shell", () => {
   // so an unfinished build reads as unfinished rather than broken. Implemented
   // modes are listed here so this test shrinks as they land rather than being
   // quietly weakened.
-  const IMPLEMENTED = new Set(["schema", "ents", "agents"]);
+  const IMPLEMENTED = new Set(["schema", "ents", "agents", "map"]);
 
   test("each unimplemented mode names itself and the epic that fills it", async ({ page }) => {
     for (const m of MODES.filter((m) => !IMPLEMENTED.has(m.slug))) {
@@ -60,6 +60,7 @@ test.describe("app shell", () => {
       ["schema", "schema-mode"],
       ["ents", "ents-mode"],
       ["agents", "agents-mode"],
+      ["map", "map-mode"],
     ]) {
       await page.goto(`/forge/${slug}`);
       await expect(byTestId(page, testid)).toBeVisible();
@@ -248,9 +249,18 @@ test.describe("affordances that are not ready yet", () => {
   // the one button that is not finished.
   test("every link in the shell resolves", async ({ page, request }) => {
     await page.goto("/forge/map");
+
+    // The rail is still exactly the mode table — that is the count worth
+    // pinning, and it used to be the whole page's because MAP was a stub with
+    // no links of its own. Counting every anchor now would shrink to an
+    // assertion about how many maps the fixture happens to have.
+    const rail = await byTestId(page, "mode-rail")
+      .locator("a[href^='/']")
+      .evaluateAll((as) => as.map((a) => a.getAttribute("href")));
+    expect(rail.length).toBe(MODES.length);
+
     const hrefs = await page.locator("a[href^='/']").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
-    expect(hrefs.length).toBe(MODES.length);
-    for (const href of hrefs) {
+    for (const href of new Set(hrefs)) {
       const resp = await request.get(href);
       expect(resp.status(), `${href} is linked from the shell`).toBe(200);
     }

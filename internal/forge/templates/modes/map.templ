@@ -1,0 +1,133 @@
+package modes
+
+// MapMode is the map editor.
+//
+// This story renders what a map *is* to Forge — which maps the project has,
+// which one the engine loads, which are unsaved, and why any of them will not
+// open — and wires the save footer to it. The canvas, the layer panel and the
+// tileset palette are Story 3; the region where they go says so rather than
+// being blank, which would be indistinguishable from a rendering failure.
+templ MapMode(data Data) {
+	if !data.HasMaps {
+		@stub("MAP", "No project is open — see the log for why.", "")
+	} else {
+		<div class="schema" data-testid="map-mode">
+			@mapList(data)
+			<div class="schema__main">
+				if data.Problem != "" {
+					<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+				}
+				@mapProblems(data)
+				if len(data.Maps) == 0 {
+					@noMaps(data)
+				} else {
+					@mapEditor(data)
+				}
+			</div>
+		</div>
+	}
+}
+
+templ mapList(data Data) {
+	<nav class="schema__list" aria-label="Maps" data-testid="map-list">
+		<div class="section-heading"><span>Maps ◂ game.toml</span></div>
+		<p class="schema__hint mono">one Tiled level each</p>
+		for _, m := range data.Maps {
+			<a
+				href={ URL(mapHref(m.Path)) }
+				class={ "list-row", kv("list-row--active", m.Path == data.SelectedMap) }
+				data-testid={ "map-" + m.Name }
+				data-active={ boolAttr(m.Path == data.SelectedMap) }
+				data-dirty={ boolAttr(data.DirtyMaps[m.Path]) }
+				data-configured={ boolAttr(m.Configured) }
+				if m.Path == data.SelectedMap {
+					aria-current="true"
+				}
+			>
+				<span class="list-row__glyph" aria-hidden="true">🗺</span>
+				<span class="list-row__label">{ m.Name }</span>
+				if data.DirtyMaps[m.Path] {
+					<span class="badge-problem" title="unsaved changes" data-testid={ "map-dirty-" + m.Name }>●</span>
+				}
+				if m.Configured {
+					<span
+						class="badge-override mono"
+						title="the map game.toml names — the one ecs-db run loads"
+						data-testid={ "map-configured-" + m.Name }
+					>loaded</span>
+				}
+			</a>
+		}
+		<p class="schema__foot">
+			Only the map marked <span class="mono">loaded</span> is the one
+			<span class="mono">ecs-db run</span> reads. Editing another is real work that
+			changes nothing about the game until <span class="mono">game.toml</span> says so.
+		</p>
+	</nav>
+}
+
+// Two states leave the strip empty and they read differently: a project with no
+// [map] at all, which is a project without a level, and one whose configured map
+// is missing or will not open, which is a broken project with a reason already
+// on screen above. Telling the second group to add a section they have is how
+// you get someone reading their own game.toml twice.
+templ noMaps(data Data) {
+	if data.ConfiguredMap == "" {
+		<div class="schema__empty" data-testid="no-maps">
+			<p>This project declares no map.</p>
+			<p class="schema__hint mono">
+				Add a <span class="mono">[map]</span> section to game.toml naming a .tmx file.
+			</p>
+		</div>
+	} else {
+		<div class="schema__empty" data-testid="map-unavailable">
+			<p>game.toml names a map that could not be opened.</p>
+			<p class="schema__hint mono">{ data.ConfiguredMap }</p>
+		</div>
+	}
+}
+
+templ mapEditor(data Data) {
+	<div class="schema__editor" data-testid="map-editor">
+		<header class="schema__editor-head">
+			<h2 class="schema__title" data-testid="map-title">{ fileName(data.SelectedMap) }</h2>
+			<p class="schema__path mono" data-testid="map-path">{ data.SelectedMap }</p>
+		</header>
+		@unbuilt("CANVAS", "Tile layers, the tileset palette and painting.", "Epic 15 Story 3")
+		<p class="schema__foot">
+			A saved map takes effect on the next <span class="mono">ecs-db run</span>.
+			The engine watches behaviour files and sprite assets; it does not watch maps.
+		</p>
+	</div>
+}
+
+templ mapProblems(data Data) {
+	if len(data.MapProblems) > 0 {
+		<div class="problems-block" data-testid="map-project-problems">
+			<div class="section-heading">Maps that did not load</div>
+			<ul class="problems" role="alert">
+				for _, p := range data.MapProblems {
+					<li class="problem problem--warning">
+						<span class="problem__badge mono">{ fileName(p.Path) }</span>
+						<span class="problem__text">{ p.Err.Error() }</span>
+					</li>
+				}
+			</ul>
+		</div>
+	}
+}
+
+// unbuilt marks a region of a mode that is not finished, as distinct from a
+// mode that is not built at all.
+//
+// Deliberately not the stub component. `mode-stub` means "this whole editor is
+// a placeholder", and the app-shell spec asserts an implemented mode renders
+// none — overloading it here would make that check unable to tell a mode that
+// was never built from one with a region still to come.
+templ unbuilt(caption, summary, epic string) {
+	<div class="mode-stub" data-testid="unbuilt-region">
+		<div class="mode-stub__caption section-heading" data-testid="unbuilt-caption">{ caption }</div>
+		<p class="mode-stub__summary">{ summary }</p>
+		<p class="mode-stub__epic mono" data-testid="unbuilt-epic">{ epic }</p>
+	</div>
+}

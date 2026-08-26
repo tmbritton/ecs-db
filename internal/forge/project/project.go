@@ -54,10 +54,15 @@ type Project struct {
 	ConfigPath string
 	SchemaPath string
 	DBPath     string
-	Schema     schema.DatabaseSchema
-	Mods       []Mod
-	Machines   []Machine // sorted by ID, so a list renders in a stable order
-	Problems   []Problem
+	// MapPath is the map game.toml names, or empty for a project that declares
+	// none. Read here for two different questions: which map MAP mode opens,
+	// and whether the pathfinding builtins exist at all — buildRegistry
+	// mirrors the engine, which registers them only when a map is configured.
+	MapPath  string
+	Schema   schema.DatabaseSchema
+	Mods     []Mod
+	Machines []Machine // sorted by ID, so a list renders in a stable order
+	Problems []Problem
 }
 
 // Open resolves the project rooted at the given game.toml.
@@ -80,6 +85,7 @@ func Open(configPath string) (*Project, error) {
 		ConfigPath: configPath,
 		SchemaPath: cfg.Schema.Path,
 		DBPath:     cfg.Database.Path,
+		MapPath:    cfg.Map.Path,
 	}
 
 	raw, err := os.ReadFile(p.SchemaPath)

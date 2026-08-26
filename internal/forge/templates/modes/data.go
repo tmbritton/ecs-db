@@ -5,6 +5,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
+	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
@@ -29,6 +30,34 @@ type Data struct {
 	// Selected is the component or entity type the URL names, resolved to
 	// something that exists.
 	Selected string
+	// Maps are the project's Tiled maps, the configured one first — the tab
+	// strip is made of these.
+	Maps []maps.Map
+	// SelectedMap is the map on screen, by path, resolved against what exists.
+	SelectedMap string
+	// DirtyMaps are the maps with unsaved work, by path.
+	//
+	// Computed for every mode, not only MAP: the save footer is in the shell
+	// and is on screen everywhere, so a footer that only knew about unsaved
+	// maps while MAP happened to be open is a way to lose work.
+	DirtyMaps map[string]bool
+	// MapProblems is why a map the project has is not open, or is open and
+	// incomplete — a file that will not parse, a .tmj, a tileset that will not
+	// resolve. Shown rather than hidden, for the reason project.Problem exists:
+	// the broken file is the one somebody came here to fix.
+	MapProblems []project.Problem
+	// ConfiguredMap is the map game.toml names, or empty for a project that
+	// declares none.
+	//
+	// What tells two states apart that both leave Maps empty: a project without
+	// a level, and one whose configured map is missing or will not parse.
+	// Answering both with "this project declares no map" told the second group
+	// to add a section they already have.
+	ConfiguredMap string
+	// HasMaps is false when no project could be opened, on the same terms as
+	// HasSession. A project that opened and declares no [map] has this true and
+	// Maps empty, which is a different state and reads differently.
+	HasMaps bool
 	// Machines are the behaviour machines the project resolved, for the binding
 	// dropdowns and for ENTS's read-only view of a bound machine's context.
 	Machines []project.Machine

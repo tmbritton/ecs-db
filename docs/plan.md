@@ -629,7 +629,12 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Found by review: a `nextobjectid` that had fallen behind was believed, and handed out an id already in use — which under `spawns`' `(map, object_id)` key moves a live entity rather than creating one, and needs no hand-editing to happen, only a git merge
   - Found by review: `xml:space` lost its prefix on the root, which every edit re-renders
 
-- [ ] **Map editing session** — Which maps a project has; open, save, discard, reload, conflict. `project.Project` does not currently carry the map path at all.
+- [x] **Map editing session** — Which maps a project has; open, save, discard, reload, conflict. `project.Project` did not carry the map path at all.
+  - The configured map is marked, because a project can hold five maps and `ecs-db run` reads exactly one — editing another is real work that changes nothing about the game until `game.toml` says so
+  - Tilesets resolve on demand and are never held: a `.tsx` is shared with Epic 16's TILES mode and with Tiled in another window, and a tree kept here has no signal to invalidate on
+  - A map that vanishes with unsaved work is kept and reported, because work in no tab is reachable from nothing
+  - Found by review: the footer's Save and Discard acted on the configured map whatever map was on screen — the confirm dialog naming one file while the request destroyed another's work
+  - Found by review, and older than this story: a conflict's "Use theirs" posted to `/forge/schema/reload` whatever the conflict was on, so resolving a map conflict discarded unsaved schema work
 
 - [ ] **The map renders** — Tile layers drawn from tileset images, layer panel in file order, tileset palette, map tabs, and the AUTHORED/LIVE/REPLAY lens with the two later lenses disabled. Needs Forge's first route that serves a project file, with the traversal check that implies.
 

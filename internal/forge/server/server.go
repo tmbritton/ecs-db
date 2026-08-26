@@ -25,6 +25,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
+	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -75,6 +76,11 @@ type Config struct {
 	// to word its "no machine with this id is loaded" warning around a list
 	// that was read once at startup, and this is the story that can change it.
 	MachineSession *machines.Session
+	// MapSession is the editing session for the project's Tiled maps. Nil when
+	// the project could not be opened, and legitimately empty when it opened
+	// and declares no [map] — a project with no level is a project, and MAP
+	// mode says so rather than the editor refusing to start.
+	MapSession *maps.Session
 	// Problems are the project's loading failures. They are what turns "that
 	// machine did not resolve" into a sentence naming the file and the reason,
 	// instead of sending the user to the log to find out what the tool already
@@ -199,6 +205,7 @@ func (s *Server) routes() http.Handler {
 	s.registerMachineEditRoutes(mux)
 	s.registerCanvasRoutes(mux)
 	s.registerEntsEditRoutes(mux)
+	s.registerMapEditRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -239,7 +246,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	s.hold(saveNone)
 	data := s.modeData(r)
 	s.render(w, r, templates.Shell(
-		m, streamQuery(r, m.Slug, data), status.Check(s.cfg.Engine), s.saves.All(), s.footer(m.Slug, data),
+		m, streamQuery(r, m.Slug, data), status.Check(s.cfg.Engine), s.saveReports(), s.footer(m.Slug, data),
 		content(data), s.confirmation(data)))
 }
 
@@ -270,6 +277,9 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	// Only where it means something. machineData runs for every mode, so
 	// without this every page — MAP, TILES, SCHEMA — put an absolute path from
 	// the developer's filesystem into its subscription URL.
+	if slug == "map" && data.SelectedMap != "" {
+		q.Set("map", data.SelectedMap)
+	}
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)
 	}
@@ -316,6 +326,7 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	})
 	data.SelectedMachine, data.DirtyMachines, data.ReformatMachines = s.machineData(r)
 	slug := modeSlug(r)
+	s.addMapData(&data, r, slug)
 	if s.cfg.MachineSession != nil {
 		data.HasMachines = true
 		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
@@ -608,10 +619,13 @@ func (s *Server) footer(slug string, data modes.Data) templates.Component {
 	if slug == "agents" && s.cfg.MachineSession != nil {
 		return s.machinesFooter(data)
 	}
+	if slug == "map" && s.cfg.MapSession != nil {
+		return s.mapFooter(data)
+	}
 	if s.cfg.Session == nil {
 		return templates.NoFooter()
 	}
-	elsewhere := s.unsavedMachines()
+	elsewhere := templates.Elsewhere{Machines: s.unsavedMachines(), Maps: s.unsavedMaps()}
 	dirty, err := s.cfg.Session.Dirty()
 	if err != nil {
 		// A schema that will not serialise cannot be saved, and saying "clean"
@@ -621,6 +635,58 @@ func (s *Server) footer(slug string, data modes.Data) templates.Component {
 	}
 	return templates.SchemaFooter(
 		filepath.Base(s.cfg.Session.Path()), dirty, data.Validation, elsewhere)
+}
+
+// unsavedMaps counts map edits this footer cannot save, on the same terms as
+// unsavedMachines.
+func (s *Server) unsavedMaps() int {
+	if s.cfg.MapSession == nil {
+		return 0
+	}
+	dirty, err := s.cfg.MapSession.Dirty()
+	if err != nil {
+		return 0
+	}
+	return len(dirty)
+}
+
+// mapFooter builds MAP mode's footer: it saves the one map on screen.
+//
+// Per map rather than all of them, which is where it differs from AGENTS. A
+// project's machines are edited together — one behaviour spans several files —
+// while its maps are separate levels, and a Save that also wrote the level in
+// the next tab is a surprise nobody asked for.
+func (s *Server) mapFooter(data modes.Data) templates.Component {
+	if data.SelectedMap == "" {
+		// Nothing to save and nothing to discard. A footer whose buttons post
+		// without naming a map would fall back to whichever one the server
+		// picked, which is how this went wrong once already.
+		return templates.NoFooter()
+	}
+	return templates.MapFooter(data.SelectedMap, filepath.Base(data.SelectedMap),
+		data.DirtyMaps[data.SelectedMap], templates.Elsewhere{
+			Schema:   s.unsavedSchema(),
+			Machines: s.unsavedMachines(),
+			Maps:     s.unsavedMapsExcept(data.SelectedMap),
+		})
+}
+
+// unsavedMapsExcept counts the maps this footer's Save will not write.
+func (s *Server) unsavedMapsExcept(path string) int {
+	if s.cfg.MapSession == nil {
+		return 0
+	}
+	dirty, err := s.cfg.MapSession.Dirty()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, p := range dirty {
+		if p != path {
+			n++
+		}
+	}
+	return n
 }
 
 // unsavedMachines counts machine edits that this footer cannot save, so
@@ -676,7 +742,7 @@ func (s *Server) machinesFooter(data modes.Data) templates.Component {
 		machinesFooterFile(data.DirtyMachines, data.ReformatMachines),
 		len(data.DirtyMachines) > len(data.ReformatMachines),
 		dirtyNames(data.DirtyMachines),
-		s.unsavedSchema(),
+		templates.Elsewhere{Schema: s.unsavedSchema(), Maps: s.unsavedMaps()},
 		invalid,
 	)
 }
@@ -818,9 +884,67 @@ func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error)
 	return buf.String(), nil
 }
 
+// saveReports pairs each save outcome with the two ways out of a conflict *for
+// that file*.
+//
+// The buttons used to post to /forge/schema/ whatever the conflict was on, so a
+// machine or a map conflict offered "Use theirs" and "Keep mine" that operated
+// on schema.json — the first of them discarding unsaved schema work to resolve
+// a conflict somewhere else. Which session holds a path is the only thing that
+// can answer this, and only the server knows.
+func (s *Server) saveReports() []components.SaveReportView {
+	reports := s.saves.All()
+	out := make([]components.SaveReportView, 0, len(reports))
+	for _, r := range reports {
+		view := components.SaveReportView{Report: r}
+		switch {
+		case s.holdsMap(r.Path):
+			q := "?map=" + url.QueryEscape(r.Path)
+			view.ReloadAction = "@post('/forge/map/reload" + q + "')"
+			view.OverwriteAction = "@post('/forge/map/save/overwrite" + q + "')"
+		case s.holdsMachine(r.Path):
+			q := "?machine=" + url.QueryEscape(r.Path)
+			view.ReloadAction = "@post('/forge/agents/reload" + q + "')"
+			view.OverwriteAction = "@post('/forge/agents/save/overwrite" + q + "')"
+		case s.cfg.Session != nil && r.Path == s.cfg.Session.Path():
+			view.ReloadAction = "@post('/forge/schema/reload')"
+			view.OverwriteAction = "@post('/forge/schema/overwrite')"
+		}
+		// A path no session claims renders no buttons rather than the wrong
+		// ones: offering an action that resolves a different file is worse than
+		// offering none.
+		out = append(out, view)
+	}
+	return out
+}
+
+func (s *Server) holdsMap(path string) bool {
+	if s.cfg.MapSession == nil {
+		return false
+	}
+	for _, held := range s.cfg.MapSession.Held() {
+		if held == path {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) holdsMachine(path string) bool {
+	if s.cfg.MachineSession == nil {
+		return false
+	}
+	for _, held := range s.cfg.MachineSession.Held() {
+		if held == path {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) renderSaveReports() (string, error) {
 	var buf bytes.Buffer
-	c := components.SaveReports(components.SaveReportsProps{Reports: s.saves.All()})
+	c := components.SaveReports(components.SaveReportsProps{Reports: s.saveReports()})
 	if err := c.Render(context.Background(), &buf); err != nil {
 		return "", err
 	}

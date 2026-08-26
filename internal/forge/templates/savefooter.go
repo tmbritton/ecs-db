@@ -1,7 +1,9 @@
 package templates
 
 import (
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 
@@ -14,13 +16,13 @@ import (
 // The actions post to the session endpoints. Both buttons are disabled when
 // clean, which the primitive already supports and nothing had used until now —
 // there is nothing to commit and nothing to throw away.
-func SchemaFooter(file string, dirty bool, report validation.Report, unsavedElsewhere int) templ.Component {
+func SchemaFooter(file string, dirty bool, report validation.Report, elsewhere Elsewhere) templ.Component {
 	return components.SaveFooter(components.SaveFooterProps{
 		Dirty:         dirty,
 		File:          file,
 		Blocked:       report.Blocked(),
 		BlockedReason: blockedReason(report),
-		Elsewhere:     machinesElsewhere(unsavedElsewhere),
+		Elsewhere:     elsewhere.describe(),
 		SaveAction:    "@post('/forge/schema/save')",
 		// Confirmed, because it throws away work with no undo. It also used to
 		// be the only control offered after a conflict, which made an
@@ -72,12 +74,12 @@ func blockedReason(report validation.Report) string {
 //
 // If that trade turns out to be wrong, the fix is a per-machine save or a
 // per-machine discard, not a return to a Save that half-works in silence.
-func MachinesFooter(file string, dirty bool, title string, unsavedSchema bool, invalid map[string]int) templ.Component {
+func MachinesFooter(file string, dirty bool, title string, elsewhere Elsewhere, invalid map[string]int) templ.Component {
 	return components.SaveFooter(components.SaveFooterProps{
 		Dirty:         dirty,
 		File:          file,
 		Title:         title,
-		Elsewhere:     schemaElsewhere(unsavedSchema),
+		Elsewhere:     elsewhere.describe(),
 		Blocked:       len(invalid) > 0,
 		BlockedReason: machinesBlockedReason(invalid),
 		SaveAction:    "@post('/forge/agents/save')",
@@ -111,26 +113,68 @@ func machinesBlockedReason(invalid map[string]int) string {
 	return strconv.Itoa(problems) + " problems in " + where + " — the engine would refuse them"
 }
 
-// machinesElsewhere and schemaElsewhere say that there is unsaved work this
-// footer cannot save.
+// MapFooter builds the save footer for MAP mode.
 //
-// One Save button does one thing, so the footer follows the mode — and that
-// made switching to AGENTS with a dirty schema.json show "✓ saved" and a
-// disabled Save, which is a way to lose work rather than a wording miss.
-func machinesElsewhere(n int) string {
-	switch n {
-	case 0:
-		return ""
-	case 1:
-		return "1 unsaved machine in AGENTS"
-	default:
-		return strconv.Itoa(n) + " unsaved machines in AGENTS"
-	}
+// Not blocked by validity, and that is a deliberate difference from
+// MachinesFooter. A map is edited by painting: half a stroke is not a state the
+// UI can be in, and the things that make a map unloadable — a gid no tileset
+// holds, a spawn whose class is not an entity type — are Story 9's to report
+// against the cell and the spawn that caused them. Blocking Save on them would
+// mean an author who pasted a tileset in the wrong order could not write the
+// file they need to fix by hand.
+// path names the map in every action, and is not optional. The footer follows
+// the selection, so a Save that posted without one would write whichever map
+// the server picked as a default — which is the configured map, not the one on
+// screen. Found by review: the confirm dialog named the map you were looking at
+// while the request discarded a different one's work.
+func MapFooter(path, file string, dirty bool, elsewhere Elsewhere) templ.Component {
+	q := "?map=" + url.QueryEscape(path)
+	return components.SaveFooter(components.SaveFooterProps{
+		Dirty:      dirty,
+		File:       file,
+		Title:      path,
+		Elsewhere:  elsewhere.describe(),
+		SaveAction: "@post('/forge/map/save" + q + "')",
+		DiscardAction: "confirm('Discard unsaved changes to " + file + "?') && " +
+			"@post('/forge/map/discard" + q + "')",
+	})
 }
 
-func schemaElsewhere(unsaved bool) string {
-	if !unsaved {
-		return ""
+// Elsewhere is unsaved work the footer on screen cannot save.
+//
+// One Save button does one thing and the footer follows the mode, so without
+// this, switching to AGENTS with a dirty schema.json showed "✓ saved" and a
+// disabled Save — a way to lose work rather than a wording miss. It was two
+// parameters on two footers until maps made it three sources and three
+// footers; a struct is what stops the next mode adding a fourth positional
+// argument to each of them.
+//
+// Each footer passes what it cannot save and leaves out what it can.
+type Elsewhere struct {
+	Schema   bool
+	Machines int
+	Maps     int
+}
+
+// describe is the one line the footer shows, or "" when everything else is
+// saved. Joined rather than truncated to the first: two kinds of unsaved work
+// elsewhere is exactly when knowing about only one is worst.
+func (e Elsewhere) describe() string {
+	var parts []string
+	if e.Schema {
+		parts = append(parts, "unsaved changes to schema.json in SCHEMA")
 	}
-	return "unsaved changes to schema.json in SCHEMA"
+	switch {
+	case e.Machines == 1:
+		parts = append(parts, "1 unsaved machine in AGENTS")
+	case e.Machines > 1:
+		parts = append(parts, strconv.Itoa(e.Machines)+" unsaved machines in AGENTS")
+	}
+	switch {
+	case e.Maps == 1:
+		parts = append(parts, "1 unsaved map in MAP")
+	case e.Maps > 1:
+		parts = append(parts, strconv.Itoa(e.Maps)+" unsaved maps in MAP")
+	}
+	return strings.Join(parts, " · ")
 }

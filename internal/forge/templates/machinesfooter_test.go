@@ -9,7 +9,7 @@ import (
 func renderFooter(t *testing.T, invalid map[string]int) string {
 	t.Helper()
 	var b strings.Builder
-	c := MachinesFooter("goblin.json", true, "goblin.json", false, invalid)
+	c := MachinesFooter("goblin.json", true, "goblin.json", Elsewhere{}, invalid)
 	if err := c.Render(context.Background(), &b); err != nil {
 		t.Fatalf("render: %v", err)
 	}

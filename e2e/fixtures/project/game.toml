@@ -46,8 +46,13 @@ width    = 640
 height   = 480
 tileSize = 32
 
-# No [map] section: Forge never loads one, and naming a file that does not exist
-# would be a trap for the first story that starts resolving it.
+# The map MAP mode opens, and the reason this project registers the pathfinding
+# builtins: buildRegistry mirrors the engine, which registers computePath and
+# inLineOfSight only when a map is configured. maps/ holds a second .tmx that
+# this does NOT name, so the "loaded" marker in the map list has something to
+# distinguish.
+[map]
+path = "./maps/e2e-level.tmx"
 
 [forge]
 addr = "127.0.0.1:7788"

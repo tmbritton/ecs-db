@@ -41,7 +41,7 @@ module.exports = defineConfig({
     {
       name: "app",
       // Everything that only reads. Runs fully parallel.
-      testIgnore: /06-engine-status|1[23]-/,
+      testIgnore: /06-engine-status|1[235]-/,
       use: { ...chrome },
     },
     {
@@ -55,7 +55,7 @@ module.exports = defineConfig({
       // it serialises within a file, and two files editing the same session in
       // parallel workers interfere exactly as two tests in one file would.
       name: "stateful",
-      testMatch: /06-engine-status|1[23]-/,
+      testMatch: /06-engine-status|1[235]-/,
       dependencies: ["app"],
       workers: 1,
       use: { ...chrome },

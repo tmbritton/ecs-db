@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
-	"github.com/tmbritton/ecs-db/internal/forge/savereport"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 )
@@ -13,7 +12,7 @@ import (
 // top, mode rail down the left, and the active mode's content filling the
 // rest. It knows nothing about what any mode contains — it renders the
 // component it is handed.
-templ Shell(active mode.Mode, streamQuery string, engine status.Status, saves []savereport.Report, footer Component, content Component, confirm Component) {
+templ Shell(active mode.Mode, streamQuery string, engine status.Status, saves []components.SaveReportView, footer Component, content Component, confirm Component) {
 	@Layout("Forge — " + active.Title) {
 		<div class="shell" data-testid="shell" data-init={ eventStream(active, streamQuery) }>
 			@menuBar(engine)

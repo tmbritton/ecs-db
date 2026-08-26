@@ -86,8 +86,9 @@ test("selecting an edge fills the panel with that transition's values", async ({
 });
 
 // The same claim Story 6 makes about actions, against the other catalogue. The
-// fixture has no map, so the engine would not register inLineOfSight — and a
-// machine using it would not load.
+// fixture gained a [map] in Epic 15 Story 2, so what is asserted is that the
+// gate opens; the closed side is covered in Go, where a project can be built
+// without one.
 test("the guard dropdown is the registry's, plus an explicit none", async ({ page }) => {
   await selectEdge(page, "idle|on|SPOTTED|0");
   const options = byTestId(page, "transition-guard").locator("option");
@@ -96,8 +97,8 @@ test("the guard dropdown is the registry's, plus an explicit none", async ({ pag
   expect(values, "there is no way to say a transition has no guard").toContain("");
   expect(values).toContain("inRange");
   expect(values).toContain("healthAbove");
-  expect(values, "inLineOfSight needs a map this project has not got").not.toContain("inLineOfSight");
-  expect(values, "and so does pathfinding's guard").not.toContain("pathComplete");
+  expect(values, "this project has a map, so line-of-sight registers").toContain("inLineOfSight");
+  expect(values, "and so does pathfinding's guard").toContain("pathComplete");
 
   // Each with its description, so what a guard does is there while you are
   // choosing it.

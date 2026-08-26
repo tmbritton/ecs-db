@@ -13,7 +13,7 @@ import "github.com/a-h/templ"
 // switch means the handler does not grow a branch per mode, and
 // registry_test.go can check it against the mode table in both directions.
 var Registry = map[string]func(Data) templ.Component{
-	"map":     func(Data) templ.Component { return Map() },
+	"map":     MapMode,
 	"tiles":   func(Data) templ.Component { return Tiles() },
 	"ents":    EntsMode,
 	"schema":  SchemaMode,

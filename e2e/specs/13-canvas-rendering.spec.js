@@ -329,8 +329,9 @@ test("a node's entry actions stay inside the node", async ({ page, baseURL }) =>
             entry: [
               { type: "setAnimation", params: { animation: "goblin_walk" } },
               { type: "pickRandomTarget", params: { radius: 5 } },
-              // Not computePath: pathfinding registers only when the project
-              // has a grid, and the fixture project has no map.
+              // log rather than computePath, so this fixture keeps saying the
+              // same thing whether or not the project has a map. What is being
+              // drawn here is a node with three entry actions, not the gate.
               { type: "log" },
             ],
             meta: { forge: { x: 40, y: 40 } },

@@ -10,7 +10,7 @@ import (
 func TestSaveReports(t *testing.T) {
 	tests := []struct {
 		name    string
-		reports []savereport.Report
+		reports []SaveReportView
 		want    []string
 		notWant []string
 	}{
@@ -22,16 +22,16 @@ func TestSaveReports(t *testing.T) {
 		},
 		{
 			name: "saved with a game listening",
-			reports: []savereport.Report{
-				{Path: "/p/schema.json", Outcome: savereport.OutcomeSaved},
+			reports: []SaveReportView{
+				{Report: savereport.Report{Path: "/p/schema.json", Outcome: savereport.OutcomeSaved}},
 			},
 			want:    []string{"save-report--ok", "schema.json", "hot-reload live"},
 			notWant: []string{"save-report--bad", "not saved"},
 		},
 		{
 			name: "saved with nothing listening is not an error",
-			reports: []savereport.Report{
-				{Path: "/p/schema.json", Outcome: savereport.OutcomeSavedNoEngine},
+			reports: []SaveReportView{
+				{Report: savereport.Report{Path: "/p/schema.json", Outcome: savereport.OutcomeSavedNoEngine}},
 			},
 			want:    []string{"save-report--idle", "no game running"},
 			notWant: []string{"save-report--bad"},
@@ -39,12 +39,12 @@ func TestSaveReports(t *testing.T) {
 		{
 			// Every problem, not the first.
 			name: "rejected lists all the problems",
-			reports: []savereport.Report{
-				{
+			reports: []SaveReportView{
+				{Report: savereport.Report{
 					Path:     "/p/goblin.json",
 					Outcome:  savereport.OutcomeRejected,
 					Problems: []string{"unknown action a", "unknown guard g", "bad initial"},
-				},
+				}},
 			},
 			want: []string{
 				"save-report--bad", "goblin.json", "not saved",
@@ -53,8 +53,8 @@ func TestSaveReports(t *testing.T) {
 		},
 		{
 			name: "conflict",
-			reports: []savereport.Report{
-				{Path: "/p/schema.json", Outcome: savereport.OutcomeConflict},
+			reports: []SaveReportView{
+				{Report: savereport.Report{Path: "/p/schema.json", Outcome: savereport.OutcomeConflict}},
 			},
 			want:    []string{"save-report--bad", "changed on disk"},
 			notWant: []string{"save-report--ok"},
@@ -62,9 +62,9 @@ func TestSaveReports(t *testing.T) {
 		{
 			// One file's failure must survive another file's success.
 			name: "two files, independent outcomes",
-			reports: []savereport.Report{
-				{Path: "/p/a.json", Outcome: savereport.OutcomeRejected, Problems: []string{"broken"}},
-				{Path: "/p/b.json", Outcome: savereport.OutcomeSaved},
+			reports: []SaveReportView{
+				{Report: savereport.Report{Path: "/p/a.json", Outcome: savereport.OutcomeRejected, Problems: []string{"broken"}}},
+				{Report: savereport.Report{Path: "/p/b.json", Outcome: savereport.OutcomeSaved}},
 			},
 			want: []string{"save-report--bad", "save-report--ok", "a.json", "b.json", "broken"},
 		},
@@ -80,8 +80,8 @@ func TestSaveReports(t *testing.T) {
 
 // The full path is what a caller matches on; the visible text is the base name.
 func TestSaveReports_CarriesTheFullPath(t *testing.T) {
-	got := render(t, SaveReports(SaveReportsProps{Reports: []savereport.Report{
-		{Path: "/deep/nested/schema.json", Outcome: savereport.OutcomeSaved},
+	got := render(t, SaveReports(SaveReportsProps{Reports: []SaveReportView{
+		{Report: savereport.Report{Path: "/deep/nested/schema.json", Outcome: savereport.OutcomeSaved}},
 	}}))
 	if !strings.Contains(got, `data-file="/deep/nested/schema.json"`) {
 		t.Errorf("the full path is not on the element:\n%s", got)
