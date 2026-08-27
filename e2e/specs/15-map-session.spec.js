@@ -104,8 +104,12 @@ test("a map changed on disk reports the conflict and offers both ways out", asyn
   const held = await byTestId(page, "map-path").textContent();
   const level = path.join(MAPS, "e2e-level.tmx");
   const original = fs.readFileSync(level, "utf8");
-  const touched = original.replace("2,2,2,2,2,2,\n", "2,2,2,2,2,1,\n");
-  expect(touched, "the fixture map changed shape").not.toBe(original);
+  // The object counter: always present in a Tiled map, never part of the
+  // picture, and safe to bump — the map still parses, so Reload can take it.
+  // Pinning a row of tile ids instead made this spec depend on what the fixture
+  // happened to look like, and it broke the moment the art changed.
+  const touched = original.replace('nextobjectid="1"', 'nextobjectid="2"');
+  expect(touched, "the fixture map has no object counter to bump").not.toBe(original);
 
   try {
     // No edit of Forge's own: this story ships no paint route, and Save checks

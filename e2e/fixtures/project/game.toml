@@ -44,7 +44,7 @@ behaviors = "./overlay/behaviors/"
 title    = "ECS e2e"
 width    = 640
 height   = 480
-tileSize = 32
+tileSize = 16
 
 # The map MAP mode opens, and the reason this project registers the pathfinding
 # builtins: buildRegistry mirrors the engine, which registers computePath and

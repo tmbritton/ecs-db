@@ -519,3 +519,269 @@ func TestSaveReports_ASchemaConflictOffersTheSchemaRoutes(t *testing.T) {
 		t.Errorf("a schema conflict offers another session's routes:\n%s", body)
 	}
 }
+
+func TestMapCanvas_DrawsACellPerNonEmptyTile(t *testing.T) {
+	srv, _, _, _ := mapServer(t)
+	body := mapPage(t, srv, "/forge/map")
+
+	if !strings.Contains(body, `data-testid="map-canvas"`) {
+		t.Fatalf("the canvas did not render:\n%s", body)
+	}
+	// The fixture is 2x2 with every cell filled.
+	if got := strings.Count(body, `data-testid="map-cell"`); got != 4 {
+		t.Errorf("got %d cells, want 4", got)
+	}
+	// Each one draws from the tileset image, through the asset route.
+	if !strings.Contains(body, "/forge/asset?path=") {
+		t.Errorf("no cell points at an image:\n%s", body)
+	}
+	// And a wall is a different slice of the sheet from a floor, which is what
+	// makes them look different.
+	if !strings.Contains(body, "background-position:0px 0px") ||
+		!strings.Contains(body, "background-position:-16px 0px") {
+		t.Errorf("every cell draws the same slice of the sheet:\n%s", body)
+	}
+}
+
+func TestMapCanvas_ListsTheLayersAndTheTilesetPalette(t *testing.T) {
+	srv, _, _, _ := mapServer(t)
+	body := mapPage(t, srv, "/forge/map")
+
+	if !strings.Contains(body, `data-testid="layer-ground"`) {
+		t.Errorf("the layer panel does not list the map's layer:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="palette-fixture"`) {
+		t.Errorf("the palette does not list the map's tileset:\n%s", body)
+	}
+	// Two tiles in the fixture tileset, both offered.
+	for _, gid := range []string{"1", "2"} {
+		if !strings.Contains(body, `data-testid="palette-tile-`+gid+`"`) {
+			t.Errorf("the palette does not offer gid %s", gid)
+		}
+	}
+}
+
+func TestMapCanvas_HidingALayerIsAViewAndNotAnEdit(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	before, err := os.ReadFile(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := mapPage(t, srv, "/forge/map?hide=0&map="+url.QueryEscape(configured))
+	if strings.Contains(body, `data-testid="map-cell"`) {
+		t.Errorf("the hidden layer was still drawn:\n%s", body)
+	}
+	if !strings.Contains(body, `data-hidden="true"`) {
+		t.Error("the layer row does not show as hidden")
+	}
+	// The file is untouched and the session is clean: an eye is not an edit.
+	after, err := os.ReadFile(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Error("hiding a layer wrote to the file")
+	}
+	if dirty, _ := sess.Dirty(); len(dirty) != 0 {
+		t.Errorf("hiding a layer marked the map unsaved: %v", dirty)
+	}
+}
+
+func TestMapCanvas_SelectingATileIsInTheURLAndSurvivesAReload(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)+"&tile=2")
+
+	if !strings.Contains(body, `data-testid="palette-tile-2"`) {
+		t.Fatalf("the palette is missing:\n%s", body)
+	}
+	if !strings.Contains(body, `data-selected="true"`) {
+		t.Errorf("the selected tile is not marked:\n%s", body)
+	}
+	if !strings.Contains(body, "tile 2") {
+		t.Errorf("the status line does not name the selected tile:\n%s", body)
+	}
+}
+
+// Every link in the mode carries the whole view, or looking at a different
+// layer would deselect your brush.
+func TestMapCanvas_LinksKeepTheRestOfTheView(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)+"&tile=2&hide=1")
+
+	// The layer toggle keeps the tile and the map.
+	if !strings.Contains(body, "tile=2") {
+		t.Errorf("a link dropped the tile selection:\n%s", body)
+	}
+	if !strings.Contains(body, "hide=1") {
+		t.Errorf("a link dropped the hidden layers:\n%s", body)
+	}
+}
+
+// The canvas is on a two-second stream whose identical-patch suppression
+// depends on two renders of an unchanged map agreeing exactly.
+func TestMapCanvas_TwoRendersOfAnUnchangedMapAreIdentical(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	at := "/forge/map?map=" + url.QueryEscape(configured) + "&tile=1"
+	first := mapPage(t, srv, at)
+	for i := 0; i < 4; i++ {
+		if got := mapPage(t, srv, at); got != first {
+			t.Fatalf("render %d differs from the first", i+2)
+		}
+	}
+}
+
+func TestMapCanvas_AnUnresolvedGIDIsDrawnRatherThanSkipped(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		return d.SetLayerData(0, []uint32{1, 9999, 2, 1})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+
+	if !strings.Contains(body, `data-testid="map-cell-unresolved"`) {
+		t.Errorf("the unresolved cell was skipped rather than shown:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="map-canvas-problem"`) {
+		t.Error("the status line does not say what is wrong")
+	}
+	// The three good cells still draw.
+	if got := strings.Count(body, `data-testid="map-cell"`); got != 3 {
+		t.Errorf("got %d drawn cells, want 3", got)
+	}
+}
+
+func TestMapCanvas_TheLensOffersOnlyAuthored(t *testing.T) {
+	srv, _, _, _ := mapServer(t)
+	body := mapPage(t, srv, "/forge/map")
+
+	for _, want := range []string{
+		`data-testid="lens-authored"`,
+		`data-testid="lens-live"`,
+		`data-testid="lens-replay"`,
+		"Epic 18",
+		"Epic 19",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the source lens is missing %s:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, `<button type="button" class="segmented__off" disabled`) {
+		t.Error("LIVE and REPLAY are not disabled")
+	}
+}
+
+func TestMapCanvas_TheStatusLineSaysHowBigTheMapIs(t *testing.T) {
+	srv, _, _, _ := mapServer(t)
+	body := mapPage(t, srv, "/forge/map")
+
+	if !strings.Contains(body, "2×2 cells") {
+		t.Errorf("the status line does not give the map's size:\n%s", body)
+	}
+	if !strings.Contains(body, "16×16 px") {
+		t.Errorf("the status line does not give the tile size:\n%s", body)
+	}
+	if !strings.Contains(body, "1 layer") {
+		t.Errorf("the status line does not give the layer count:\n%s", body)
+	}
+}
+
+// The layer a stroke lands on. Story 4 paints into it, and its own notes say
+// the panel showing which one is active is not decoration.
+func TestMapCanvas_TheActiveLayerIsMarkedAndSelectable(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+
+	// The first layer is active by default: a map always has somewhere to paint.
+	if !strings.Contains(body, `data-active="true"`) {
+		t.Errorf("no layer is marked active:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="layer-select-ground"`) {
+		t.Errorf("a layer cannot be made active:\n%s", body)
+	}
+	if !strings.Contains(body, "painting ground") {
+		t.Errorf("the status line does not say where a stroke would land:\n%s", body)
+	}
+}
+
+// Two controls on one row, because conflating them means you cannot look at a
+// layer without also painting into it.
+func TestMapCanvas_TheEyeAndTheNameAreDifferentControls(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+
+	if !strings.Contains(body, `data-testid="layer-eye-ground"`) {
+		t.Errorf("the row has no visibility toggle:\n%s", body)
+	}
+	// The eye's link changes hide and not layer; the name's does the reverse.
+	if !strings.Contains(body, "hide=0") {
+		t.Errorf("the eye does not toggle visibility:\n%s", body)
+	}
+}
+
+// A layer the file hides can be looked at. It could not be while Forge's view
+// state was OR'd with the file: the eye changed the URL, flipped nothing, and
+// never changed its own state.
+func TestMapCanvas_ALayerTheFileHidesStartsHiddenAndCanBeShown(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	raw, err := os.ReadFile(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := strings.Replace(string(raw), `<layer id="1" name="ground"`,
+		`<layer id="1" name="ground" visible="0"`, 1)
+	if hidden == string(raw) {
+		t.Fatal("the fixture's layer could not be hidden")
+	}
+	if err := os.WriteFile(configured, []byte(hidden), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Reload(configured); err != nil {
+		t.Fatal(err)
+	}
+
+	at := "/forge/map?map=" + url.QueryEscape(configured)
+	body := mapPage(t, srv, at)
+	if strings.Contains(body, `data-testid="map-cell"`) {
+		t.Errorf("a layer the file hides was drawn on first load:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="layer-file-hidden-ground"`) {
+		t.Errorf("the row does not say the file hides it:\n%s", body)
+	}
+
+	// Turning it on: the URL says which layers are hidden, and this one is not.
+	body = mapPage(t, srv, at+"&hide=")
+	if !strings.Contains(body, `data-testid="map-cell"`) {
+		t.Errorf("a layer the file hides could not be shown:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="layer-file-hidden-ground"`) {
+		t.Error("showing it claimed the file no longer hides it")
+	}
+}
+
+// Tiled's other way of making a layer invisible. An open eye over a layer that
+// draws nothing, with no explanation, is worse than either state alone.
+func TestMapCanvas_ALayerAtZeroOpacitySaysSo(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	raw, err := os.ReadFile(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghost := strings.Replace(string(raw), `<layer id="1" name="ground"`,
+		`<layer id="1" name="ground" opacity="0"`, 1)
+	if err := os.WriteFile(configured, []byte(ghost), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Reload(configured); err != nil {
+		t.Fatal(err)
+	}
+
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+	if !strings.Contains(body, `data-testid="layer-transparent-ground"`) {
+		t.Errorf("a fully transparent layer is not marked:\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="map-cell"`) {
+		t.Error("a fully transparent layer was drawn")
+	}
+}

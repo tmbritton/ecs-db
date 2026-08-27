@@ -3,25 +3,37 @@
  The map the e2e suite points Forge at, and the one game.toml names.
 
  Deliberately distinctive, like everything else in this fixture: 6x4 cells at
- 24px, a mapId of "e2e-level", and a tileset of its own. A test asserting on any
- of it is also asserting that Forge read *this* project.
+ 16px, a mapId of "e2e-level", and two tilesets of its own. A test asserting on
+ any of it is also asserting that Forge read *this* project.
 
- It is also the reason the project now registers computePath and inLineOfSight.
+ Two tile layers, because one layer cannot show a layer rule. "ground" is a
+ stone border round grass with a path and a pool; "props" puts a bush and a
+ barrel on top of it, which is what makes hiding a layer visibly do something.
+
+ It is also the reason this project registers computePath and inLineOfSight.
  buildRegistry mirrors the engine, which registers the pathfinding builtins only
- when a map is configured, so the specs that used to assert the gate was closed
- now assert it is open.
+ when a map is configured.
 -->
-<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="24" tileheight="24" infinite="0" nextlayerid="3" nextobjectid="1">
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="6" height="4" tilewidth="16" tileheight="16" infinite="0" nextlayerid="4" nextobjectid="1">
  <properties>
   <property name="mapId" value="e2e-level"/>
  </properties>
  <tileset firstgid="1" source="e2e-tiles.tsx"/>
+ <tileset firstgid="121" source="e2e-things.tsx"/>
  <layer id="1" name="ground" width="6" height="4">
   <data encoding="csv">
-2,2,2,2,2,2,
-2,1,1,1,1,2,
-2,1,1,1,1,2,
-2,2,2,2,2,2
+1,1,1,1,1,1,
+1,12,15,15,14,1,
+1,12,12,12,14,1,
+1,1,1,1,1,1
+</data>
+ </layer>
+ <layer id="3" name="props" width="6" height="4">
+  <data encoding="csv">
+0,0,0,0,0,0,
+0,20,0,0,0,0,
+0,0,0,123,0,0,
+0,0,0,0,0,0
 </data>
  </layer>
  <objectgroup id="2" name="spawns"/>

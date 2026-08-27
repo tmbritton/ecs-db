@@ -27,6 +27,11 @@ import (
 
 // Config is what a session needs to find a project's maps.
 type Config struct {
+	// Root is the project directory: nothing outside it is served over HTTP.
+	//
+	// Empty falls back to the configured map's own directory, which is all a
+	// session given nothing but a map path can honestly claim to know.
+	Root string
 	// MapPath is the map game.toml names, already resolved against the config
 	// file that declared it. Empty for a project with no [map] section, which
 	// is a state and not a failure: Forge opens, MAP mode says so, and every
@@ -55,6 +60,9 @@ type Session struct {
 	// tilesets records whether each open map's tilesets resolve. See
 	// checkTilesets for why it is recorded rather than recomputed per render.
 	tilesets map[string]error
+	// images is every image path the open maps' tilesets refer to, recorded by
+	// Resolved. See Serves.
+	images   map[string]bool
 	order    []string // paths, configured map first
 	maps     []Map
 	problems []project.Problem
@@ -68,6 +76,12 @@ type Session struct {
 // removes the only way to do it. A project with no [map] at all opens a session
 // holding nothing, which is a state MAP mode renders.
 func Open(cfg Config) *Session {
+	if cfg.Root == "" && cfg.MapPath != "" {
+		cfg.Root = filepath.Dir(cfg.MapPath)
+	}
+	if cfg.Root != "" {
+		cfg.Root = filepath.Clean(cfg.Root)
+	}
 	if cfg.MapPath != "" {
 		// One file must not become two tabs with two independent editable
 		// files. config.Load leaves an absolute path uncleaned, so a game.toml
@@ -79,6 +93,7 @@ func Open(cfg Config) *Session {
 		cfg:      cfg,
 		files:    map[string]*editable.File[*tiled.Document]{},
 		tilesets: map[string]error{},
+		images:   map[string]bool{},
 	}
 	s.reload()
 	return s
@@ -387,7 +402,84 @@ func (s *Session) resolve(path string, doc *tiled.Document) (*tiled.Map, error) 
 	if err := m.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
 		return nil, err
 	}
+	s.recordImages(m)
 	return m, nil
+}
+
+// recordImages notes every picture this map's tilesets refer to. Caller holds
+// s.mu.
+func (s *Session) recordImages(m *tiled.Map) {
+	for _, ref := range m.Tilesets {
+		if ref.Tileset == nil {
+			continue
+		}
+		if p := ref.Tileset.Image.Path; p != "" {
+			s.images[p] = true
+		}
+		for _, tile := range ref.Tileset.Tiles {
+			if p := tile.Image.Path; p != "" {
+				s.images[p] = true
+			}
+		}
+	}
+}
+
+// Serves reports whether an image may be sent to the browser.
+//
+// **Two gates, and both are needed.** The first is the allow-list: the set of
+// files this project's own tilesets name, filled by every resolve. It makes a
+// path the *request* invented unreachable — "..", an absolute path, a
+// case-differing spelling — without the route doing any path arithmetic, and
+// it is the reason the browser can only ask for pictures the page it was given
+// told it about.
+//
+// The second is containment, and the first gate does not imply it. A tileset is
+// a file in the project, and a project can be a clone of somebody else's
+// repository: a .tsx naming `source="../../../etc/passwd"`, or an absolute
+// path, or a fixture.png that is a symlink out of the tree, is a file the
+// project names and is not a file this may serve. Without this, opening Forge
+// on a downloaded asset pack turns /forge/asset into a general read primitive
+// for anything with a picture's extension. Found by review, and the code said
+// the opposite in as many words.
+//
+// The cost is stated rather than hidden: **art outside the project directory
+// cannot be previewed.** Tiled writes an absolute source the moment art lives
+// elsewhere, so that is a real project shape this refuses to draw. Reaching it
+// wants a deliberate opt-in naming the other directory, not a silent default.
+//
+// The allow-list only ever grows: an image a tileset stops naming stays
+// servable until Forge restarts. That is a stale permission to read a file the
+// project referred to a moment ago and is still inside it, which is not a way
+// out of anything.
+func (s *Session) Serves(path string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.images[path] && s.contained(path)
+}
+
+// contained reports whether a path resolves to somewhere inside the project.
+//
+// Symlinks are followed on both sides before comparing, because a link is how
+// a path inside the tree names a file outside it — and comparing the strings
+// would say the link is fine. A path that will not resolve is refused: it
+// either does not exist or cannot be read, and both are answered the same way
+// by the route.
+func (s *Session) contained(path string) bool {
+	// No guard for an empty root: EvalSymlinks refuses one, which is the answer
+	// a session that knows no project should give anyway.
+	root, err := filepath.EvalSymlinks(s.cfg.Root)
+	if err != nil {
+		return false
+	}
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Dirty is every map with unsaved work: the tab strip in order, then anything

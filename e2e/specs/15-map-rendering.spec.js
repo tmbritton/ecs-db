@@ -1,0 +1,186 @@
+// Epic 15 Story 3 — the map renders.
+//
+// What only a browser can show: that the tileset image actually loads through
+// the asset route, that the cells are where the map says, and that the canvas
+// does not flicker under the page stream. Painting is Story 4's; nothing here
+// changes a file.
+const { test, expect, byTestId } = require("../fixtures");
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/forge/map");
+});
+
+test("the fixture map draws a cell per tile, from the tileset image", async ({ page }) => {
+  await expect(byTestId(page, "map-canvas")).toBeVisible();
+  // 6x4 of ground, every cell filled, plus the two props on top of it.
+  await expect(byTestId(page, "map-cell")).toHaveCount(26);
+
+  // The image is fetched, and it is served — not a broken picture with a box
+  // where a tile should be.
+  const src = await byTestId(page, "map-cell")
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(src).toContain("/forge/asset");
+
+  const url = src.match(/url\("([^"]+)"\)/)[1];
+  const res = await page.request.get(url);
+  expect(res.status(), "the tileset image did not load").toBe(200);
+  expect(res.headers()["content-type"]).toBe("image/png");
+});
+
+test("walls and floors draw different slices of the sheet", async ({ page }) => {
+  const positions = await byTestId(page, "map-cell").evaluateAll((els) =>
+    els.map((e) => getComputedStyle(e).backgroundPosition),
+  );
+  const distinct = new Set(positions);
+  expect(distinct.size, "every cell drew the same tile").toBeGreaterThan(1);
+});
+
+test("the status line gives the map's size and its tile size", async ({ page }) => {
+  await expect(byTestId(page, "map-size")).toHaveText("6×4 cells");
+  await expect(byTestId(page, "map-tile-size")).toHaveText("16×16 px");
+  await expect(byTestId(page, "map-layer-count")).toHaveText("2 layers");
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("no tile selected");
+});
+
+test("hiding a layer stops it drawing and leaves the file alone", async ({ page }) => {
+  await expect(byTestId(page, "map-cell")).toHaveCount(26);
+
+  // The props layer, so what disappears is a handful of tiles rather than the
+  // whole picture — which is what makes this a layer test and not a blank one.
+  await byTestId(page, "layer-eye-props").click();
+  await expect(byTestId(page, "map-cell")).toHaveCount(24);
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-hidden", "true");
+  await expect(byTestId(page, "layer-ground")).toHaveAttribute("data-hidden", "false");
+  // An eye is a view, not an edit.
+  await expect(byTestId(page, "save-footer")).not.toHaveClass(/save-footer--dirty/);
+
+  await byTestId(page, "layer-eye-props").click();
+  await expect(byTestId(page, "map-cell")).toHaveCount(26);
+
+  await byTestId(page, "layer-eye-ground").click();
+  await expect(byTestId(page, "map-cell")).toHaveCount(2);
+});
+
+test("selecting a tile marks it, changes the URL, and survives a reload", async ({ page }) => {
+  await byTestId(page, "palette-tile-2").click();
+  await expect(byTestId(page, "palette-tile-2")).toHaveAttribute("data-selected", "true");
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("tile 2");
+  expect(page.url()).toContain("tile=2");
+
+  await page.reload();
+  await expect(byTestId(page, "palette-tile-2")).toHaveAttribute("data-selected", "true");
+
+  // Clicking the selected tile again clears it.
+  await byTestId(page, "palette-tile-2").click();
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("no tile selected");
+});
+
+test("a tile selection survives looking at a different layer", async ({ page }) => {
+  await byTestId(page, "palette-tile-1").click();
+  await byTestId(page, "layer-eye-props").click();
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("tile 1");
+});
+
+// Tiled addresses tilesets by range, picking the highest first gid at or below
+// an id. A project with one tileset never exercises that, and this map's props
+// come from a second sheet starting at 121.
+test("the palette lists both tilesets, in first-gid order", async ({ page }) => {
+  await expect(byTestId(page, "palette-tiny16-basic")).toBeVisible();
+  await expect(byTestId(page, "palette-tiny16-things")).toBeVisible();
+
+  const names = await page
+    .locator("[data-testid^='palette-tiny16-']")
+    .evaluateAll((els) => els.map((e) => e.getAttribute("data-testid")));
+  expect(names).toEqual(["palette-tiny16-basic", "palette-tiny16-things"]);
+
+  // 120 tiles in the first sheet, so the second starts at 121 — and a tile from
+  // it is drawn on the map.
+  await expect(byTestId(page, "palette-tile-121")).toBeVisible();
+});
+
+test("LIVE and REPLAY are present, disabled, and say which epic owns them", async ({ page }) => {
+  await expect(byTestId(page, "lens-authored")).toBeVisible();
+  await expect(byTestId(page, "lens-live")).toBeDisabled();
+  await expect(byTestId(page, "lens-replay")).toBeDisabled();
+  await expect(byTestId(page, "lens-live")).toHaveAttribute("title", /Epic 18/);
+  await expect(byTestId(page, "lens-replay")).toHaveAttribute("title", /Epic 19/);
+});
+
+test("the canvas is not re-patched every tick", async ({ page }) => {
+  // The canvas is the biggest thing on the page stream. If any part of building
+  // it ranges a map, two renders of an unchanged file differ and the server
+  // sends the whole canvas twice a second — which both flickers and defeats the
+  // identical-patch suppression the rest of the mode relies on.
+  //
+  // Counted from a second, raw subscription, the way 06-engine-status does it:
+  // Datastar consumes its own stream, so the frames cannot be counted from
+  // outside it.
+  await expect(byTestId(page, "map-cell")).toHaveCount(26);
+
+  // The page's own subscription, not a default one: the stream carries the map,
+  // the hidden layers, the active layer and the tile, and a test that dropped
+  // them would be measuring a view nobody is looking at.
+  const stream = await page.evaluate(() =>
+    document.querySelector("[data-init]").getAttribute("data-init").match(/@get\('([^']+)'\)/)[1],
+  );
+  expect(stream, "the stream does not carry the view").toContain("map=");
+
+  const content = await page.evaluate(async (url) => {
+    const resp = await fetch(url);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise((r) => setTimeout(() => r({ done: true, timedOut: true }), deadline - Date.now())),
+      ]);
+      if (chunk.timedOut || chunk.done) break;
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    await reader.cancel();
+    // Anchored on the leading space: `data-testid="mode-content"` ends with the
+    // substring this is looking for, and an unanchored match counts it too.
+    return (text.match(/ id="mode-content"/g) || []).length;
+  }, stream);
+  expect(content, `the canvas was patched ${content} times in ~6s`).toBe(1);
+});
+
+test("the asset route refuses a path no tileset names", async ({ page }) => {
+  for (const target of ["/etc/passwd", "../../etc/passwd", "e2e/fixtures/project/schema.json"]) {
+    const res = await page.request.get(`/forge/asset?path=${encodeURIComponent(target)}`);
+    expect(res.status(), `${target} was served`).toBe(404);
+  }
+});
+
+test("the layer row is two controls: what is drawn, and what is painted", async ({ page }) => {
+  // Conflating them means you cannot look at a layer without also painting into
+  // it, which is how you lose an hour in a tile editor.
+  await expect(byTestId(page, "layer-ground")).toHaveAttribute("data-active", "true");
+  await expect(byTestId(page, "map-active-layer")).toHaveText("painting ground");
+
+  await byTestId(page, "layer-select-props").click();
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-active", "true");
+  await expect(byTestId(page, "layer-ground")).toHaveAttribute("data-active", "false");
+  await expect(byTestId(page, "map-active-layer")).toHaveText("painting props");
+
+  // Hiding the layer you are painting into does not stop it being the one you
+  // are painting into.
+  await byTestId(page, "layer-eye-props").click();
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-hidden", "true");
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-active", "true");
+});
+
+test("the active layer survives a reload and travels with the other links", async ({ page }) => {
+  await byTestId(page, "layer-select-props").click();
+  expect(page.url()).toContain("layer=1");
+
+  await page.reload();
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-active", "true");
+
+  await byTestId(page, "palette-tile-1").click();
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-active", "true");
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("tile 1");
+});

@@ -131,6 +131,15 @@ ecs-db/
 
 GNU Affero General Public License v3.0
 
+### Third-party assets
+
+The end-to-end test fixture vendors tile art under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), which is a different
+licence from the code above. It is attributed in
+[`e2e/fixtures/project/maps/CREDITS.md`](e2e/fixtures/project/maps/CREDITS.md).
+Separately licensed works distributed together; the AGPL covers this
+repository's own source.
+
 ## Getting Help
 
 - **Issues**: Report bugs or request features via GitHub Issues

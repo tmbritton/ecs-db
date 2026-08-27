@@ -636,7 +636,12 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Found by review: the footer's Save and Discard acted on the configured map whatever map was on screen — the confirm dialog naming one file while the request destroyed another's work
   - Found by review, and older than this story: a conflict's "Use theirs" posted to `/forge/schema/reload` whatever the conflict was on, so resolving a map conflict discarded unsaved schema work
 
-- [ ] **The map renders** — Tile layers drawn from tileset images, layer panel in file order, tileset palette, map tabs, and the AUTHORED/LIVE/REPLAY lens with the two later lenses disabled. Needs Forge's first route that serves a project file, with the traversal check that implies.
+- [x] **The map renders** — Tile layers drawn from tileset images, layer panel in file order, tileset palette, map tabs, and the AUTHORED/LIVE/REPLAY lens with the two later lenses disabled.
+  - `tiled.DrawList` became a projection of a new `Placements`, so the editor draws a cell the engine skips — an unresolved gid you cannot see is one you cannot fix — from the one walk that decides layer order
+  - Found by that refactor: a refused cell was handed whichever reason was last in an aggregated list that keeps one entry per *distinct* reason
+  - Forge's first route serving a project file is an allow-list of what the project's tilesets name, plus a containment check. Found by review: the allow-list alone stops the *request* traversing and not the *project* — a `.tsx` naming a symlink out of the tree served `/etc/passwd`
+  - Found by review: a layer hidden in Tiled had an eye you could click that changed the URL and nothing else, so the one place you would look at a hidden layer could not show it
+  - The e2e fixture draws real CC-BY art now, so the browser suite exercises a sheet's rows and columns rather than two generated colours
 
 - [ ] **Painting, server-side** — Stamp, rect, eraser, rotate and flip as operations on the session, proven in Go against map values.
 

@@ -11,6 +11,13 @@ import (
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
+const collectionTSX = `<?xml version="1.0" encoding="UTF-8"?>
+<tileset version="1.10" name="props" tilewidth="16" tileheight="16" tilecount="2" columns="0">
+ <tile id="0"><image source="barrel.png" width="16" height="16"/></tile>
+ <tile id="1"><image source="crate.png" width="16" height="16"/></tile>
+</tileset>
+`
+
 const twoTileTSX = `<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" name="fixture" tilewidth="16" tileheight="16" tilecount="2" columns="2">
  <image source="fixture.png" width="32" height="16"/>
@@ -36,8 +43,12 @@ func mapWith(id, data string) string {
 `
 }
 
-// project writes a directory of maps and returns the path of the first one,
-// which stands in for the configured map.
+// project writes a directory of maps and returns it.
+//
+// The tileset images are written too, and have to be: containment resolves
+// symlinks, which needs the file to be there. That is the same answer the route
+// gives for a picture that is missing — refused — and it is why an image a
+// tileset names but nobody shipped is not servable.
 func project(t *testing.T, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -53,6 +64,7 @@ func openOne(t *testing.T) (*maps.Session, string) {
 	t.Helper()
 	dir := project(t, map[string]string{
 		"fixture.tsx": twoTileTSX,
+		"fixture.png": "not really a png, and nothing here opens it",
 		"level1.tmx":  mapWith("level1", "2,2,\n2,1"),
 	})
 	path := filepath.Join(dir, "level1.tmx")
@@ -570,4 +582,144 @@ func TestSession_IsSafeForConcurrentUse(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// The asset route's allow-list: only images the project's own tilesets refer
+// to, so a path nobody names is not served whatever it looks like.
+func TestServes_OnlyImagesTheProjectsTilesetsName(t *testing.T) {
+	s, path := openOne(t)
+	dir := filepath.Dir(path)
+
+	// Filled when the map was opened, so the first page load can draw.
+	if !s.Serves(filepath.Join(dir, "fixture.png")) {
+		t.Error("the tileset's own image is not allowed")
+	}
+	if _, err := s.Resolved(path); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Serves(filepath.Join(dir, "fixture.png")) {
+		t.Error("a render lost the allow-list")
+	}
+	for _, denied := range []string{
+		"/etc/passwd",
+		"/etc/hosts",
+		filepath.Join(dir, "level1.tmx"),
+		filepath.Join(dir, "fixture.tsx"),
+		filepath.Join(dir, "..", "outside.png"),
+		"",
+	} {
+		if s.Serves(denied) {
+			t.Errorf("%q is served and no tileset names it", denied)
+		}
+	}
+}
+
+// A collection tileset has no sheet: each tile is a whole file, so the pictures
+// the allow-list has to know about are the tiles' own.
+func TestServes_AllowsACollectionTilesOwnPictures(t *testing.T) {
+	dir := project(t, map[string]string{
+		"fixture.tsx": twoTileTSX,
+		"fixture.png": "x",
+		"barrel.png":  "x",
+		"crate.png":   "x",
+		"props.tsx":   collectionTSX,
+		"level1.tmx": strings.Replace(mapWith("level1", "2,2,\n2,1"),
+			`<tileset firstgid="1" source="fixture.tsx"/>`,
+			`<tileset firstgid="1" source="fixture.tsx"/>`+"\n <tileset firstgid=\"100\" source=\"props.tsx\"/>", 1),
+	})
+	s := maps.Open(maps.Config{MapPath: filepath.Join(dir, "level1.tmx")})
+	if got := s.Problems(); len(got) != 0 {
+		t.Fatalf("problems: %v", got)
+	}
+	for _, name := range []string{"fixture.png", "barrel.png", "crate.png"} {
+		if !s.Serves(filepath.Join(dir, name)) {
+			t.Errorf("%s is not allowed, and a tileset names it", name)
+		}
+	}
+	if s.Serves(filepath.Join(dir, "props.tsx")) {
+		t.Error("the tileset file itself is allowed")
+	}
+}
+
+// The second gate. The allow-list makes a path the *request* invented
+// unreachable; it does not stop a path the *project* names from pointing
+// outside the project — which is what a downloaded asset pack can do.
+func TestServes_RefusesWhatATilesetNamesOutsideTheProject(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.png"), []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("a relative source that climbs out", func(t *testing.T) {
+		dir := project(t, map[string]string{
+			"fixture.tsx": strings.Replace(twoTileTSX, `source="fixture.png"`, `source="../secret.png"`, 1),
+			"level1.tmx":  mapWith("level1", "2,2,\n2,1"),
+		})
+		up := filepath.Join(filepath.Dir(dir), "secret.png")
+		if err := os.WriteFile(up, []byte("SECRET"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := maps.Open(maps.Config{Root: dir, MapPath: filepath.Join(dir, "level1.tmx")})
+		if s.Serves(up) {
+			t.Error("a tileset climbed out of the project and was served")
+		}
+	})
+
+	t.Run("an absolute source", func(t *testing.T) {
+		target := filepath.Join(outside, "secret.png")
+		dir := project(t, map[string]string{
+			"fixture.tsx": strings.Replace(twoTileTSX, `source="fixture.png"`, `source="`+target+`"`, 1),
+			"level1.tmx":  mapWith("level1", "2,2,\n2,1"),
+		})
+		s := maps.Open(maps.Config{Root: dir, MapPath: filepath.Join(dir, "level1.tmx")})
+		if s.Serves(target) {
+			t.Error("a tileset named an absolute path outside the project and it was served")
+		}
+	})
+
+	t.Run("a symlink that leaves the project", func(t *testing.T) {
+		dir := project(t, map[string]string{
+			"fixture.tsx": twoTileTSX,
+			"level1.tmx":  mapWith("level1", "2,2,\n2,1"),
+		})
+		link := filepath.Join(dir, "fixture.png")
+		if err := os.Symlink(filepath.Join(outside, "secret.png"), link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		s := maps.Open(maps.Config{Root: dir, MapPath: filepath.Join(dir, "level1.tmx")})
+		if s.Serves(link) {
+			t.Error("a symlink out of the project was served")
+		}
+	})
+}
+
+// A project laid out the ordinary way keeps working: a map in one directory and
+// its art in another, both under the project root.
+func TestServes_AllowsArtInAnotherDirectoryOfTheSameProject(t *testing.T) {
+	root := t.TempDir()
+	maps_ := filepath.Join(root, "maps")
+	art := filepath.Join(root, "art")
+	for _, d := range []string{maps_, art} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(art, "fixture.png"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tsx := strings.Replace(twoTileTSX, `source="fixture.png"`, `source="../art/fixture.png"`, 1)
+	if err := os.WriteFile(filepath.Join(maps_, "fixture.tsx"), []byte(tsx), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(maps_, "level1.tmx"), []byte(mapWith("level1", "2,2,\n2,1")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := maps.Open(maps.Config{Root: root, MapPath: filepath.Join(maps_, "level1.tmx")})
+	if got := s.Problems(); len(got) != 0 {
+		t.Fatalf("problems: %v", got)
+	}
+	if !s.Serves(filepath.Join(art, "fixture.png")) {
+		t.Error("art in a sibling directory of the same project is not served")
+	}
 }

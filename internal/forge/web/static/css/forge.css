@@ -2420,3 +2420,214 @@ option:disabled {
   font-size: 9.5px;
   color: var(--text-faint);
 }
+
+/* ── MAP mode ──────────────────────────────────────────────────────────────
+   The canvas is one absolutely positioned element per non-empty cell, in draw
+   order — a later element covers an earlier one, which is the engine's layer
+   rule falling out of document order rather than being reimplemented in z-index.
+
+   Cells are sized and placed inline, because a position cannot be a class.
+   Everything else about them is here. */
+.map-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+  padding: 10px 14px 0;
+}
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+
+.map-toolbar__note {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+/* The source lens. Two of its three positions are later epics, and a disabled
+   control has to look deliberate rather than broken. */
+.segmented {
+  display: flex;
+  border: 2px solid var(--border);
+  font-size: 11px;
+  flex: none;
+}
+
+.segmented__on {
+  padding: 3px 11px;
+  background: var(--active);
+  color: var(--amber);
+}
+
+.segmented__off {
+  padding: 3px 11px;
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  font: inherit;
+  cursor: not-allowed;
+}
+
+/* The viewport scrolls; the canvas inside it is the map's full size. A map
+   larger than the panel is ordinary, and a canvas that clipped it would hide
+   part of the level with nothing to say so. */
+.map-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 2px solid var(--border);
+  background: var(--canvas);
+  padding: 8px;
+}
+
+.map-canvas {
+  position: relative;
+  background: var(--canvas);
+}
+
+/* The grid is one repeating gradient rather than an element per cell: it is
+   decoration, and a few hundred more elements is a few hundred more things for
+   a patch to diff. */
+.map-canvas__grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--hover) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--hover) 1px, transparent 1px);
+}
+
+.map-cell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  image-rendering: pixelated;
+  background-repeat: no-repeat;
+}
+
+/* A tile whose global id no tileset holds. Drawn rather than skipped: the
+   engine will refuse to load the map over it, and a cell you cannot see is one
+   you cannot find. */
+.map-cell--unresolved {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--red);
+  /* Sized against the cell, because the whole element is then scaled with the
+     rest of the canvas: an absolute 2px border on a 16px tile at 3x draws a 6px
+     border and a 42px glyph, which reads as a rendering fault rather than a
+     marker. */
+  font-size: 0.6em;
+  border: 0.1em dashed var(--red);
+  background: rgba(224, 108, 96, 0.14);
+  box-sizing: border-box;
+}
+
+.map-status {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  flex: none;
+}
+
+.map-status__problem {
+  color: var(--red);
+}
+
+/* ── MAP mode: the layer panel and the palette ─────────────────────────────
+   A layer row is two controls, not one: the eye decides what Forge draws, and
+   the name decides where a stroke lands. Conflating them means you cannot look
+   at a layer without also painting into it. */
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--gutter);
+  border-left: 3px solid transparent;
+  color: var(--text-secondary);
+}
+
+.layer-row:hover {
+  background: var(--hover);
+}
+
+.layer-row--active {
+  background: var(--active);
+  border-left-color: var(--amber);
+  color: var(--text-hi);
+}
+
+.layer-row--muted .layer-row__name {
+  color: var(--text-faint);
+}
+
+.layer-row__eye {
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: var(--row-pad) 0;
+  width: 16px;
+  text-align: center;
+}
+
+.layer-row__eye:hover {
+  color: var(--amber);
+}
+
+.layer-row__name {
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+  padding: var(--row-pad) 0;
+}
+
+.palette {
+  padding: 4px 12px 10px;
+}
+
+.palette__name {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--text-dim);
+  padding-bottom: 4px;
+}
+
+.palette__problem {
+  font-size: 11px;
+  color: var(--red);
+  margin: 0 0 4px;
+}
+
+.palette__tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--border);
+  border: 2px solid var(--border);
+  width: max-content;
+  max-width: 100%;
+}
+
+.palette-tile {
+  display: block;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+
+.palette-tile:hover {
+  outline-color: var(--border-hi);
+}
+
+.palette-tile--selected {
+  outline-color: var(--amber);
+}

@@ -206,6 +206,7 @@ func (s *Server) routes() http.Handler {
 	s.registerCanvasRoutes(mux)
 	s.registerEntsEditRoutes(mux)
 	s.registerMapEditRoutes(mux)
+	s.registerAssetRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
 	mux.HandleFunc("GET /", s.handleIndex)
@@ -278,7 +279,19 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	// without this every page — MAP, TILES, SCHEMA — put an absolute path from
 	// the developer's filesystem into its subscription URL.
 	if slug == "map" && data.SelectedMap != "" {
+		// Every part of the view, not just the map: a stream subscribed with
+		// only the path re-renders with no layer hidden and no tile selected,
+		// so the canvas undoes your selection twice a second.
 		q.Set("map", data.SelectedMap)
+		if hide := r.URL.Query().Get("hide"); hide != "" {
+			q.Set("hide", hide)
+		}
+		if layer := r.URL.Query().Get("layer"); layer != "" {
+			q.Set("layer", layer)
+		}
+		if tile := r.URL.Query().Get("tile"); tile != "" {
+			q.Set("tile", tile)
+		}
 	}
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)

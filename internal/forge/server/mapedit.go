@@ -5,9 +5,21 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 )
+
+// canvasScale is how many screen pixels one map pixel gets.
+//
+// Fixed, and not a control. A 16px tileset at 1:1 draws the e2e fixture at 96x64
+// — a picture nobody can see, and an editor whose canvas is unreadable is not an
+// editor. Three is legible for 16px art and still sane for 32px, which is what
+// this engine's own map uses. A zoom control belongs with the story that owns
+// the pointer surface, because zoom and pointer arithmetic are the same
+// question asked twice.
+const canvasScale = 3
 
 func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/save", sameOriginOnly(s.handleMapSave))
@@ -165,6 +177,53 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 	}
 	data.ConfiguredMap = s.cfg.MapSession.Configured()
 	data.SelectedMap = selectMap(data.Maps, r.URL.Query().Get("map"))
+	q := r.URL.Query()
+	data.MapView = modes.MapView{
+		Path:        data.SelectedMap,
+		Hidden:      modes.ParseHidden(q.Get("hide")),
+		Active:      modes.ParseLayer(q.Get("layer")),
+		SelectedGID: modes.ParseGID(q.Get("tile")),
+	}
+	// Only where it is drawn. Resolving a map means parsing it and reading its
+	// tilesets, and no mode but MAP renders a cell of it.
+	if slug != "map" || data.SelectedMap == "" {
+		return
+	}
+	m, err := s.cfg.MapSession.Resolved(data.SelectedMap)
+	if err != nil {
+		// Already a Problem on the panel above, from the session's own check.
+		// A canvas that refused to render would take the map list with it.
+		return
+	}
+	// A view that says nothing about layers starts from what the file says, and
+	// from then on the URL is the whole answer. Seeded here rather than inside
+	// the canvas because only a URL can be authoritative — a canvas that OR'd
+	// the two gave a file-hidden layer an eye that could not be turned on.
+	if !q.Has("hide") {
+		data.MapView.Hidden = hiddenInFile(m)
+	}
+	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{
+		Hidden:      data.MapView.Hidden,
+		Active:      data.MapView.Active,
+		SelectedGID: data.MapView.SelectedGID,
+		AssetURL:    assetURL,
+		Scale:       canvasScale,
+	})
+}
+
+// hiddenInFile is the map's own idea of which layers are not drawn.
+func hiddenInFile(m *tiled.Map) map[int]bool {
+	var out map[int]bool
+	for i, layer := range m.Layers {
+		if layer.Visible {
+			continue
+		}
+		if out == nil {
+			out = map[int]bool{}
+		}
+		out[i] = true
+	}
+	return out
 }
 
 // selectMap resolves ?map= to a map the project has, falling back to the first

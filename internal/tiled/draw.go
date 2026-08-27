@@ -112,7 +112,25 @@ func (m *Map) Drawable() bool {
 	return false
 }
 
-// DrawList is every tile of every visible layer, in the order they are drawn.
+// Placement is one non-empty cell, either placed or refused.
+//
+// The full answer, of which DrawList is the half a renderer can use. A cell
+// whose tile cannot be drawn is nothing to the engine — there is no picture for
+// it — and is the whole point to an editor, where a tile you cannot see is one
+// you cannot fix. Both come from one walk so the two cannot disagree about
+// layer order, render order, tile offsets or which tileset owns an id.
+type Placement struct {
+	// Draw is meaningful only when Problem is empty.
+	Draw
+	// X and Y are the cell, and Layer is the layer it came from — neither of
+	// which a Draw carries, because a renderer works in pixels.
+	X, Y  int
+	Layer string
+	// Problem is why this cell could not be drawn, or empty.
+	Problem string
+}
+
+// Placements is every non-empty cell of every visible layer, in draw order.
 //
 // All the arithmetic and none of the drawing: no image is opened, nothing is
 // decoded, and nothing here knows what a renderer is. That is deliberate. The
@@ -122,9 +140,8 @@ func (m *Map) Drawable() bool {
 //
 // Call after ResolveTilesets. A tileset that was never resolved is a problem
 // rather than an empty one.
-func (m *Map) DrawList() ([]Draw, []DrawProblem) {
-	draws := make([]Draw, 0)
-	p := &problems{seen: map[string]int{}}
+func (m *Map) Placements() []Placement {
+	out := make([]Placement, 0)
 
 	// Which corner a layer is drawn from. Invisible for square tiles and the
 	// whole point for the tall ones this exists to draw: render order is what
@@ -151,35 +168,61 @@ func (m *Map) DrawList() ([]Draw, []DrawProblem) {
 				if tile.GID == 0 {
 					continue // an empty cell, not a blank tile
 				}
-				d, ok := m.drawOf(tile, x, y, layer.Name, p)
-				if !ok {
-					continue
+				place := Placement{X: x, Y: y, Layer: layer.Name}
+				d, why := m.drawOf(tile, x, y)
+				if why != "" {
+					place.Problem = why
+				} else {
+					d.Alpha = layer.Opacity
+					place.Draw = d
 				}
-				d.Alpha = layer.Opacity
-				draws = append(draws, d)
+				out = append(out, place)
 			}
 		}
+	}
+	return out
+}
+
+// DrawList is every tile that can be drawn, and one problem per distinct reason
+// the rest could not be.
+//
+// A projection of Placements: the placed ones in order, and the refusals
+// aggregated. Counted rather than repeated, because a tileset whose image is
+// missing spoils every cell that came from it and a renderer saying so per cell
+// per frame would bury the one line that matters under three hundred copies.
+func (m *Map) DrawList() ([]Draw, []DrawProblem) {
+	places := m.Placements()
+	draws := make([]Draw, 0, len(places))
+	p := &problems{seen: map[string]int{}}
+	for _, place := range places {
+		if place.Problem == "" {
+			draws = append(draws, place.Draw)
+			continue
+		}
+		p.add(place.Problem, place.Layer, place.X, place.Y)
 	}
 	return draws, p.list
 }
 
-// drawOf places one tile, or records why it could not be placed.
-func (m *Map) drawOf(tile Tile, x, y int, layerName string, p *problems) (Draw, bool) {
+// drawOf places one tile, or says why it could not be placed.
+//
+// It returns the reason rather than filing it, so the caller can attach it to
+// the cell that caused it. Filing it here meant reading it back off a list that
+// keeps one entry per *distinct* reason — so a cell repeating an earlier fault
+// added no entry and was handed whichever reason happened to be last.
+func (m *Map) drawOf(tile Tile, x, y int) (Draw, string) {
 	ref, local, ok := m.TilesetFor(tile.GID)
 	if !ok {
-		p.add(fmt.Sprintf("no tileset holds global id %d", tile.GID), layerName, x, y)
-		return Draw{}, false
+		return Draw{}, fmt.Sprintf("no tileset holds global id %d", tile.GID)
 	}
 	if ref.Tileset == nil {
-		p.add(fmt.Sprintf("tileset %q was never resolved", refName(ref)), layerName, x, y)
-		return Draw{}, false
+		return Draw{}, fmt.Sprintf("tileset %q was never resolved", refName(ref))
 	}
 	ts := ref.Tileset
 
 	image, sx, sy, sw, sh, why := source(ts, local, tile.GID)
 	if why != "" {
-		p.add(why, layerName, x, y)
-		return Draw{}, false
+		return Draw{}, why
 	}
 
 	return Draw{
@@ -193,7 +236,7 @@ func (m *Map) drawOf(tile Tile, x, y int, layerName string, p *problems) (Draw, 
 		DX:    x*m.TileWidth + ts.TileOffsetX,
 		DY:    (y+1)*m.TileHeight - drawnHeight(sw, sh, tile.FlipD) + ts.TileOffsetY,
 		FlipH: tile.FlipH, FlipV: tile.FlipV, FlipD: tile.FlipD,
-	}, true
+	}, ""
 }
 
 // drawnHeight is how tall the tile ends up, which is not how tall its source is

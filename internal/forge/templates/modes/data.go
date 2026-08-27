@@ -5,6 +5,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
+	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -46,6 +47,13 @@ type Data struct {
 	// resolve. Shown rather than hidden, for the reason project.Problem exists:
 	// the broken file is the one somebody came here to fix.
 	MapProblems []project.Problem
+	// Canvas is the selected map laid out: every cell placed, the layer rows,
+	// the palette and one line per reason a cell could not be drawn.
+	Canvas mapcanvas.Canvas
+	// MapView is the URL's view state — which map, which layers Forge is
+	// hiding, which tile is selected — and is what every link in the mode is
+	// built from, so none of them can drop part of it.
+	MapView MapView
 	// ConfiguredMap is the map game.toml names, or empty for a project that
 	// declares none.
 	//

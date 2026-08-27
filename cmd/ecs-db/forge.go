@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -123,7 +124,12 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		// opens one holding nothing, which is a state MAP mode renders rather
 		// than a failure — the map is the one thing a project can legitimately
 		// not have and still be worth editing.
-		mapSession = maps.Open(maps.Config{MapPath: proj.MapPath})
+		mapSession = maps.Open(maps.Config{
+			// The config file's directory is the project, and is what bounds
+			// what MAP mode will serve to the browser.
+			Root:    filepath.Dir(proj.ConfigPath),
+			MapPath: proj.MapPath,
+		})
 	}
 
 	srv := server.New(server.Config{

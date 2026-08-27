@@ -2,11 +2,16 @@ package modes
 
 // MapMode is the map editor.
 //
-// This story renders what a map *is* to Forge — which maps the project has,
-// which one the engine loads, which are unsaved, and why any of them will not
-// open — and wires the save footer to it. The canvas, the layer panel and the
-// tileset palette are Story 3; the region where they go says so rather than
-// being blank, which would be indistinguishable from a rendering failure.
+// The left rail is what the project holds: its maps, the layers of the one on
+// screen, and the tiles its tilesets offer. The main column draws that map.
+//
+// Everything here is server-rendered and patched down the page stream, and every
+// selection — which map, which layers are drawn, which layer a stroke lands on,
+// which tile is in hand — is in the URL. So it survives a reload, it can be
+// linked, and the routes that paint read it from the request rather than from
+// state the server has to keep per browser.
+//
+// The inspector rail the prototype puts on the right arrives with Story 7.
 templ MapMode(data Data) {
 	if !data.HasMaps {
 		@stub("MAP", "No project is open — see the log for why.", "")
@@ -34,7 +39,7 @@ templ mapList(data Data) {
 		<p class="schema__hint mono">one Tiled level each</p>
 		for _, m := range data.Maps {
 			<a
-				href={ URL(mapHref(m.Path)) }
+				href={ URL(data.MapView.WithMap(m.Path).Href()) }
 				class={ "list-row", kv("list-row--active", m.Path == data.SelectedMap) }
 				data-testid={ "map-" + m.Name }
 				data-active={ boolAttr(m.Path == data.SelectedMap) }
@@ -58,11 +63,14 @@ templ mapList(data Data) {
 				}
 			</a>
 		}
-		<p class="schema__foot">
+		<p class="schema__hint">
 			Only the map marked <span class="mono">loaded</span> is the one
-			<span class="mono">ecs-db run</span> reads. Editing another is real work that
-			changes nothing about the game until <span class="mono">game.toml</span> says so.
+			<span class="mono">ecs-db run</span> reads.
 		</p>
+		if data.SelectedMap != "" {
+			@mapLayers(data)
+			@mapPalette(data)
+		}
 	</nav>
 }
 
@@ -88,17 +96,172 @@ templ noMaps(data Data) {
 }
 
 templ mapEditor(data Data) {
-	<div class="schema__editor" data-testid="map-editor">
+	<div class="map-editor" data-testid="map-editor">
 		<header class="schema__editor-head">
 			<h2 class="schema__title" data-testid="map-title">{ fileName(data.SelectedMap) }</h2>
 			<p class="schema__path mono" data-testid="map-path">{ data.SelectedMap }</p>
 		</header>
-		@unbuilt("CANVAS", "Tile layers, the tileset palette and painting.", "Epic 15 Story 3")
+		@mapToolbar(data)
+		@mapCanvas(data)
+		@mapStatus(data)
 		<p class="schema__foot">
 			A saved map takes effect on the next <span class="mono">ecs-db run</span>.
 			The engine watches behaviour files and sprite assets; it does not watch maps.
 		</p>
 	</div>
+}
+
+// The source lens is the spine of the mode: it decides what the canvas and the
+// inspector are looking at. Only AUTHORED exists — LIVE and REPLAY read a
+// running game's database — and each says which epic delivers it rather than
+// leaving a hole where the control goes.
+templ mapToolbar(data Data) {
+	<div class="map-toolbar" data-testid="map-toolbar">
+		<div class="segmented" role="group" aria-label="Source" data-testid="source-lens">
+			<span class="segmented__on" data-testid="lens-authored" aria-current="true">AUTHORED</span>
+			<button
+				type="button"
+				class="segmented__off"
+				disabled
+				title="Attaching to a running game is Epic 18"
+				data-testid="lens-live"
+			>● LIVE</button>
+			<button
+				type="button"
+				class="segmented__off"
+				disabled
+				title="Scrubbing the transitions log is Epic 19"
+				data-testid="lens-replay"
+			>REPLAY</button>
+		</div>
+		<span class="map-toolbar__note mono" data-testid="map-tools-note">
+			painting arrives in Epic 15 Story 4
+		</span>
+	</div>
+}
+
+// The canvas: one absolutely positioned element per non-empty cell, emitted in
+// draw order so the stacking is the engine's without the template knowing what
+// stacking is.
+templ mapCanvas(data Data) {
+	<div class="map-viewport" data-testid="map-viewport">
+		<div class="map-canvas" data-testid="map-canvas" style={ canvasBoxStyle(data.Canvas.W, data.Canvas.H) }>
+		<div class="map-canvas__grid" style={ gridStyle(data.Canvas) } aria-hidden="true"></div>
+		for _, c := range data.Canvas.Cells {
+			if c.Unresolved() {
+				<div
+					class="map-cell map-cell--unresolved"
+					style={ cellStyle(c) }
+					data-testid="map-cell-unresolved"
+					data-cell={ cellID(c) }
+					title={ c.Problem }
+				>?</div>
+			} else {
+				<div
+					class="map-cell"
+					style={ cellStyle(c) }
+					data-testid="map-cell"
+					data-cell={ cellID(c) }
+				></div>
+			}
+		}
+		</div>
+	</div>
+}
+
+templ mapStatus(data Data) {
+	<div class="map-status mono" data-testid="map-status">
+		<span data-testid="map-size">{ itoa(data.Canvas.Cols) }×{ itoa(data.Canvas.Rows) } cells</span>
+		<span data-testid="map-tile-size">{ itoa(data.Canvas.TileW) }×{ itoa(data.Canvas.TileH) } px</span>
+		<span data-testid="map-layer-count">{ layerCount(data.Canvas) }</span>
+		<span data-testid="map-active-layer">{ activeLayerName(data.Canvas) }</span>
+		if data.MapView.SelectedGID != 0 {
+			<span data-testid="map-selected-tile">tile { gidLabel(data.MapView.SelectedGID) }</span>
+		} else {
+			<span data-testid="map-selected-tile">no tile selected</span>
+		}
+		if len(data.Canvas.Problems) > 0 {
+			<span class="map-status__problem" data-testid="map-canvas-problem">{ data.Canvas.Problems[0] }</span>
+		}
+	</div>
+}
+
+// The layer panel. Order is file order, which is draw order, which is also the
+// order the engine reads a cell's tile from — topmost non-empty wins.
+templ mapLayers(data Data) {
+	<div class="section-heading" data-testid="layer-heading"><span>Layers</span></div>
+	for _, l := range data.Canvas.Layers {
+		<div
+			class={ "layer-row", kv("layer-row--active", l.Active), kv("layer-row--muted", l.Hidden) }
+			data-testid={ "layer-" + l.Name }
+			data-hidden={ boolAttr(l.Hidden) }
+			data-active={ boolAttr(l.Active) }
+		>
+			<a
+				href={ URL(data.MapView.WithLayerToggled(l.Index).Href()) }
+				class="layer-row__eye"
+				data-testid={ "layer-eye-" + l.Name }
+				title={ layerTitle(l) }
+				aria-label={ "show or hide " + l.Name }
+			>
+				if l.Hidden {
+					—
+				} else {
+					👁
+				}
+			</a>
+			<a
+				href={ URL(data.MapView.WithActiveLayer(l.Index).Href()) }
+				class="layer-row__name"
+				data-testid={ "layer-select-" + l.Name }
+				title="paint into this layer"
+				if l.Active {
+					aria-current="true"
+				}
+			>{ l.Name }</a>
+			if l.HiddenInFile {
+				<span class="badge-override mono" data-testid={ "layer-file-hidden-" + l.Name }>file</span>
+			}
+			if l.Transparent {
+				<span class="badge-override mono" title="the map sets this layer's opacity to 0" data-testid={ "layer-transparent-" + l.Name }>α0</span>
+			}
+			if l.Empty {
+				<span class="badge-problem mono" data-testid={ "layer-empty-" + l.Name }>empty</span>
+			}
+		</div>
+	}
+	<p class="schema__hint" data-testid="layer-note">
+		The eye is what Forge draws. It is not written to the file, and the engine
+		imports a hidden layer's tiles either way. The highlighted layer is the one
+		a stroke lands on.
+	</p>
+}
+
+// The palette, by tileset. A collection tileset shows its tiles' own pictures,
+// which is what Epic 14 Story 2 supports and what half of real projects use.
+templ mapPalette(data Data) {
+	<div class="section-heading" data-testid="palette-heading"><span>Tilesets ◂ the map</span></div>
+	for _, set := range data.Canvas.Tilesets {
+		<div class="palette" data-testid={ "palette-" + set.Name }>
+			<div class="palette__name mono">{ set.Name }</div>
+			if set.Problem != "" {
+				<p class="palette__problem" role="alert" data-testid={ "palette-problem-" + set.Name }>{ set.Problem }</p>
+			}
+			<div class="palette__tiles">
+				for _, t := range set.Tiles {
+					<a
+						href={ URL(data.MapView.WithTile(t.GID).Href()) }
+						class={ "palette-tile", kv("palette-tile--selected", t.Selected) }
+						style={ paletteStyle(t) }
+						data-testid={ "palette-tile-" + gidLabel(t.GID) }
+						data-selected={ boolAttr(t.Selected) }
+						title={ "global id " + gidLabel(t.GID) }
+						aria-label={ "tile " + gidLabel(t.GID) }
+					></a>
+				}
+			</div>
+		</div>
+	}
 }
 
 templ mapProblems(data Data) {
@@ -115,19 +278,4 @@ templ mapProblems(data Data) {
 			</ul>
 		</div>
 	}
-}
-
-// unbuilt marks a region of a mode that is not finished, as distinct from a
-// mode that is not built at all.
-//
-// Deliberately not the stub component. `mode-stub` means "this whole editor is
-// a placeholder", and the app-shell spec asserts an implemented mode renders
-// none — overloading it here would make that check unable to tell a mode that
-// was never built from one with a region still to come.
-templ unbuilt(caption, summary, epic string) {
-	<div class="mode-stub" data-testid="unbuilt-region">
-		<div class="mode-stub__caption section-heading" data-testid="unbuilt-caption">{ caption }</div>
-		<p class="mode-stub__summary">{ summary }</p>
-		<p class="mode-stub__epic mono" data-testid="unbuilt-epic">{ epic }</p>
-	</div>
 }
