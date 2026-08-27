@@ -250,3 +250,55 @@ func TestParseLayer_TakesWhatItCanAndIgnoresTheRest(t *testing.T) {
 		}
 	}
 }
+
+func TestMapView_ZoomTravelsWithEveryOtherLink(t *testing.T) {
+	v := MapView{Path: "/p/m.tmx", Hidden: map[int]bool{4: true}, Active: 2, Zoom: 3, SelectedGID: 9}
+
+	if !strings.Contains(v.Href(), "zoom=3") {
+		t.Errorf("the view's own href drops the zoom: %s", v.Href())
+	}
+	for name, got := range map[string]MapView{
+		"toggling a layer": v.WithLayerToggled(1),
+		"choosing a layer": v.WithActiveLayer(0),
+		"selecting a tile": v.WithTile(11),
+		"zooming":          v.WithZoom(2),
+	} {
+		want := 3
+		if name == "zooming" {
+			want = 2
+		}
+		if got.Zoom != want {
+			t.Errorf("%s left the zoom at %d, want %d", name, got.Zoom, want)
+		}
+	}
+	// Switching maps drops it, like everything else: a zoom that fits one map
+	// need not fit another, and the next one gets its own fitted default.
+	if got := v.WithMap("/p/other.tmx"); got.Zoom != 0 {
+		t.Errorf("switching maps carried the zoom: %d", got.Zoom)
+	}
+}
+
+// Only the steps the control offers. A hand-typed 137 would draw one tile the
+// size of the panel from a URL nothing in the UI can produce.
+func TestParseZoom_TakesOnlyTheStepsTheControlOffers(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"1", 1},
+		{"4", 4},
+		{"8", 8},
+		{" 2 ", 2},
+		{"5", 0},
+		{"137", 0},
+		{"0", 0},
+		{"-2", 0},
+		{"nonsense", 0},
+		{"2.5", 0},
+	} {
+		if got := ParseZoom(tc.in); got != tc.want {
+			t.Errorf("ParseZoom(%q) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}

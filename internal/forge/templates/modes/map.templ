@@ -134,6 +134,27 @@ templ mapToolbar(data Data) {
 				data-testid="lens-replay"
 			>REPLAY</button>
 		</div>
+		if len(zoomSteps(data)) > 0 {
+			<div class="segmented" role="group" aria-label="Zoom" data-testid="zoom-control">
+				for _, z := range zoomSteps(data) {
+					if z.Current {
+						<span
+							class="segmented__on"
+							aria-current="true"
+							data-testid={ "zoom-" + itoa(z.N) }
+							data-current="true"
+						>{ itoa(z.N) }×</span>
+					} else {
+						<a
+							href={ URL(z.Href) }
+							class="segmented__link"
+							data-testid={ "zoom-" + itoa(z.N) }
+							data-current="false"
+						>{ itoa(z.N) }×</a>
+					}
+				}
+			</div>
+		}
 		<span class="map-toolbar__note mono" data-testid="map-tools-note">
 			painting arrives in Epic 15 Story 4
 		</span>
@@ -145,7 +166,13 @@ templ mapToolbar(data Data) {
 // stacking is.
 templ mapCanvas(data Data) {
 	<div class="map-viewport" data-testid="map-viewport">
-		<div class="map-canvas" data-testid="map-canvas" style={ canvasBoxStyle(data.Canvas.W, data.Canvas.H) }>
+		<div
+			class="map-canvas"
+			data-testid="map-canvas"
+			style={ canvasBoxStyle(data.Canvas.W, data.Canvas.H) }
+			data-cell-w={ itoa(data.Canvas.CellW()) }
+			data-cell-h={ itoa(data.Canvas.CellH()) }
+		>
 		<div class="map-canvas__grid" style={ gridStyle(data.Canvas) } aria-hidden="true"></div>
 		for _, c := range data.Canvas.Cells {
 			if c.Unresolved() {
@@ -169,19 +196,29 @@ templ mapCanvas(data Data) {
 	</div>
 }
 
+// A canvas with a zero scale is a map whose tilesets did not resolve: it was
+// never built, so its size, its tile size and its layer count are all zero. A
+// row of zeros reads as a map that is 0x0, which is a different and untrue
+// thing from a map that could not be drawn — and the reason is already on the
+// panel above.
 templ mapStatus(data Data) {
 	<div class="map-status mono" data-testid="map-status">
-		<span data-testid="map-size">{ itoa(data.Canvas.Cols) }×{ itoa(data.Canvas.Rows) } cells</span>
-		<span data-testid="map-tile-size">{ itoa(data.Canvas.TileW) }×{ itoa(data.Canvas.TileH) } px</span>
-		<span data-testid="map-layer-count">{ layerCount(data.Canvas) }</span>
-		<span data-testid="map-active-layer">{ activeLayerName(data.Canvas) }</span>
-		if data.MapView.SelectedGID != 0 {
-			<span data-testid="map-selected-tile">tile { gidLabel(data.MapView.SelectedGID) }</span>
+		if data.Canvas.Scale < 1 {
+			<span class="map-status__problem" data-testid="map-not-drawn">not drawn — see above</span>
 		} else {
-			<span data-testid="map-selected-tile">no tile selected</span>
-		}
-		if len(data.Canvas.Problems) > 0 {
-			<span class="map-status__problem" data-testid="map-canvas-problem">{ data.Canvas.Problems[0] }</span>
+			<span data-testid="map-size">{ itoa(data.Canvas.Cols) }×{ itoa(data.Canvas.Rows) } cells</span>
+			<span data-testid="map-tile-size">{ itoa(data.Canvas.TileW) }×{ itoa(data.Canvas.TileH) } px</span>
+			<span data-testid="map-zoom">{ zoomLabel(data.Canvas) }</span>
+			<span data-testid="map-layer-count">{ layerCount(data.Canvas) }</span>
+			<span data-testid="map-active-layer">{ activeLayerName(data.Canvas) }</span>
+			if data.MapView.SelectedGID != 0 {
+				<span data-testid="map-selected-tile">tile { gidLabel(data.MapView.SelectedGID) }</span>
+			} else {
+				<span data-testid="map-selected-tile">no tile selected</span>
+			}
+			if len(data.Canvas.Problems) > 0 {
+				<span class="map-status__problem" data-testid="map-canvas-problem">{ data.Canvas.Problems[0] }</span>
+			}
 		}
 	</div>
 }

@@ -785,3 +785,86 @@ func TestMapCanvas_ALayerAtZeroOpacitySaysSo(t *testing.T) {
 		t.Error("a fully transparent layer was drawn")
 	}
 }
+
+// Zoom is in the URL like every other part of the view, and the control marks
+// the scale actually in force — which for a view that has asked for nothing is
+// the fitted one, not the parameter.
+func TestMapCanvas_ZoomIsAControlAndIsInTheURL(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	at := "/forge/map?map=" + url.QueryEscape(configured)
+
+	body := mapPage(t, srv, at)
+	if !strings.Contains(body, `data-testid="zoom-control"`) {
+		t.Fatalf("there is no zoom control:\n%s", body)
+	}
+	// The fixture is 2x2 at 16px, so it fits at the largest step FitScale
+	// offers and the control says so without anyone asking.
+	if !strings.Contains(body, `data-testid="zoom-4" data-current="true"`) {
+		t.Errorf("the control does not mark the fitted scale:\n%s", body)
+	}
+
+	body = mapPage(t, srv, at+"&zoom=1")
+	if !strings.Contains(body, `data-testid="zoom-1" data-current="true"`) {
+		t.Errorf("asking for 1x did not select it:\n%s", body)
+	}
+	if !strings.Contains(body, "1× · 16px cells") {
+		t.Errorf("the status line does not say what a cell comes to:\n%s", body)
+	}
+
+	// And at the fitted default the cell is four times its size in the file,
+	// which is the half of the readout that 1x cannot show.
+	body = mapPage(t, srv, at)
+	if !strings.Contains(body, "4× · 64px cells") {
+		t.Errorf("the status line does not scale the cell size:\n%s", body)
+	}
+	if !strings.Contains(body, `data-cell-w="64"`) {
+		t.Errorf("the canvas does not carry its cell size for Story 5:\n%s", body)
+	}
+}
+
+// A zoom the control cannot produce is ignored rather than honoured: a
+// hand-typed 137 would draw one tile the size of the panel.
+func TestMapCanvas_AZoomOutsideTheStepsIsIgnored(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	at := "/forge/map?map=" + url.QueryEscape(configured)
+	for _, bad := range []string{"137", "0", "-2", "nonsense", "2.5"} {
+		body := mapPage(t, srv, at+"&zoom="+url.QueryEscape(bad))
+		if !strings.Contains(body, `data-testid="zoom-4" data-current="true"`) {
+			t.Errorf("zoom=%q was honoured:\n%s", bad, body)
+		}
+	}
+}
+
+// A map whose tilesets do not resolve still renders — with the reason on the
+// panel above — and there is nothing to zoom. A control marking none of its six
+// steps is worse than no control.
+func TestMapCanvas_AMapThatWillNotResolveHasNoZoomControl(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	if err := os.Remove(filepath.Join(filepath.Dir(configured), "fixture.tsx")); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Reload(configured); err != nil {
+		t.Fatal(err)
+	}
+
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+	if !strings.Contains(body, `data-testid="map-editor"`) {
+		t.Fatalf("the mode stopped rendering:\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="zoom-control"`) {
+		t.Errorf("a map with nothing drawn offers a zoom control:\n%s", body)
+	}
+	// Not a row of zeros: "0×0 cells" reads as a map that is 0x0, which is a
+	// different and untrue thing from a map that could not be drawn.
+	if strings.Contains(body, "0×0 cells") || strings.Contains(body, "0× · 0px") {
+		t.Errorf("the status line reports a map of no size:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="map-not-drawn"`) {
+		t.Errorf("the status line does not say the map is not drawn:\n%s", body)
+	}
+	// And the reason is on the panel, which is what makes this a broken map
+	// rather than an empty one.
+	if !strings.Contains(body, "fixture.tsx") {
+		t.Errorf("the reason is not shown:\n%s", body)
+	}
+}

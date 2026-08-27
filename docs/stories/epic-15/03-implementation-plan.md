@@ -84,8 +84,12 @@ Implemented.
   measured and recorded rather than assumed: 20×15 is 300 elements and a
   500×500 map is a quarter of a million. **Measured:** ~222 bytes of HTML per
   cell — 89 KB at 400 cells, 2.2 MB at 10,000, 57 MB at 250,000.
-- **Zoom is not in this story.** Cell size on screen equals tile size in the
-  file, so there is exactly one coordinate system for Story 5 to be wrong about.
+- ~~**Zoom is not in this story.**~~ **Reversed.** It shipped without one, at a
+  fixed 3× chosen for the fixture's 16px art, and the engine's own 32px map then
+  drew at 1920×1440. Cell size on screen is `TileW × Scale` and varies per map
+  and per view; `Canvas.CellW()` is the one number that says it, and it is on
+  the canvas element as `data-cell-w` so Story 5's pointer arithmetic reads it
+  rather than re-deriving it.
 
 ## Missed, not deferred
 

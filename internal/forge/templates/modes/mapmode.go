@@ -25,7 +25,11 @@ type MapView struct {
 	// half of an OR with the file.
 	Hidden map[int]bool
 	// Active is the layer a stroke would land on. Story 4 paints into it.
-	Active      int
+	Active int
+	// Zoom is how many screen pixels one map pixel gets, or 0 for the scale
+	// that fits the map. In the URL like every other part of the view, so a
+	// link to a map is a link to how you were looking at it.
+	Zoom        int
 	SelectedGID uint32
 }
 
@@ -40,6 +44,9 @@ func (v MapView) Href() string {
 	}
 	if v.Active != 0 {
 		q.Set("layer", strconv.Itoa(v.Active))
+	}
+	if v.Zoom != 0 {
+		q.Set("zoom", strconv.Itoa(v.Zoom))
 	}
 	if v.SelectedGID != 0 {
 		q.Set("tile", strconv.FormatUint(uint64(v.SelectedGID), 10))
@@ -58,7 +65,10 @@ func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
 
 // WithLayerToggled flips one layer's visibility.
 func (v MapView) WithLayerToggled(i int) MapView {
-	next := MapView{Path: v.Path, Active: v.Active, SelectedGID: v.SelectedGID, Hidden: map[int]bool{}}
+	next := MapView{
+		Path: v.Path, Active: v.Active, Zoom: v.Zoom,
+		SelectedGID: v.SelectedGID, Hidden: map[int]bool{},
+	}
 	for k, on := range v.Hidden {
 		if on {
 			next.Hidden[k] = true
@@ -76,11 +86,16 @@ func (v MapView) WithLayerToggled(i int) MapView {
 // given is the one already selected — so clicking the current tile clears it.
 // WithActiveLayer is this view painting into another layer.
 func (v MapView) WithActiveLayer(i int) MapView {
-	return MapView{Path: v.Path, Hidden: v.Hidden, Active: i, SelectedGID: v.SelectedGID}
+	return MapView{Path: v.Path, Hidden: v.Hidden, Active: i, Zoom: v.Zoom, SelectedGID: v.SelectedGID}
+}
+
+// WithZoom is this view at another magnification.
+func (v MapView) WithZoom(n int) MapView {
+	return MapView{Path: v.Path, Hidden: v.Hidden, Active: v.Active, Zoom: n, SelectedGID: v.SelectedGID}
 }
 
 func (v MapView) WithTile(gid uint32) MapView {
-	next := MapView{Path: v.Path, Hidden: v.Hidden, Active: v.Active, SelectedGID: gid}
+	next := MapView{Path: v.Path, Hidden: v.Hidden, Active: v.Active, Zoom: v.Zoom, SelectedGID: gid}
 	if v.SelectedGID == gid {
 		next.SelectedGID = 0
 	}
@@ -113,6 +128,22 @@ func ParseLayer(raw string) int {
 		return 0
 	}
 	return i
+}
+
+// ParseZoom reads the zoom parameter, on ParseHidden's terms — and only the
+// steps the control offers. A hand-typed 137 would draw a tile the size of the
+// panel from a URL nothing in the UI can produce.
+func ParseZoom(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	for _, step := range mapcanvas.Steps() {
+		if step == n {
+			return n
+		}
+	}
+	return 0
 }
 
 // ParseGID reads the tile parameter, on the same terms.
@@ -187,7 +218,7 @@ func canvasBoxStyle(w, h int) templ.SafeCSS {
 // lines is 300 more things for a patch to diff.
 func gridStyle(c mapcanvas.Canvas) templ.SafeCSS {
 	return templ.SafeCSS(
-		"background-size:" + itoa(c.TileW*c.Scale) + "px " + itoa(c.TileH*c.Scale) + "px")
+		"background-size:" + itoa(c.CellW()) + "px " + itoa(c.CellH()) + "px")
 }
 
 // ftoa is a coordinate written as a number at every magnitude — never in
@@ -228,6 +259,45 @@ func layerTitle(l mapcanvas.Layer) string {
 	default:
 		return "drawn"
 	}
+}
+
+// zoomSteps is the zoom control's rows: each step, the view that selects it,
+// and whether it is the one in force.
+type zoomStep struct {
+	N       int
+	Href    string
+	Current bool
+}
+
+// A zero canvas is a map whose tilesets did not resolve: it renders, with the
+// reason on the panel above, and there is nothing to zoom. A control marking
+// none of its six steps is worse than no control, which is what this returns.
+func zoomSteps(data Data) []zoomStep {
+	if data.Canvas.Scale < 1 {
+		return nil
+	}
+	all := mapcanvas.Steps()
+	out := make([]zoomStep, 0, len(all))
+	for _, n := range all {
+		out = append(out, zoomStep{
+			N:    n,
+			Href: data.MapView.WithZoom(n).Href(),
+			// Against the scale actually in force, not against the parameter:
+			// a view that asked for nothing is at the fitted scale, and the
+			// control has to mark the step the canvas is really drawn at.
+			Current: n == data.Canvas.Scale,
+		})
+	}
+	return out
+}
+
+// zoomLabel is the magnification and what it makes a cell, because "3x" says
+// nothing on its own about whether the map will fit.
+// Only ever called for a canvas that was built — mapStatus says "not drawn" for
+// one that was not, because its size and its layer count are as meaningless as
+// its zoom.
+func zoomLabel(c mapcanvas.Canvas) string {
+	return itoa(c.Scale) + "× · " + itoa(c.CellW()) + "px cells"
 }
 
 // activeLayerName is what the status line calls the layer a stroke would land

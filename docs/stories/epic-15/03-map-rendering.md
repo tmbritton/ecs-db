@@ -54,6 +54,7 @@ controls.
       navigation
 - [x] The `AUTHORED / ● LIVE / REPLAY` lens control renders in the toolbar, with
       LIVE and REPLAY disabled and each naming the epic that delivers it
+- [x] Zoom, added after the story shipped — see *The zoom control* below
 - [~] The status line under the canvas shows ~~the hovered cell and~~ the map's
       size and tile size — **hover moved to Story 5.** Hover is pointer state,
       and pointer state is the story that introduces this epic's only JS. The
@@ -85,6 +86,13 @@ controls.
       count `datastar-patch-elements` frames and assert the count stops growing,
       as `06-engine-status.spec.js` does
 - [x] The image route refuses `../../etc/passwd` and anything outside the project
+- [x] Zoom is a control, is in the URL, and survives a reload — added after the
+      story shipped, with the map really drawn at the size the control says
+- [x] Zoom travels with every other link: choosing a tile or hiding a layer does
+      not reset it
+- [x] The palette does not follow the canvas zoom — the rail is a fixed width
+      and at 8× a 32px tile became a 256px swatch that flex then squashed into a
+      distorted crop of itself
 
 ## Notes
 
@@ -93,10 +101,11 @@ controls.
   stack, and a stack is most of what layers are for. It also means MAP mode
   needs no database at all in AUTHORED, which is what lets it work with no game
   ever having run.
-- **Cell size on screen is not tile size in the file.** Zoom is a view concern
-  and belongs to the client; the coordinates the server reasons about are always
-  cells. Getting that boundary right here is what keeps Story 5's pointer maths
-  from having two coordinate systems to be wrong about.
+- **Cell size on screen is not tile size in the file.** The coordinates the
+  server reasons about are always cells; the pixels are a rendering of them.
+  ~~Zoom belongs to the client~~ — it turned out to belong in the URL with every
+  other part of the view, and the boundary this note is about is kept by
+  `Canvas.CellW()` being the only place the product is taken.
 - 20×15 is 300 cells and a real map is thousands. Whether cells are elements or
   one canvas is an implementation decision, but it is worth taking with the
   patch-stream in mind: a full-map redraw on every stamp is a lot of HTML.
@@ -186,12 +195,10 @@ Also found by review:
 ### Left undone, deliberately
 
 - **The hovered cell.** Hover is pointer state, and pointer state is Story 5's.
-- **Zoom is fixed at 3×**, chosen for 16px art. At 32px — which this engine's own
-  map uses — that is 96px cells, so `level1.tmx` renders 1920×1440 in a panel
-  and an author sees about six cells across. A target-cell-size rule
-  (`max(1, 48/tileWidth)`) would give 3 and 1–2 respectively for the same one
-  line, and belongs with the zoom control in Story 5: zoom and pointer
-  arithmetic are the same question asked twice.
+- ~~**Zoom is fixed at 3×**, chosen for 16px art.~~ **Done, after the fact —
+  see *The zoom control*.** Deferring it was the wrong call: the number was
+  chosen for the fixture and shipped against the engine's own map, where it
+  drew 96px cells and a canvas of 1920×1440.
 - **The canvas is an element per cell, and the ceiling is now measured** rather
   than assumed. Through the real template: 400 cells is 89 KB of HTML, 10,000 is
   2.2 MB, 250,000 is 57 MB — about 222 bytes a cell. The mode stream also
@@ -204,6 +211,42 @@ Also found by review:
   name. It is for a test to point at and a person to read. Story 5 keys pointer
   state on the layer *index*, which is what the panel and the paint routes
   already address a layer by.
+
+### The zoom control
+
+Added after the story shipped, because the fixed 3× it shipped with was chosen
+for 16px art and the engine's own map is 20×15 at 32px — which came to 96px
+cells and a canvas of 1920×1440 that does not fit on a screen. The story had
+recorded that as a deferral to Story 5, on the argument that zoom and pointer
+arithmetic are the same question. That argument is still true and it was still
+the wrong call: a canvas you cannot see the map on is not a canvas, and the
+deferral shipped one.
+
+**`mapcanvas.FitScale` is the default**: the largest step that keeps the whole
+map inside a 900×640 budget, capped at 4 and floored at 1. Both dimensions bind
+— a tall, narrow map has width to spare and no height. The engine's map gets 1×
+and the e2e fixture gets 4×, so the common case is "open a map, see the map"
+with no interaction. The budget is not the viewport, which the server cannot
+know; it is a size comfortably inside a laptop window beside Forge's two panels.
+
+**The steps are 1, 2, 3, 4, 6 and 8, and they are integers.** A fractional scale
+puts a tile boundary between device pixels and pixel art either blurs or gains a
+seam depending on which way the browser rounds. `?zoom=` takes only a step the
+control offers, so a hand-typed 137 cannot draw one tile the size of the panel.
+
+The control marks the scale **in force**, not the parameter: a view that has
+asked for nothing is at the fitted scale, and a control that highlighted nothing
+in that case would be worse than no control. Review found the one case where
+that could still happen — a map whose tilesets do not resolve renders with a
+zero canvas — and the control is absent there rather than marking none of its
+six steps.
+
+**The palette keeps its own scale**, also found by review. Zoom is a canvas
+concern and a 212px rail structurally cannot follow it: at 8× a 32px tile became
+a 256px swatch, flex shrank each one's width to fit while its height and its
+background-size did not, and every tile in the palette became a distorted crop
+of itself. Swatches are sized for the rail — about 32px — which is legible for
+8px art and does not magnify art that is already big enough.
 
 ### The battery
 
@@ -224,3 +267,8 @@ version of the fix checked the file mode after the `os.Open` that blocks.
 
 One accepted survivor: the `slug != "map"` guard that stops the canvas being
 built for every mode is a cost guard, and removing it changes no output at all.
+
+A fourth pass of 13 mutations covered the zoom control, 12 caught first time.
+The survivor was a fit that only measured width — every fixture in the test was
+a square map, so height never bound on its own, and the property test beside the
+table had the same blind spot.

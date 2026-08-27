@@ -642,6 +642,7 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Forge's first route serving a project file is an allow-list of what the project's tilesets name, plus a containment check. Found by review: the allow-list alone stops the *request* traversing and not the *project* — a `.tsx` naming a symlink out of the tree served `/etc/passwd`
   - Found by review: a layer hidden in Tiled had an eye you could click that changed the URL and nothing else, so the one place you would look at a hidden layer could not show it
   - The e2e fixture draws real CC-BY art now, so the browser suite exercises a sheet's rows and columns rather than two generated colours
+  - Zoom, added after the story shipped: the fixed scale it shipped with was chosen for 16px art and drew the engine's own 32px map at 1920×1440. Deferring the control to Story 5 was the wrong call — a canvas you cannot see the map on is not a canvas
 
 - [ ] **Painting, server-side** — Stamp, rect, eraser, rotate and flip as operations on the session, proven in Go against map values.
 

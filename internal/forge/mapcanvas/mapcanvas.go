@@ -44,13 +44,14 @@ type Options struct {
 	// AssetURL turns a resolved image path into something the browser can
 	// fetch. Required; a nil one would render every tile pointing at nothing.
 	AssetURL func(path string) string
-	// Scale is how many screen pixels one map pixel gets. Zero means 1.
+	// Scale is how many screen pixels one map pixel gets. Zero means FitScale.
 	//
 	// A display concern and nothing else: the map is still measured in cells and
 	// the file is still measured in pixels, and this multiplies neither. It
-	// exists because a 16px tileset at 1:1 is a picture nobody can see — the
-	// fixture map comes out 96x64 — and an editor whose canvas is unreadable is
-	// not an editor.
+	// exists because a 16px tileset at 1:1 is a picture nobody can see, and
+	// because a 32px one at 3x is a picture that does not fit — an editor whose
+	// canvas is unreadable and an editor whose canvas runs off the screen are
+	// the same complaint from opposite ends.
 	//
 	// An integer, so a tile boundary always lands on a device pixel and
 	// pixelated art stays crisp. Story 5's pointer arithmetic divides by
@@ -84,6 +85,94 @@ type Canvas struct {
 	Problems []string
 }
 
+// steps are the zoom levels the control offers, and the ones FitScale chooses
+// between. Ascending, which FitScale relies on.
+//
+// Discrete and integral: a fractional scale puts a tile boundary between device
+// pixels, and pixel art either blurs or gains a seam depending on which way the
+// browser rounds. Powers-of-two plus 3 covers the useful range — 1 for 32px art,
+// 8 for 8px art — without a slider nobody can hit an exact value on.
+var steps = [6]int{1, 2, 3, 4, 6, 8}
+
+// Steps is the zoom levels the control offers, as a copy: a caller that
+// appended to or reordered a shared slice would change both what the control
+// offers and what ParseZoom will accept.
+//
+// A real copy, not steps[:] — slicing an array gives a window onto it, so the
+// first caller to write through that window changes the array for everyone.
+func Steps() []int {
+	out := make([]int, len(steps))
+	copy(out, steps[:])
+	return out
+}
+
+// fitBudget is the canvas area a map is scaled to fit by default, in pixels.
+//
+// Not the viewport, which the server cannot know. A number that is comfortably
+// inside a laptop window beside Forge's two side panels, chosen so the common
+// case — open a map, see the map — needs no interaction.
+// Exported so a test can assert the property rather than a copy of the numbers:
+// moving the budget should change what the test means, not silently pass.
+const FitBudgetW, FitBudgetH = 900, 640
+
+// fitCap is the most FitScale will magnify by. A tiny map filling the whole
+// panel is its own kind of wrong, and every step at or below it divides both
+// budget dimensions exactly — see the comparison in FitScale.
+const fitCap = 4
+
+// paletteScale is how much the swatches are magnified, and it is deliberately
+// not the canvas's zoom.
+//
+// Zoom is a canvas concern. The palette lives in a rail 212px wide with about
+// 188px of room, and following the canvas to 8x made a 32px tile a 256px
+// swatch: flex shrank each one to fit the width while its height and its
+// background-size did not, so every tile in the palette became a distorted crop
+// of itself. Even at the fitted default it turned 216 swatches into seven
+// thousand pixels of scrolling.
+//
+// So the swatches are sized for the rail: about 32px each, which is legible for
+// 8px art and does not magnify art that is already big enough.
+func paletteScale(tileW int) int {
+	const target = 32
+	if tileW <= 0 || tileW >= target {
+		return 1
+	}
+	s := target / tileW
+	if s > fitCap {
+		s = fitCap
+	}
+	return s
+}
+
+// FitScale is the zoom a map gets when nobody has asked for one: the largest
+// step that keeps the whole map inside the budget, and never more than 4.
+//
+// Both ends matter. A 16px tileset at 1:1 draws a picture nobody can see, so
+// small art is magnified; a 20x15 map of 32px tiles at 3x is 1920x1440, which
+// is what shipping a fixed scale chosen for the other case did. Capped at
+// fitCap because a tiny map filling the whole panel is its own kind of wrong.
+func FitScale(cols, rows, tileW, tileH int) int {
+	if cols <= 0 || rows <= 0 || tileW <= 0 || tileH <= 0 {
+		return 1
+	}
+	best := 1
+	for _, s := range steps {
+		if s > fitCap {
+			break
+		}
+		// Divided rather than multiplied. checkSize only refuses a *negative*
+		// map size, so a hand-written .tmx can declare a width of 4e18 — and
+		// cols*tileW*s then overflows to a negative number, passes the budget
+		// test, and picks a scale for a map that fits nothing. Every step at or
+		// below the cap divides 900 and 640 exactly, so this is the same
+		// comparison with no product to overflow.
+		if cols*tileW <= FitBudgetW/s && rows*tileH <= FitBudgetH/s {
+			best = s
+		}
+	}
+	return best
+}
+
 // Cell is one placed tile, or one that could not be placed.
 type Cell struct {
 	X, Y  int
@@ -102,6 +191,17 @@ type Cell struct {
 	// cannot fix, and the engine will refuse to load the map over it.
 	Problem string
 }
+
+// CellW and CellH are a cell's size on screen: the file's tile size times the
+// zoom.
+//
+// One accessor rather than the product written out at each call site — the grid
+// writes it, the status line writes it, and Story 5's pointer arithmetic divides
+// by it, which is three chances to multiply by the wrong one of two numbers that
+// are both called a size.
+func (c Canvas) CellW() int { return c.TileW * c.Scale }
+
+func (c Canvas) CellH() int { return c.TileH * c.Scale }
 
 // Unresolved reports whether this cell is a marker rather than a tile.
 func (c Cell) Unresolved() bool { return c.Problem != "" }
@@ -161,7 +261,7 @@ func Build(m *tiled.Map, opts Options) Canvas {
 	}
 	scale := opts.Scale
 	if scale < 1 {
-		scale = 1
+		scale = FitScale(m.Width, m.Height, m.TileWidth, m.TileHeight)
 	}
 	c := Canvas{
 		Cols: m.Width, Rows: m.Height,
@@ -239,7 +339,7 @@ func Build(m *tiled.Map, opts Options) Canvas {
 		c.Cells = append(c.Cells, cell)
 	}
 
-	c.Tilesets = palette(m, opts, scale)
+	c.Tilesets = palette(m, opts, paletteScale(m.TileWidth))
 	return c
 }
 
@@ -253,6 +353,8 @@ func Build(m *tiled.Map, opts Options) Canvas {
 // First-gid order rather than file order, so two renders of one map agree: the
 // strip is on a stream whose identical-patch suppression depends on it, and a
 // palette that reshuffled would both flicker and defeat the suppression.
+//
+// Its own scale, not the canvas's — see paletteScale.
 func palette(m *tiled.Map, opts Options, scale int) []Tileset {
 	refs := append([]tiled.TilesetRef(nil), m.Tilesets...)
 	sort.Slice(refs, func(i, j int) bool { return refs[i].FirstGID < refs[j].FirstGID })

@@ -40,6 +40,9 @@ test("the status line gives the map's size and its tile size", async ({ page }) 
   await expect(byTestId(page, "map-size")).toHaveText("6×4 cells");
   await expect(byTestId(page, "map-tile-size")).toHaveText("16×16 px");
   await expect(byTestId(page, "map-layer-count")).toHaveText("2 layers");
+  // 6x4 at 16px fits comfortably, so it opens at the largest step FitScale
+  // offers, with nobody having asked.
+  await expect(byTestId(page, "map-zoom")).toHaveText("4× · 64px cells");
   await expect(byTestId(page, "map-selected-tile")).toHaveText("no tile selected");
 });
 
@@ -183,4 +186,49 @@ test("the active layer survives a reload and travels with the other links", asyn
   await byTestId(page, "palette-tile-1").click();
   await expect(byTestId(page, "layer-props")).toHaveAttribute("data-active", "true");
   await expect(byTestId(page, "map-selected-tile")).toHaveText("tile 1");
+});
+
+test("zoom is a control, is in the URL, and survives a reload", async ({ page }) => {
+  await expect(byTestId(page, "zoom-4")).toHaveAttribute("data-current", "true");
+
+  await byTestId(page, "zoom-1").click();
+  await expect(byTestId(page, "zoom-1")).toHaveAttribute("data-current", "true");
+  await expect(byTestId(page, "zoom-4")).toHaveAttribute("data-current", "false");
+  await expect(byTestId(page, "map-zoom")).toHaveText("1× · 16px cells");
+  expect(page.url()).toContain("zoom=1");
+
+  // The map really is drawn smaller: a cell's own box is the tile's size and
+  // the matrix is what scales it, so the canvas is what changes. The exact
+  // number, because "less than 200" is also true at 2x.
+  const box = await byTestId(page, "map-canvas").boundingBox();
+  expect(box.width, "6 cells of 16px at 1x").toBe(96);
+  await expect(byTestId(page, "map-canvas")).toHaveAttribute("data-cell-w", "16");
+
+  await page.reload();
+  await expect(byTestId(page, "zoom-1")).toHaveAttribute("data-current", "true");
+});
+
+test("zoom travels with the other links", async ({ page }) => {
+  await byTestId(page, "zoom-2").click();
+  await byTestId(page, "palette-tile-1").click();
+  await expect(byTestId(page, "zoom-2")).toHaveAttribute("data-current", "true");
+  await expect(byTestId(page, "map-selected-tile")).toHaveText("tile 1");
+
+  await byTestId(page, "layer-eye-props").click();
+  await expect(byTestId(page, "zoom-2")).toHaveAttribute("data-current", "true");
+});
+
+test("the palette does not follow the canvas zoom", async ({ page }) => {
+  // Zoom is a canvas concern. The rail is 212px wide and cannot follow it: at 8x
+  // a 32px tile became a 256px swatch, flex shrank its width to fit while its
+  // height and background-size did not, and every tile became a distorted crop.
+  const swatch = byTestId(page, "palette-tile-1");
+  const before = await swatch.boundingBox();
+
+  await byTestId(page, "zoom-8").click();
+  await expect(byTestId(page, "zoom-8")).toHaveAttribute("data-current", "true");
+
+  const after = await swatch.boundingBox();
+  expect(after.width).toBe(before.width);
+  expect(after.height).toBe(before.height);
 });

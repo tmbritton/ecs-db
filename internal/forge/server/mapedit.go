@@ -11,16 +11,6 @@ import (
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
-// canvasScale is how many screen pixels one map pixel gets.
-//
-// Fixed, and not a control. A 16px tileset at 1:1 draws the e2e fixture at 96x64
-// — a picture nobody can see, and an editor whose canvas is unreadable is not an
-// editor. Three is legible for 16px art and still sane for 32px, which is what
-// this engine's own map uses. A zoom control belongs with the story that owns
-// the pointer surface, because zoom and pointer arithmetic are the same
-// question asked twice.
-const canvasScale = 3
-
 func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/save", sameOriginOnly(s.handleMapSave))
 	mux.HandleFunc("POST /forge/map/save/overwrite", sameOriginOnly(s.handleMapOverwrite))
@@ -182,6 +172,7 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 		Path:        data.SelectedMap,
 		Hidden:      modes.ParseHidden(q.Get("hide")),
 		Active:      modes.ParseLayer(q.Get("layer")),
+		Zoom:        modes.ParseZoom(q.Get("zoom")),
 		SelectedGID: modes.ParseGID(q.Get("tile")),
 	}
 	// Only where it is drawn. Resolving a map means parsing it and reading its
@@ -207,7 +198,9 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 		Active:      data.MapView.Active,
 		SelectedGID: data.MapView.SelectedGID,
 		AssetURL:    assetURL,
-		Scale:       canvasScale,
+		// Zero means the scale that fits the map, which is what a view that has
+		// not asked gets.
+		Scale: data.MapView.Zoom,
 	})
 }
 

@@ -2458,8 +2458,17 @@ option:disabled {
   flex: none;
 }
 
+/* Every segment carries its left divider and the first one drops it, rather
+   than the highlighted segment being assumed to be first. The source lens is
+   always AUTHORED-first; the zoom control's highlight moves, and without this
+   the two segments either side of it ran together. */
+.segmented > :first-child {
+  border-left: 0;
+}
+
 .segmented__on {
   padding: 3px 11px;
+  border-left: 2px solid var(--border);
   background: var(--active);
   color: var(--amber);
 }
@@ -2472,6 +2481,18 @@ option:disabled {
   color: var(--text-dim);
   font: inherit;
   cursor: not-allowed;
+}
+
+.segmented__link {
+  padding: 3px 11px;
+  border-left: 2px solid var(--border);
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.segmented__link:hover {
+  color: var(--amber);
+  background: var(--hover);
 }
 
 /* The viewport scrolls; the canvas inside it is the map's full size. A map

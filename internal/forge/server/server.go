@@ -289,6 +289,9 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 		if layer := r.URL.Query().Get("layer"); layer != "" {
 			q.Set("layer", layer)
 		}
+		if zoom := r.URL.Query().Get("zoom"); zoom != "" {
+			q.Set("zoom", zoom)
+		}
 		if tile := r.URL.Query().Get("tile"); tile != "" {
 			q.Set("tile", tile)
 		}
