@@ -17,7 +17,7 @@ import (
 func renderMode(t *testing.T, data Data) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := SchemaMode(data).Render(context.Background(), &buf); err != nil {
+	if err := Render("schema", data).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	return buf.String()

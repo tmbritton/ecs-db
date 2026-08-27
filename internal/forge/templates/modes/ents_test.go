@@ -14,7 +14,7 @@ import (
 func renderEnts(t *testing.T, data Data) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := EntsMode(data).Render(context.Background(), &buf); err != nil {
+	if err := Render("ents", data).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	return buf.String()

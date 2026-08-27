@@ -15,17 +15,17 @@ import (
 func TestRegistry_CoversEveryMode(t *testing.T) {
 	for _, m := range mode.All {
 		t.Run(m.Slug, func(t *testing.T) {
-			build, ok := Registry[m.Slug]
+			content, ok := Registry[m.Slug]
 			if !ok {
-				t.Fatalf("no stub registered for %q", m.Slug)
+				t.Fatalf("no content registered for %q", m.Slug)
 			}
-			if build == nil {
-				t.Fatalf("stub for %q is nil", m.Slug)
+			if len(content.Regions) == 0 {
+				t.Fatalf("%q registers no regions, so nothing on it can be patched", m.Slug)
 			}
-			c := build(Data{})
-			if c == nil {
-				t.Fatalf("stub for %q built a nil component", m.Slug)
+			if content.Page == nil {
+				t.Fatalf("%q registers no way to assemble its regions into a page", m.Slug)
 			}
+			c := Render(m.Slug, Data{})
 
 			var buf bytes.Buffer
 			if err := c.Render(context.Background(), &buf); err != nil {

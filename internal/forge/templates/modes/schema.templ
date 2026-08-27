@@ -2,72 +2,48 @@ package modes
 
 import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 
-// SchemaMode edits the components half of schema.json.
-templ SchemaMode(data Data) {
-	if !data.HasSession {
-		@stub("SCHEMA", "No project is open — see the log for why.", "")
-	} else {
-		{{ selected := selectComponent(data.Schema, data.Selected) }}
-		<div class="schema" data-testid="schema-mode">
-			@componentList(data, selected)
-			<div class="schema__main">
-				@fileProblemsPanel(data)
-				if selected == "" {
-					<div class="schema__empty" data-testid="schema-empty">
-						<p>This schema declares no components yet.</p>
-					</div>
-				} else {
-					@componentEditor(data, selected)
-				}
-				@migrationPanel(data)
-			</div>
-		</div>
-	}
-}
 
-templ componentList(data Data, selected string) {
-	<nav class="schema__list" aria-label="Components" data-testid="component-list">
-		<div class="section-heading">
-			<span>Components</span>
-			<button
-				type="button"
-				class="schema__version"
-				title="Bump schemaVersion — a migration marker the engine checks at startup, not a label"
-				data-testid="schema-version"
-				data-on:click={ action("/forge/schema/version") }
-			>v{ itoa(data.Schema.SchemaVersion) }</button>
-		</div>
-		<p class="schema__hint mono">one comp_* SQL table each</p>
-		for _, name := range componentNames(data.Schema) {
-			<a
-				href={ URL(componentHref(name)) }
-				class={ "list-row", kv("list-row--active", name == selected) }
-				data-testid={ "component-" + name }
-				data-active={ boolAttr(name == selected) }
-				data-problem={ boolAttr(hasProblems(data, ownerComponent, name)) }
-				if name == selected {
-					aria-current="true"
-				}
-			>
-				<span class="list-row__glyph" aria-hidden="true">⛃</span>
-				<span class="list-row__label">{ name }</span>
-				if data.Schema.Components[name].Behavior != "" {
-					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
-				}
-				@problemBadge(data, ownerComponent, name)
-			</a>
-		}
+templ componentListBody(data Data, selected string) {
+	<div class="section-heading">
+		<span>Components</span>
 		<button
 			type="button"
-			class="btn--dashed schema__add"
-			data-testid="add-component"
-			data-on:click={ action("/forge/schema/component", "add", "NewComponent") }
-		>+ NEW COMPONENT</button>
-		<p class="schema__foot">
-			Entity types live in the ENTS tab — both halves of
-			<span class="mono">schema.json</span>
-		</p>
-	</nav>
+			class="schema__version"
+			title="Bump schemaVersion — a migration marker the engine checks at startup, not a label"
+			data-testid="schema-version"
+			data-on:click={ action("/forge/schema/version") }
+		>v{ itoa(data.Schema.SchemaVersion) }</button>
+	</div>
+	<p class="schema__hint mono">one comp_* SQL table each</p>
+	for _, name := range componentNames(data.Schema) {
+		<a
+			href={ URL(componentHref(name)) }
+			class={ "list-row", kv("list-row--active", name == selected) }
+			data-testid={ "component-" + name }
+			data-active={ boolAttr(name == selected) }
+			data-problem={ boolAttr(hasProblems(data, ownerComponent, name)) }
+			if name == selected {
+				aria-current="true"
+			}
+		>
+			<span class="list-row__glyph" aria-hidden="true">⛃</span>
+			<span class="list-row__label">{ name }</span>
+			if data.Schema.Components[name].Behavior != "" {
+				<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
+			}
+			@problemBadge(data, ownerComponent, name)
+		</a>
+	}
+	<button
+		type="button"
+		class="btn--dashed schema__add"
+		data-testid="add-component"
+		data-on:click={ action("/forge/schema/component", "add", "NewComponent") }
+	>+ NEW COMPONENT</button>
+	<p class="schema__foot">
+		Entity types live in the ENTS tab — both halves of
+		<span class="mono">schema.json</span>
+	</p>
 }
 
 templ componentEditor(data Data, name string) {

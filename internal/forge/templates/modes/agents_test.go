@@ -16,7 +16,7 @@ import (
 func renderAgents(t *testing.T, data Data) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := AgentsMode(data).Render(context.Background(), &buf); err != nil {
+	if err := Render("agents", data).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	return buf.String()

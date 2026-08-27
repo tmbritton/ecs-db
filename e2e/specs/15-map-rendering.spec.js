@@ -144,9 +144,14 @@ test("the canvas is not re-patched every tick", async ({ page }) => {
       text += decoder.decode(chunk.value, { stream: true });
     }
     await reader.cancel();
-    // Anchored on the leading space: `data-testid="mode-content"` ends with the
-    // substring this is looking for, and an unanchored match counts it too.
-    return (text.match(/ id="mode-content"/g) || []).length;
+    // The canvas is its own patch target now, so this counts the canvas rather
+    // than the whole mode — which is a sharper question than it was: before the
+    // split, "the mode was sent twice" and "the canvas was sent twice" were the
+    // same measurement, and only the second one matters.
+    //
+    // Anchored on the leading space: `data-testid="map-canvas"` ends with the
+    // substring `id="map-canvas"`, and an unanchored match counts it too.
+    return (text.match(/ id="map-canvas-region"/g) || []).length;
   }, stream);
   expect(content, `the canvas was patched ${content} times in ~6s`).toBe(1);
 });

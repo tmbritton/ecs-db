@@ -28,17 +28,37 @@ type region struct {
 // has unless something makes it so — the stream's whole ability to say "you
 // already have this" rests on the two being byte-identical.
 //
-// data is a function because three of the five need it and two do not, and
+// data is a function because most of the regions need it and two do not, and
 // gathering it costs a read-only open of the game's database — two on SCHEMA.
+// Both callers memoise it, so asking once per region costs one gather.
 func (s *Server) regions(m mode.Mode, data func() modes.Data) []region {
-	return []region{
+	out := []region{
 		{"engine status", s.renderEngineStatus},
 		{"save reports", s.renderSaveReports},
 		{"save footer", func() (string, error) { return s.renderFooter(m.Slug, data()) }},
-		{"mode content", func() (string, error) { return s.renderModeContent(m, data()) }},
-		{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }},
 	}
+	// The mode's own regions, in its own order — one on a stub, four on MAP.
+	// The shell knows only that there are some and that Page puts them back
+	// together; which ones, and how many, is the mode's business.
+	for _, r := range modes.Registry[m.Slug].Regions {
+		out = append(out, region{
+			name:   m.Slug + "/" + r.ID,
+			render: func() (string, error) { return renderToString(r.Render(data())) },
+		})
+	}
+	out = append(out, region{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }})
+	return out
 }
+
+// modeRegionRange reports where a mode's own regions sit in the slice regions
+// returns, so the page can hand exactly those to Page and nothing else.
+func modeRegionRange(m mode.Mode) (first, count int) {
+	return shellRegionsBefore, len(modes.Registry[m.Slug].Regions)
+}
+
+// shellRegionsBefore is how many of the shell's own regions come before a
+// mode's. Engine status, save reports and the save footer, in that order.
+const shellRegionsBefore = 3
 
 // renderRegions renders a page's regions and the version stamp that identifies
 // them.
@@ -76,27 +96,28 @@ func (s *Server) renderRegions(m mode.Mode, data modes.Data) (templates.Regions,
 		_, _ = sum.Write([]byte{0})
 	}
 
+	first, count := modeRegionRange(m)
+	content, ok := modes.Registry[m.Slug]
+	if !ok {
+		return templates.Regions{}, "", fmt.Errorf("no content registered for mode %q", m.Slug)
+	}
+	// The page's mode content is assembled from the very bytes the stream would
+	// send, not rendered a second time from the same Data. Two renders that
+	// merely ought to agree is what the version stamp would then be asserting
+	// about, and the stamp is only worth having if it cannot be wrong.
+	modeContent, err := renderToString(
+		templates.ModeContentRegion(content.Page(rendered[first : first+count])))
+	if err != nil {
+		return templates.Regions{}, "", fmt.Errorf("assembling %s: %w", m.Slug, err)
+	}
+
 	return templates.Regions{
 		EngineStatus: rendered[0],
 		SaveReports:  rendered[1],
 		SaveFooter:   rendered[2],
-		ModeContent:  rendered[3],
-		SaveConfirm:  rendered[4],
+		ModeContent:  modeContent,
+		SaveConfirm:  rendered[len(rendered)-1],
 	}, strconv.FormatUint(sum.Sum64(), 16), nil
-}
-
-// renderModeContent renders the open mode. The selection it renders for comes
-// from the request's own query string — the page's, or the one the page put in
-// its stream subscription.
-//
-// It lives here rather than beside renderFooter and renderConfirmRegion because
-// it is the only region that has to look up which component to build.
-func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error) {
-	build, ok := modes.Registry[m.Slug]
-	if !ok {
-		return "", fmt.Errorf("no content registered for mode %q", m.Slug)
-	}
-	return renderToString(templates.ModeContentRegion(build(data)))
 }
 
 func renderToString(c templates.Component) (string, error) {

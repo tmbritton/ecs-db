@@ -20,7 +20,7 @@ func TestStubs_ExposeTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	for _, m := range mode.All {
 		t.Run(m.Slug, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := Registry[m.Slug](Data{}).Render(context.Background(), &buf); err != nil {
+			if err := Render(m.Slug, Data{}).Render(context.Background(), &buf); err != nil {
 				t.Fatalf("render: %v", err)
 			}
 			seen := map[string]int{}
@@ -115,7 +115,7 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	data.SelectedStateWarning = "Delete state idle? Nothing transitions into it."
 
 	var buf bytes.Buffer
-	if err := AgentsMode(data).Render(context.Background(), &buf); err != nil {
+	if err := Render("agents", data).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	assertModeTestIDs(t, buf.String(), []string{
@@ -130,7 +130,7 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	// The ones that only render in the other states, which no other test would
 	// notice going missing either.
 	var empty bytes.Buffer
-	if err := AgentsMode(inspectorFixture(t, "")).Render(context.Background(), &empty); err != nil {
+	if err := Render("agents", inspectorFixture(t, "")).Render(context.Background(), &empty); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	assertModeTestIDs(t, empty.String(), []string{"inspector-empty"})
@@ -138,7 +138,7 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	// 13-transition-inspector.spec.js selects on these.
 	transition := transitionFixture(t, guardedGo)
 	var edge bytes.Buffer
-	if err := AgentsMode(transition).Render(context.Background(), &edge); err != nil {
+	if err := Render("agents", transition).Render(context.Background(), &edge); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	assertModeTestIDs(t, edge.String(), []string{
@@ -152,7 +152,7 @@ func TestInspector_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 
 	notInitial := inspectorFixture(t, "state:combat")
 	var other bytes.Buffer
-	if err := AgentsMode(notInitial).Render(context.Background(), &other); err != nil {
+	if err := Render("agents", notInitial).Render(context.Background(), &other); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	assertModeTestIDs(t, other.String(), []string{"set-initial"})

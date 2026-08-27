@@ -2,71 +2,44 @@ package modes
 
 import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 
-// AgentsMode edits the project's behaviour machines.
-//
-// The left rail is what this project resolved and what the selected machine
-// seeds; the main column is the machine's identity and its statechart. The
-// inspector rail the prototype puts on the right arrives with Stories 6 and 7.
-templ AgentsMode(data Data) {
-	if !data.HasMachines {
-		@stub("AGENTS", "No project is open — see the log for why.", "")
-	} else {
-		<div class="schema" data-testid="agents-mode">
-			@machineList(data)
-			<div class="schema__main">
-				if data.Problem != "" {
-					<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
-				}
-				@projectProblems(data)
-				if data.SelectedMachine == "" {
-					@noMachines(data)
-				} else {
-					@machineEditor(data)
-				}
-			</div>
-		</div>
-	}
-}
 
-templ machineList(data Data) {
-	<nav class="schema__list" aria-label="Machines" data-testid="machine-list">
-		<div class="section-heading"><span>Machines ◂ behaviors/</span></div>
-		<p class="schema__hint mono">one XState file each</p>
-		for _, m := range data.Machines {
-			<a
-				href={ URL(machineHref(m.Path)) }
-				class={ "list-row", kv("list-row--active", m.Path == data.SelectedMachine) }
-				data-testid={ "machine-" + m.ID }
-				data-active={ boolAttr(m.Path == data.SelectedMachine) }
-				data-dirty={ boolAttr(data.DirtyMachines[m.Path]) }
-				if m.Path == data.SelectedMachine {
-					aria-current="true"
-				}
-			>
-				<span class="list-row__glyph" aria-hidden="true">◉</span>
-				<span class="list-row__label">{ m.ID }</span>
-				if data.DirtyMachines[m.Path] {
-					<span class="badge-problem" title="unsaved changes" data-testid={ "machine-dirty-" + m.ID }>●</span>
-				}
-				<span class="list-row__mod mono" data-testid={ "machine-mod-" + m.ID }>{ m.Mod }</span>
-				if m.Overrides {
-					<span
-						class="badge-override mono"
-						title={ overrideTitle(m) }
-						data-testid={ "machine-override-" + m.ID }
-					>override</span>
-				}
-			</a>
-		}
-		if len(data.Machines) > 0 {
-			@newMachineControl(data)
-		}
-		@contextManifest(data)
-		<p class="schema__foot">
-			A machine's identity is the <span class="mono">id</span> inside the file, not
-			its filename — an entity type's behaviour binding resolves through the id.
-		</p>
-	</nav>
+templ machineListBody(data Data) {
+	<div class="section-heading"><span>Machines ◂ behaviors/</span></div>
+	<p class="schema__hint mono">one XState file each</p>
+	for _, m := range data.Machines {
+		<a
+			href={ URL(machineHref(m.Path)) }
+			class={ "list-row", kv("list-row--active", m.Path == data.SelectedMachine) }
+			data-testid={ "machine-" + m.ID }
+			data-active={ boolAttr(m.Path == data.SelectedMachine) }
+			data-dirty={ boolAttr(data.DirtyMachines[m.Path]) }
+			if m.Path == data.SelectedMachine {
+				aria-current="true"
+			}
+		>
+			<span class="list-row__glyph" aria-hidden="true">◉</span>
+			<span class="list-row__label">{ m.ID }</span>
+			if data.DirtyMachines[m.Path] {
+				<span class="badge-problem" title="unsaved changes" data-testid={ "machine-dirty-" + m.ID }>●</span>
+			}
+			<span class="list-row__mod mono" data-testid={ "machine-mod-" + m.ID }>{ m.Mod }</span>
+			if m.Overrides {
+				<span
+					class="badge-override mono"
+					title={ overrideTitle(m) }
+					data-testid={ "machine-override-" + m.ID }
+				>override</span>
+			}
+		</a>
+	}
+	if len(data.Machines) > 0 {
+		@newMachineControl(data)
+	}
+	@contextManifest(data)
+	<p class="schema__foot">
+		A machine's identity is the <span class="mono">id</span> inside the file, not
+		its filename — an entity type's behaviour binding resolves through the id.
+	</p>
 }
 
 // newMachineControl asks which mod when there is a choice, rather than picking.

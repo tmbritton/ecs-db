@@ -153,7 +153,14 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
       status: (text.match(/ id="engine-status"/g) || []).length,
       saves: (text.match(/ id="save-reports"/g) || []).length,
       footer: (text.match(/ id="save-footer"/g) || []).length,
-      content: (text.match(/ id="mode-content"/g) || []).length,
+      // MAP's own four, since this page is /forge/map. The mode is patched
+      // through its regions rather than as one <main>, so what used to be a
+      // single "mode content" count is four — and the canvas being separable
+      // from the rest is the point of them.
+      list: (text.match(/ id="mode-list"/g) || []).length,
+      head: (text.match(/ id="map-head"/g) || []).length,
+      canvas: (text.match(/ id="map-canvas-region"/g) || []).length,
+      foot: (text.match(/ id="map-foot"/g) || []).length,
       confirm: (text.match(/ id="save-confirm"/g) || []).length,
       total: (text.match(/event: datastar-patch-elements/g) || []).length,
     };
@@ -162,12 +169,16 @@ test("an unchanged status is not re-patched every tick", async ({ page }) => {
   expect(frames.status, `engine status sent ${frames.status} times in ~6s`).toBe(1);
   expect(frames.saves, `save reports sent ${frames.saves} times in ~6s`).toBe(1);
   expect(frames.footer, `save footer sent ${frames.footer} times in ~6s`).toBe(1);
-  expect(frames.content, `mode content sent ${frames.content} times in ~6s`).toBe(1);
+  expect(frames.list, `the map list sent ${frames.list} times in ~6s`).toBe(1);
+  expect(frames.head, `the map head sent ${frames.head} times in ~6s`).toBe(1);
+  expect(frames.canvas, `the canvas sent ${frames.canvas} times in ~6s`).toBe(1);
+  expect(frames.foot, `the map foot sent ${frames.foot} times in ~6s`).toBe(1);
   expect(frames.confirm, `save confirmation sent ${frames.confirm} times in ~6s`).toBe(1);
-  // Five live regions, each sent once. The total is checked as well so a region
-  // added later without a counter here fails loudly — which is exactly how the
-  // save-confirmation region announced itself.
-  expect(frames.total, `${frames.total} patches in total`).toBe(5);
+  // Eight live regions, each sent once. The total is checked as well so a
+  // region added later without a counter here fails loudly — which is exactly
+  // how the save-confirmation region announced itself, and again how MAP's
+  // three-way split of its editor column did.
+  expect(frames.total, `${frames.total} patches in total`).toBe(8);
 });
 
 test("the readout is announced to assistive tech when it changes", async ({ page }) => {

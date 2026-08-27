@@ -262,7 +262,9 @@ test("nothing on the canvas moves between two renders", async ({ page }) => {
     return {
       // Anchored on the leading space: data-testid="mode-content" would
       // otherwise match too and report two patches where there was one.
-      content: (text.match(/ id="mode-content"/g) || []).length,
+      // The mode is patched as its regions now, not as one <main>. The chart
+      // lives in mode-main, which is the one worth counting here.
+      content: (text.match(/ id="mode-main"/g) || []).length,
       chart: (text.match(/data-testid="statechart"/g) || []).length,
     };
   }, stream);

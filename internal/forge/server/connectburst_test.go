@@ -227,3 +227,32 @@ func modesWithAndWithoutASelection() []struct {
 	}
 	return out
 }
+
+// Every region lands in its own slot, exactly once, in the whole document.
+//
+// The mode's own assembly is checked in modes/regions_test.go, but that cannot
+// see the shell — and the shell is where the slots can be crossed. Reading the
+// save confirmation out of a fixed index rather than the end of the slice puts
+// a mode region into the confirmation slot: the page then carries that id
+// twice, every patch for it lands on whichever comes first in the document, and
+// the region it displaced never appears at all. Nothing errors.
+func TestModePage_CarriesEveryRegionExactlyOnce(t *testing.T) {
+	srv, _ := pushServer(t)
+
+	for _, m := range mode.All {
+		_, body := get(t, srv, m.Path())
+
+		ids := []string{"engine-status", "save-reports", "save-footer", "save-confirm", "mode-content"}
+		for _, region := range modes.Registry[m.Slug].Regions {
+			ids = append(ids, region.ID)
+		}
+		for _, id := range ids {
+			// Anchored on the whitespace before the attribute: `data-testid="x"`
+			// ends with `id="x"`, so an unanchored count reports a test id as an
+			// element id and every one of these passes for the wrong reason.
+			if n := len(regexp.MustCompile(`\sid="`+regexp.QuoteMeta(id)+`"`).FindAllString(body, -1)); n != 1 {
+				t.Errorf("%s: id %q appears %d times in the page, want exactly 1", m.Slug, id, n)
+			}
+		}
+	}
+}

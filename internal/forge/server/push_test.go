@@ -333,7 +333,7 @@ func TestPageLoad_TellsTheOtherTabsItResetTheirSharedState(t *testing.T) {
 		t.Fatal("the second page rendered nothing")
 	}
 
-	f := awaitFrameWithin(t, ch, `data-testid="mode-content"`, "after a page load elsewhere", 2*time.Second)
+	f := awaitFrameWithin(t, ch, `id="mode-main"`, "after a page load elsewhere", 2*time.Second)
 	if strings.Contains(f, "the engine will not have that") {
 		t.Error("the refusal is still on the page after a load elsewhere cleared it server-side")
 	}

@@ -9,12 +9,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
+	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
 )
@@ -289,8 +291,8 @@ func TestModeEvents_DoesNotRepeatAnUnchangedStatus(t *testing.T) {
 					perElement["save-reports"]++
 				case strings.Contains(f, `id="save-footer"`):
 					perElement["save-footer"]++
-				case strings.Contains(f, `id="mode-content"`):
-					perElement["mode-content"]++
+				case matchedRegion(f) != "":
+					perElement[matchedRegion(f)]++
 				case strings.Contains(f, `id="save-confirm"`):
 					perElement["save-confirm"]++
 				default:
@@ -316,9 +318,15 @@ func TestModeEvents_DoesNotRepeatAnUnchangedStatus(t *testing.T) {
 		t.Errorf("save footer patched %d times over ~20 intervals with nothing changing, want 1",
 			perElement["save-footer"])
 	}
-	if perElement["mode-content"] != 1 {
-		t.Errorf("mode content patched %d times over ~20 intervals with nothing changing, want 1",
-			perElement["mode-content"])
+	// The mode is patched through its own regions now, not as one <main>. Which
+	// ones and how many is the mode's business — see modes.Registry — so they
+	// are read from there rather than written out here, where they would be a
+	// second copy to keep in step.
+	for _, region := range modes.Registry[mode.Default.Slug].Regions {
+		if perElement[region.ID] != 1 {
+			t.Errorf("%s patched %d times over ~20 intervals with nothing changing, want 1",
+				region.ID, perElement[region.ID])
+		}
 	}
 	if perElement["save-confirm"] != 1 {
 		t.Errorf("save confirmation patched %d times over ~20 intervals with nothing changing, want 1",
@@ -447,4 +455,22 @@ func TestModePage_RendersExistingSaveReports(t *testing.T) {
 			t.Errorf("the served page does not show the existing report (%q missing)", want)
 		}
 	}
+}
+
+// matchedRegion names the mode region a frame patched, or "" if it patched
+// something else. Read from the registry so that a mode gaining a region does
+// not silently start counting as "unrecognised".
+func matchedRegion(frame string) string {
+	for _, content := range modes.Registry {
+		for _, region := range content.Regions {
+			// Anchored on the whitespace before the attribute, like every other
+			// id match in this suite: `data-testid="x"` ends with `id="x"`. No
+			// test id collides with a region id today, and one named after a
+			// region would silently misattribute every frame.
+			if regexp.MustCompile(`\sid="` + regexp.QuoteMeta(region.ID) + `"`).MatchString(frame) {
+				return region.ID
+			}
+		}
+	}
+	return ""
 }

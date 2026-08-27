@@ -1,0 +1,221 @@
+package modes
+
+// The region wrappers. Each carries the id the SSE stream patches, and each is
+// rendered in every state its mode can be in — including "no project is open",
+// which is a state a mode can leave and re-enter without a reload.
+//
+// The id is always there; the data-testid is not. They answer different
+// questions. The id is where a patch lands, and it has to exist before there is
+// anything to put in it. The test id says "there is a component list here",
+// which with no project open would be a lie — and the browser suite selects on
+// it precisely to find out.
+//
+// The pages below are assembled from regions already rendered rather than from
+// the Data behind them, so that a full page load and a stream patch cannot
+// drift apart. See Content.
+
+// twoPanePage is the shape of every mode but MAP: a list rail and an editor
+// panel, side by side.
+templ twoPanePage(testid string, rendered []string) {
+	<div class="schema" data-testid={ testid }>
+		for _, html := range rendered {
+			@templ.Raw(html)
+		}
+	</div>
+}
+
+// --- SCHEMA ---
+
+templ SchemaListRegion(data Data) {
+	<nav
+		id="mode-list"
+		class="schema__list"
+		if data.HasSession {
+			aria-label="Components"
+			data-testid="component-list"
+		}
+	>
+		if data.HasSession {
+			@componentListBody(data, selectComponent(data.Schema, data.Selected))
+		}
+	</nav>
+}
+
+templ SchemaMainRegion(data Data) {
+	<div id="mode-main" class="schema__main">
+		if !data.HasSession {
+			@stub("SCHEMA", "No project is open — see the log for why.", "")
+		} else {
+			{{ selected := selectComponent(data.Schema, data.Selected) }}
+			@fileProblemsPanel(data)
+			if selected == "" {
+				<div class="schema__empty" data-testid="schema-empty">
+					<p>This schema declares no components yet.</p>
+				</div>
+			} else {
+				@componentEditor(data, selected)
+			}
+			@migrationPanel(data)
+		}
+	</div>
+}
+
+// --- ENTS ---
+
+templ EntsListRegion(data Data) {
+	<nav
+		id="mode-list"
+		class="schema__list"
+		if data.HasSession {
+			aria-label="Entity types"
+			data-testid="type-list"
+		}
+	>
+		if data.HasSession {
+			@entityTypeListBody(data, selectEntityType(data.Schema, data.Selected))
+		}
+	</nav>
+}
+
+templ EntsMainRegion(data Data) {
+	<div id="mode-main" class="schema__main">
+		if !data.HasSession {
+			@stub("ENTS", "No project is open — see the log for why.", "")
+		} else {
+			{{ selected := selectEntityType(data.Schema, data.Selected) }}
+			@fileProblemsPanel(data)
+			if selected == "" {
+				<div class="schema__empty" data-testid="ents-empty">
+					<p>This schema declares no entity types yet.</p>
+				</div>
+			} else {
+				@entityTypeEditor(data, selected)
+			}
+		}
+	</div>
+}
+
+// --- AGENTS ---
+
+templ AgentsListRegion(data Data) {
+	<nav
+		id="mode-list"
+		class="schema__list"
+		if data.HasMachines {
+			aria-label="Machines"
+			data-testid="machine-list"
+		}
+	>
+		if data.HasMachines {
+			@machineListBody(data)
+		}
+	</nav>
+}
+
+templ AgentsMainRegion(data Data) {
+	<div id="mode-main" class="schema__main">
+		if !data.HasMachines {
+			@stub("AGENTS", "No project is open — see the log for why.", "")
+		} else {
+			if data.Problem != "" {
+				<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+			}
+			@projectProblems(data)
+			if data.SelectedMachine == "" {
+				@noMachines(data)
+			} else {
+				@machineEditor(data)
+			}
+		}
+	</div>
+}
+
+// --- MAP ---
+
+// mapPage is MAP's own assembly, because its right-hand side is three regions
+// rather than one, sharing a column. The wrappers between them are static, so
+// they live here rather than inside any region.
+templ mapPage(list, head, canvas, foot string) {
+	<div class="schema" data-testid="map-mode">
+		@templ.Raw(list)
+		<div class="schema__main">
+			<div class="map-editor" data-testid="map-editor">
+				@templ.Raw(head)
+				@templ.Raw(canvas)
+				@templ.Raw(foot)
+			</div>
+		</div>
+	</div>
+}
+
+templ MapListRegion(data Data) {
+	<nav
+		id="mode-list"
+		class="schema__list"
+		if data.HasMaps {
+			aria-label="Maps"
+			data-testid="map-list"
+		}
+	>
+		if data.HasMaps {
+			@mapListBody(data)
+		}
+	</nav>
+}
+
+// MapHeadRegion is everything above the canvas: the refusal banner, the map's
+// problems, which file is open, and the toolbar. All of it small, all of it
+// changing far more often than the three hundred cells below it.
+templ MapHeadRegion(data Data) {
+	<div id="map-head" class="map-head">
+		if !data.HasMaps {
+			@stub("MAP", "No project is open — see the log for why.", "")
+		} else {
+			if data.Problem != "" {
+				<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
+			}
+			@mapProblems(data)
+			if len(data.Maps) == 0 {
+				@noMaps(data)
+			} else {
+				<header class="schema__editor-head">
+					<h2 class="schema__title" data-testid="map-title">{ fileName(data.SelectedMap) }</h2>
+					<p class="schema__path mono" data-testid="map-path">{ data.SelectedMap }</p>
+				</header>
+				@mapToolbar(data)
+			}
+		}
+	</div>
+}
+
+templ MapCanvasRegion(data Data) {
+	<div id="map-canvas-region" class="map-canvas-region">
+		if data.HasMaps && len(data.Maps) > 0 {
+			@mapCanvas(data)
+		}
+	</div>
+}
+
+templ MapFootRegion(data Data) {
+	<div id="map-foot" class="map-foot">
+		if data.HasMaps && len(data.Maps) > 0 {
+			@mapStatus(data)
+			<p class="schema__foot">
+				A saved map takes effect on the next <span class="mono">ecs-db run</span>.
+				The engine watches behaviour files and sprite assets; it does not watch maps.
+			</p>
+		}
+	</div>
+}
+
+// --- stubs ---
+
+templ EmptyListRegion() {
+	<nav id="mode-list" class="schema__list" aria-label="Nothing to list"></nav>
+}
+
+templ StubMainRegion(caption, summary, epic string) {
+	<div id="mode-main" class="schema__main">
+		@stub(caption, summary, epic)
+	</div>
+}

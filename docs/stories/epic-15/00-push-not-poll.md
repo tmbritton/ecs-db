@@ -1,7 +1,7 @@
 # Story 0: Push, not poll
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🚧 In progress — the bus and the connect burst are done; regions, MAP's links and view transitions are not  
+**Status:** 🚧 In progress — the bus, the connect burst and the region split are done; MAP's links and view transitions are not  
 **Priority:** Highest — every later story lands on this architecture
 
 **Depends on:** Story 3
@@ -61,9 +61,9 @@ afterwards.
       bus empty, because a leaked subscriber degrades into a save that waits
       `PublishTimeout` per abandoned tab rather than into a visible break
 - [x] A burst of events causes one re-render, not one per event
-- [ ] An interaction patches only the region it changed; the canvas is not
+- [x] An interaction patches only the region it changed; the canvas is not
       touched unless the canvas changed
-- [ ] Region ids are present on every render of a mode, including the
+- [x] Region ids are present on every render of a mode, including the
       no-project stub — an id that appears and disappears is an id a patch
       cannot target
 - [x] The database is opened once per poll interval for the whole server, not

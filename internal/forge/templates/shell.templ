@@ -18,8 +18,10 @@ import (
 // the page it is attached to already holds these exact bytes, and "these exact
 // bytes" is only checkable if both sides produced them the same way.
 //
-// Each string carries its own wrapper element with the id the stream patches —
-// see renderRegions — which is why they are emitted here bare.
+// Each string arrives with its own wrapper element already around it, which is
+// why they are emitted here bare. For four of the five that wrapper carries the
+// id the stream patches; ModeContent's is the <main> the mode's own regions sit
+// inside, and the stream patches those rather than it.
 type Regions struct {
 	EngineStatus string
 	SaveReports  string
@@ -123,8 +125,10 @@ templ SaveConfirmRegion(confirm Component) {
 	</div>
 }
 
-// ModeContentRegion is the element the stream patches when a mode's content
-// changes. Without it an edit only appears on the next full page load.
+// ModeContentRegion is the <main> a mode's content is delivered in on a page
+// load. The stream does not patch it — a mode is patched through its own
+// regions, which sit inside this — so it is a wrapper and a layout anchor
+// rather than a target.
 templ ModeContentRegion(content Component) {
 	<main id="mode-content" class="shell__content" data-testid="mode-content">
 		@content

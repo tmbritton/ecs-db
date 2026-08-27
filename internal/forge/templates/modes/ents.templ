@@ -2,66 +2,39 @@ package modes
 
 import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 
-// EntsMode edits the entity-types half of schema.json.
-//
-// Deliberately the same shape as SCHEMA — list in authored order, selection in
-// the URL, edits through the shared session — because they are two halves of
-// one file and two idioms for editing it would be one too many.
-templ EntsMode(data Data) {
-	if !data.HasSession {
-		@stub("ENTS", "No project is open — see the log for why.", "")
-	} else {
-		{{ selected := selectEntityType(data.Schema, data.Selected) }}
-		<div class="schema" data-testid="ents-mode">
-			@entityTypeList(data, selected)
-			<div class="schema__main">
-				@fileProblemsPanel(data)
-				if selected == "" {
-					<div class="schema__empty" data-testid="ents-empty">
-						<p>This schema declares no entity types yet.</p>
-					</div>
-				} else {
-					@entityTypeEditor(data, selected)
-				}
-			</div>
-		</div>
-	}
-}
 
-templ entityTypeList(data Data, selected string) {
-	<nav class="schema__list" aria-label="Entity types" data-testid="type-list">
-		<div class="section-heading"><span>Entity types</span></div>
-		<p class="schema__hint mono">a contract, not a table</p>
-		for _, name := range entityTypeNames(data.Schema) {
-			<a
-				href={ URL(entityTypeHref(name)) }
-				class={ "list-row", kv("list-row--active", name == selected) }
-				data-testid={ "type-" + name }
-				data-active={ boolAttr(name == selected) }
-				data-problem={ boolAttr(hasProblems(data, ownerEntityType, name)) }
-				if name == selected {
-					aria-current="true"
-				}
-			>
-				<span class="list-row__glyph" aria-hidden="true">♟</span>
-				<span class="list-row__label">{ name }</span>
-				if data.Schema.EntityTypes[name].Behavior != "" {
-					<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
-				}
-				@problemBadge(data, ownerEntityType, name)
-			</a>
-		}
-		<button
-			type="button"
-			class="btn--dashed schema__add"
-			data-testid="add-type"
-			data-on:click={ action("/forge/ents/type", "add", "NewType") }
-		>+ NEW ENTITY TYPE</button>
-		<p class="schema__foot">
-			Components live in the SCHEMA tab — both halves of
-			<span class="mono">schema.json</span>
-		</p>
-	</nav>
+templ entityTypeListBody(data Data, selected string) {
+	<div class="section-heading"><span>Entity types</span></div>
+	<p class="schema__hint mono">a contract, not a table</p>
+	for _, name := range entityTypeNames(data.Schema) {
+		<a
+			href={ URL(entityTypeHref(name)) }
+			class={ "list-row", kv("list-row--active", name == selected) }
+			data-testid={ "type-" + name }
+			data-active={ boolAttr(name == selected) }
+			data-problem={ boolAttr(hasProblems(data, ownerEntityType, name)) }
+			if name == selected {
+				aria-current="true"
+			}
+		>
+			<span class="list-row__glyph" aria-hidden="true">♟</span>
+			<span class="list-row__label">{ name }</span>
+			if data.Schema.EntityTypes[name].Behavior != "" {
+				<span class="badge-ctx" title="binds a behaviour machine">ƒ</span>
+			}
+			@problemBadge(data, ownerEntityType, name)
+		</a>
+	}
+	<button
+		type="button"
+		class="btn--dashed schema__add"
+		data-testid="add-type"
+		data-on:click={ action("/forge/ents/type", "add", "NewType") }
+	>+ NEW ENTITY TYPE</button>
+	<p class="schema__foot">
+		Components live in the SCHEMA tab — both halves of
+		<span class="mono">schema.json</span>
+	</p>
 }
 
 templ entityTypeEditor(data Data, name string) {

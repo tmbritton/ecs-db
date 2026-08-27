@@ -893,6 +893,19 @@ option:disabled {
   min-height: 0;
 }
 
+/* A list rail with nothing in it takes no space and is not a landmark.
+   
+   The element itself stays in the document, because it is a patch target and a
+   patch needs something to land on — a mode goes from "no project open" to a
+   populated rail without a page load, and an id that only appears once there is
+   something to put in it is an id the first patch misses. So it is hidden
+   rather than omitted: `display: none` costs it its 212px panel, its border and
+   its place in the accessibility tree, all of which would otherwise show as an
+   empty grey column beside every stub mode. */
+.schema__list:empty {
+  display: none;
+}
+
 .schema__list {
   width: 212px;
   flex: none;
@@ -2434,6 +2447,16 @@ option:disabled {
   min-width: 0;
   gap: 8px;
   padding: 10px 14px 0;
+}
+
+/* The three elements the map's right-hand column is patched through. They exist
+   to be addressed, not to be seen: `display: contents` lifts their children
+   into .map-editor's flex column exactly as if the wrappers were not there, so
+   splitting the column into separate patch targets changed no pixel of it. */
+.map-head,
+.map-canvas-region,
+.map-foot {
+  display: contents;
 }
 
 .map-toolbar {

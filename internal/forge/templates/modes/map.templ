@@ -1,77 +1,43 @@
 package modes
 
-// MapMode is the map editor.
-//
-// The left rail is what the project holds: its maps, the layers of the one on
-// screen, and the tiles its tilesets offer. The main column draws that map.
-//
-// Everything here is server-rendered and patched down the page stream, and every
-// selection — which map, which layers are drawn, which layer a stroke lands on,
-// which tile is in hand — is in the URL. So it survives a reload, it can be
-// linked, and the routes that paint read it from the request rather than from
-// state the server has to keep per browser.
-//
-// The inspector rail the prototype puts on the right arrives with Story 7.
-templ MapMode(data Data) {
-	if !data.HasMaps {
-		@stub("MAP", "No project is open — see the log for why.", "")
-	} else {
-		<div class="schema" data-testid="map-mode">
-			@mapList(data)
-			<div class="schema__main">
-				if data.Problem != "" {
-					<p class="schema__problem" role="alert" data-testid="edit-problem">{ data.Problem }</p>
-				}
-				@mapProblems(data)
-				if len(data.Maps) == 0 {
-					@noMaps(data)
-				} else {
-					@mapEditor(data)
-				}
-			</div>
-		</div>
-	}
-}
 
-templ mapList(data Data) {
-	<nav class="schema__list" aria-label="Maps" data-testid="map-list">
-		<div class="section-heading"><span>Maps ◂ game.toml</span></div>
-		<p class="schema__hint mono">one Tiled level each</p>
-		for _, m := range data.Maps {
-			<a
-				href={ URL(data.MapView.WithMap(m.Path).Href()) }
-				class={ "list-row", kv("list-row--active", m.Path == data.SelectedMap) }
-				data-testid={ "map-" + m.Name }
-				data-active={ boolAttr(m.Path == data.SelectedMap) }
-				data-dirty={ boolAttr(data.DirtyMaps[m.Path]) }
-				data-configured={ boolAttr(m.Configured) }
-				if m.Path == data.SelectedMap {
-					aria-current="true"
-				}
-			>
-				<span class="list-row__glyph" aria-hidden="true">🗺</span>
-				<span class="list-row__label">{ m.Name }</span>
-				if data.DirtyMaps[m.Path] {
-					<span class="badge-problem" title="unsaved changes" data-testid={ "map-dirty-" + m.Name }>●</span>
-				}
-				if m.Configured {
-					<span
-						class="badge-override mono"
-						title="the map game.toml names — the one ecs-db run loads"
-						data-testid={ "map-configured-" + m.Name }
-					>loaded</span>
-				}
-			</a>
-		}
-		<p class="schema__hint">
-			Only the map marked <span class="mono">loaded</span> is the one
-			<span class="mono">ecs-db run</span> reads.
-		</p>
-		if data.SelectedMap != "" {
-			@mapLayers(data)
-			@mapPalette(data)
-		}
-	</nav>
+templ mapListBody(data Data) {
+	<div class="section-heading"><span>Maps ◂ game.toml</span></div>
+	<p class="schema__hint mono">one Tiled level each</p>
+	for _, m := range data.Maps {
+		<a
+			href={ URL(data.MapView.WithMap(m.Path).Href()) }
+			class={ "list-row", kv("list-row--active", m.Path == data.SelectedMap) }
+			data-testid={ "map-" + m.Name }
+			data-active={ boolAttr(m.Path == data.SelectedMap) }
+			data-dirty={ boolAttr(data.DirtyMaps[m.Path]) }
+			data-configured={ boolAttr(m.Configured) }
+			if m.Path == data.SelectedMap {
+				aria-current="true"
+			}
+		>
+			<span class="list-row__glyph" aria-hidden="true">🗺</span>
+			<span class="list-row__label">{ m.Name }</span>
+			if data.DirtyMaps[m.Path] {
+				<span class="badge-problem" title="unsaved changes" data-testid={ "map-dirty-" + m.Name }>●</span>
+			}
+			if m.Configured {
+				<span
+					class="badge-override mono"
+					title="the map game.toml names — the one ecs-db run loads"
+					data-testid={ "map-configured-" + m.Name }
+				>loaded</span>
+			}
+		</a>
+	}
+	<p class="schema__hint">
+		Only the map marked <span class="mono">loaded</span> is the one
+		<span class="mono">ecs-db run</span> reads.
+	</p>
+	if data.SelectedMap != "" {
+		@mapLayers(data)
+		@mapPalette(data)
+	}
 }
 
 // Two states leave the strip empty and they read differently: a project with no
@@ -95,21 +61,6 @@ templ noMaps(data Data) {
 	}
 }
 
-templ mapEditor(data Data) {
-	<div class="map-editor" data-testid="map-editor">
-		<header class="schema__editor-head">
-			<h2 class="schema__title" data-testid="map-title">{ fileName(data.SelectedMap) }</h2>
-			<p class="schema__path mono" data-testid="map-path">{ data.SelectedMap }</p>
-		</header>
-		@mapToolbar(data)
-		@mapCanvas(data)
-		@mapStatus(data)
-		<p class="schema__foot">
-			A saved map takes effect on the next <span class="mono">ecs-db run</span>.
-			The engine watches behaviour files and sprite assets; it does not watch maps.
-		</p>
-	</div>
-}
 
 // The source lens is the spine of the mode: it decides what the canvas and the
 // inspector are looking at. Only AUTHORED exists — LIVE and REPLAY read a
