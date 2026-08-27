@@ -623,6 +623,13 @@ This epic's stated engine touchpoint was "Epic 14's TMX writer path". **There is
 
 Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds by entity *type* from `schema.json` and no object property feeds it, so the prototype's per-spawn dropdown would write a value nothing reads. And saving a map does not hot-reload: the watcher watches behaviours directories, `animations.toml` and the sprites directory, so a map takes effect on the next `ecs-db run`. See the epic README.
 
+- [ ] **Push, not poll** — Mutations publish to an event bus and the open pages are told immediately, instead of finding out on the next tick of a two-second poll. In progress: the bus and the redundant connect burst are done; region granularity, MAP's remaining page loads and view transitions are not.
+  - Measured before changing anything: the server answered in 2–9ms while an edit took ~1s on average to appear, because nothing pushed — every mutation route answered 204 and waited for a timer
+  - Every navigation rendered the page twice: the browser parsed 79KB and the stream then morphed `<main>` into a byte-identical copy of itself (76.5KB). A page that has just rendered now receives nothing
+  - The bus is copied from `pkg/eventbus` in `tmbritton/fancykaraoke-go` to stay source-compatible until it is extracted into a shared library. Its `Publish` deadlocks on the subscriber after a slow one, via the pre-Go-1.23 timer drain; it also had no `Unsubscribe`, which Forge needs because it subscribes once per page load
+  - Found by review: loading a page resets three fields every *other* page renders, and is a GET, so it was the one mutation that told nobody — leaving a second tab's save confirmation on screen with buttons that no longer did anything
+  - Found by review: the poll had been acting as a file watcher by accident, so removing it stopped Forge noticing a map added by Tiled or a `schema.json` rewritten by git. The poller now fingerprints the project's files deliberately
+
 - [x] **TMX writer & round-trip fidelity** — A writer that preserves everything Forge does not model, byte-for-byte, and maintains `nextobjectid` so an id is never reused.
   - A copy-on-write tree, not an emitter: every element keeps its source bytes and is written verbatim unless an edit reached it, so what this package does not model survives without it knowing the thing exists
   - Painting one cell of the shipped level changes exactly one line of the file, comment and all

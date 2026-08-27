@@ -29,8 +29,32 @@ func renderShellWith(t *testing.T, active mode.Mode, engine status.Status) strin
 		_, err := io.WriteString(w, "<p>STUB-CONTENT</p>")
 		return err
 	})
-	if err := Shell(active, "", engine, nil, NoFooter(), body, nil).Render(context.Background(), &buf); err != nil {
+	if err := Shell(active, "", shellRegions(t, engine, nil, body)).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render shell: %v", err)
+	}
+	return buf.String()
+}
+
+// shellRegions renders the regions Shell now takes pre-rendered, through the
+// same wrappers the server renders them through — so a test still exercises the
+// ids and elements a patch has to target, rather than bare fragments the real
+// page would never contain.
+func shellRegions(t *testing.T, engine status.Status, reports []components.SaveReportView, body templ.Component) Regions {
+	t.Helper()
+	return Regions{
+		EngineStatus: renderToString(t, components.EngineStatus(components.EngineStatusProps{Status: engine})),
+		SaveReports:  renderToString(t, components.SaveReports(components.SaveReportsProps{Reports: reports})),
+		SaveFooter:   renderToString(t, SaveFooterRegion(NoFooter())),
+		ModeContent:  renderToString(t, ModeContentRegion(body)),
+		SaveConfirm:  renderToString(t, SaveConfirmRegion(nil)),
+	}
+}
+
+func renderToString(t *testing.T, c templ.Component) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := c.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
 	}
 	return buf.String()
 }
@@ -143,7 +167,7 @@ func TestShell_RendersTheReportsItIsGiven(t *testing.T) {
 		Outcome:  savereport.OutcomeRejected,
 		Problems: []string{"unknown action alpha"},
 	}}}
-	if err := Shell(mode.Default, "", status.Status{}, reports, NoFooter(), body, nil).Render(context.Background(), &buf); err != nil {
+	if err := Shell(mode.Default, "", shellRegions(t, status.Status{}, reports, body)).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	for _, want := range []string{"goblin.json", "unknown action alpha"} {

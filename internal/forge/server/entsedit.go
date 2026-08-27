@@ -16,11 +16,11 @@ import (
 // stream it already holds, and saving stays a separate act.
 
 func (s *Server) registerEntsEditRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /forge/ents/type", sameOriginOnly(s.handleTypeEdit))
-	mux.HandleFunc("POST /forge/ents/behavior", sameOriginOnly(s.handleTypeBehaviorEdit))
-	mux.HandleFunc("POST /forge/ents/validation", sameOriginOnly(s.handleValidationEdit))
-	mux.HandleFunc("POST /forge/ents/extras", sameOriginOnly(s.handleExtrasEdit))
-	mux.HandleFunc("POST /forge/ents/component", sameOriginOnly(s.handleTypeComponentEdit))
+	mux.HandleFunc("POST /forge/ents/type", s.sameOriginOnly(s.handleTypeEdit))
+	mux.HandleFunc("POST /forge/ents/behavior", s.sameOriginOnly(s.handleTypeBehaviorEdit))
+	mux.HandleFunc("POST /forge/ents/validation", s.sameOriginOnly(s.handleValidationEdit))
+	mux.HandleFunc("POST /forge/ents/extras", s.sameOriginOnly(s.handleExtrasEdit))
+	mux.HandleFunc("POST /forge/ents/component", s.sameOriginOnly(s.handleTypeComponentEdit))
 }
 
 func (s *Server) handleTypeEdit(w http.ResponseWriter, r *http.Request) {

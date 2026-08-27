@@ -195,11 +195,21 @@ test("half-typing a number does not delete the value that was there", async ({
   // Mid-way through typing 1e5.
   await amount.fill("1e");
   await amount.blur();
-  await page.waitForTimeout(2500);
-  // The value is untouched and the refusal says why, rather than the parameter
-  // quietly disappearing.
-  expect(firstAction(await saved(page, baseURL), "resting").params.amount).toBe(5);
+
+  // The refusal is asserted before the file, and the order is load-bearing:
+  // saved() is not a read. It POSTs /forge/agents/save, and a save that
+  // succeeds clears the refusal — so reading the file first destroys the thing
+  // the next line is looking for.
+  //
+  // That used to be invisible. The clearing reached the browser on the next
+  // two-second poll, which was after this assertion had already run, so the
+  // test passed against a DOM that was two seconds out of date. Now that an
+  // edit is pushed the moment it happens, a stale DOM is no longer available to
+  // hide behind.
   await expect(byTestId(page, "edit-problem")).toContainText("amount takes a number");
+
+  // And the value is untouched, rather than the parameter quietly disappearing.
+  expect(firstAction(await saved(page, baseURL), "resting").params.amount).toBe(5);
 
   // And finishing the number works.
   await amount.fill("1e5");

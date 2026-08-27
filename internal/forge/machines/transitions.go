@@ -53,7 +53,7 @@ func (s *Session) GuardCatalogue() []agent.GuardMeta {
 // A function over a definition and not a Session method, deliberately. Every
 // Session.Read clones by emitting and re-parsing the whole machine, so asking
 // the session for this on a page that already holds the definition would
-// serialise and re-parse it a second time every stream tick — and build the
+// serialise and re-parse it a second time on every stream render — and build the
 // dropdown from a different snapshot than the chart beside it.
 func StateTargets(def *agent.MachineDefinition) []string {
 	if def == nil {

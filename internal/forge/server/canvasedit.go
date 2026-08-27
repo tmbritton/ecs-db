@@ -4,9 +4,10 @@ package server
 // set-initial, and the right-click menu that offers most of them.
 //
 // Each one answers 204 and lets the page stream redraw, exactly as every other
-// machine edit does. That means a change is on screen within one tick rather
-// than in the response — the cost of having one place that renders the mode
-// rather than a renderer in every handler.
+// machine edit does. The change arrives on the stream rather than in the
+// response — one place that renders the mode, rather than a renderer in every
+// handler — and the route publishes on its way out, so "on the stream" means
+// within a few milliseconds rather than whenever a timer next came round.
 
 import (
 	"fmt"
@@ -26,10 +27,10 @@ import (
 )
 
 func (s *Server) registerCanvasRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /forge/agents/state", sameOriginOnly(s.handleStateEdit))
-	mux.HandleFunc("POST /forge/agents/transition", sameOriginOnly(s.handleTransitionEdit))
-	mux.HandleFunc("POST /forge/agents/action", sameOriginOnly(s.handleActionEdit))
-	mux.HandleFunc("POST /forge/agents/menu", sameOriginOnly(s.handleCanvasMenu))
+	mux.HandleFunc("POST /forge/agents/state", s.sameOriginOnly(s.handleStateEdit))
+	mux.HandleFunc("POST /forge/agents/transition", s.sameOriginOnly(s.handleTransitionEdit))
+	mux.HandleFunc("POST /forge/agents/action", s.sameOriginOnly(s.handleActionEdit))
+	mux.HandleFunc("POST /forge/agents/menu", s.sameOriginOnly(s.handleCanvasMenu))
 }
 
 // handleStateEdit dispatches on which parameter is present, the same shape as

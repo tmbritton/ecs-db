@@ -4,25 +4,41 @@ import (
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
-	"github.com/tmbritton/ecs-db/internal/forge/status"
-	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 )
 
 // Shell is the frame every Forge page is delivered in: menu bar across the
 // top, mode rail down the left, and the active mode's content filling the
 // rest. It knows nothing about what any mode contains — it renders the
 // component it is handed.
-templ Shell(active mode.Mode, streamQuery string, engine status.Status, saves []components.SaveReportView, footer Component, content Component, confirm Component) {
+// Regions is a page's patchable areas, already rendered to HTML.
+//
+// Already rendered, rather than components to render here, so that a page and
+// the SSE stream that follows it go through *one* render path instead of two
+// that have to be kept agreeing by hand. The stream skips its first send when
+// the page it is attached to already holds these exact bytes, and "these exact
+// bytes" is only checkable if both sides produced them the same way.
+//
+// Each string carries its own wrapper element with the id the stream patches —
+// see renderRegions — which is why they are emitted here bare.
+type Regions struct {
+	EngineStatus string
+	SaveReports  string
+	SaveFooter   string
+	ModeContent  string
+	SaveConfirm  string
+}
+
+templ Shell(active mode.Mode, streamQuery string, r Regions) {
 	@Layout("Forge — " + active.Title) {
 		<div class="shell" data-testid="shell" data-init={ eventStream(active, streamQuery) }>
-			@menuBar(engine)
+			@menuBar(r.EngineStatus)
 			<div class="shell__body">
 				@modeRail(active)
-				@ModeContentRegion(content)
-				@SaveFooterRegion(footer)
-				@components.SaveReports(components.SaveReportsProps{Reports: saves})
+				@templ.Raw(r.ModeContent)
+				@templ.Raw(r.SaveFooter)
+				@templ.Raw(r.SaveReports)
 			</div>
-			@SaveConfirmRegion(confirm)
+			@templ.Raw(r.SaveConfirm)
 		</div>
 	}
 }
@@ -31,7 +47,7 @@ templ Shell(active mode.Mode, streamQuery string, engine status.Status, saves []
 // disabled buttons rather than spans styled to look clickable: a disabled
 // button reports its state to a screen reader, and cannot be tabbed to and
 // pressed to no effect.
-templ menuBar(engine status.Status) {
+templ menuBar(engineStatus string) {
 	<div class="menubar" data-testid="menubar">
 		<span class="menubar__wordmark" data-testid="wordmark">⚒ FORGE</span>
 		for _, label := range menuLabels {
@@ -43,7 +59,7 @@ templ menuBar(engine status.Status) {
 			>{ label }</button>
 		}
 		<div class="menubar__status">
-			@components.EngineStatus(components.EngineStatusProps{Status: engine})
+			@templ.Raw(engineStatus)
 		</div>
 	</div>
 }

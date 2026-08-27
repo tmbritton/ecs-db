@@ -22,11 +22,11 @@ import (
 // stream it already holds; saving is a separate, deliberate act.
 
 func (s *Server) registerSchemaEditRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /forge/schema/version", sameOriginOnly(s.handleBumpVersion))
-	mux.HandleFunc("POST /forge/schema/component", sameOriginOnly(s.handleComponentEdit))
-	mux.HandleFunc("POST /forge/schema/shape", sameOriginOnly(s.handleShapeEdit))
-	mux.HandleFunc("POST /forge/schema/behavior", sameOriginOnly(s.handleBehaviorEdit))
-	mux.HandleFunc("POST /forge/schema/field", sameOriginOnly(s.handleFieldEdit))
+	mux.HandleFunc("POST /forge/schema/version", s.sameOriginOnly(s.handleBumpVersion))
+	mux.HandleFunc("POST /forge/schema/component", s.sameOriginOnly(s.handleComponentEdit))
+	mux.HandleFunc("POST /forge/schema/shape", s.sameOriginOnly(s.handleShapeEdit))
+	mux.HandleFunc("POST /forge/schema/behavior", s.sameOriginOnly(s.handleBehaviorEdit))
+	mux.HandleFunc("POST /forge/schema/field", s.sameOriginOnly(s.handleFieldEdit))
 }
 
 // sameOriginOnly refuses a cross-site write before the handler looks at
@@ -36,13 +36,29 @@ func (s *Server) registerSchemaEditRoutes(mux *http.ServeMux) {
 // before argument dispatch, or a malformed cross-origin request gets a 400
 // about its arguments instead of a 403 about where it came from — which is a
 // confusing answer and one bad refactor away from being no answer at all.
-func sameOriginOnly(next http.HandlerFunc) http.HandlerFunc {
+func (s *Server) sameOriginOnly(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !sameOrigin(r) {
 			http.Error(w, "cross-origin write refused", http.StatusForbidden)
 			return
 		}
+		// Deferred, not sequential: net/http recovers a handler panic, so a
+		// handler that mutated and then panicked would leave the change made
+		// and nobody told. That used to heal on the next poll; now it would be
+		// permanent.
+		defer s.publish(eventTypeFor(r.URL.Path))
 		next(w, r)
+
+		// Every mutation route goes through here and nothing else does, which
+		// is why the push lives here rather than in the handlers. Twenty-four
+		// handlers each remembering to publish is twenty-four chances to
+		// forget, and the symptom of forgetting — a control that works but
+		// whose result does not appear until you touch something else — is one
+		// nobody reports as a missing publish.
+		//
+		// Unconditionally, including when the handler refused the edit: a
+		// refusal sets the problem the panel renders, so it changed the page
+		// just as much as a success did.
 	}
 }
 
@@ -59,8 +75,8 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, fn func(*schema.Da
 	if err := sess.Edit(fn); err != nil {
 		// A rejected edit is a message for the user, not a server failure: it
 		// means what they asked for is not a legal schema. It is recorded so
-		// the mode can render the reason on the next stream tick — a control
-		// that silently does nothing teaches you it is broken.
+		// the mode renders the reason the moment the route publishes — a
+		// control that silently does nothing teaches you it is broken.
 		//
 		// 204 rather than 422: the outcome travels on the stream like every
 		// other change, and a 4xx here would surface in the browser console as

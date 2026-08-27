@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -623,13 +624,22 @@ func TestMapCanvas_LinksKeepTheRestOfTheView(t *testing.T) {
 func TestMapCanvas_TwoRendersOfAnUnchangedMapAreIdentical(t *testing.T) {
 	srv, _, _, configured := mapServer(t)
 	at := "/forge/map?map=" + url.QueryEscape(configured) + "&tile=1"
-	first := mapPage(t, srv, at)
+	first := withoutStamp(mapPage(t, srv, at))
 	for i := 0; i < 4; i++ {
-		if got := mapPage(t, srv, at); got != first {
+		if got := withoutStamp(mapPage(t, srv, at)); got != first {
 			t.Fatalf("render %d differs from the first", i+2)
 		}
 	}
 }
+
+// withoutStamp removes the one thing in a page that is *supposed* to differ
+// between two loads: the single-use stamp its stream presents to prove it
+// already holds this render. Everything else being identical is the property
+// worth having — a map iterated in Go's randomised order would flicker the
+// canvas and defeat the stream's identical-patch suppression.
+var stampAttr = regexp.MustCompile(`v=[0-9a-f]{32}`)
+
+func withoutStamp(page string) string { return stampAttr.ReplaceAllString(page, "v=STAMP") }
 
 func TestMapCanvas_AnUnresolvedGIDIsDrawnRatherThanSkipped(t *testing.T) {
 	srv, _, sess, configured := mapServer(t)

@@ -12,10 +12,10 @@ import (
 )
 
 func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /forge/map/save", sameOriginOnly(s.handleMapSave))
-	mux.HandleFunc("POST /forge/map/save/overwrite", sameOriginOnly(s.handleMapOverwrite))
-	mux.HandleFunc("POST /forge/map/discard", sameOriginOnly(s.handleMapDiscard))
-	mux.HandleFunc("POST /forge/map/reload", sameOriginOnly(s.handleMapReload))
+	mux.HandleFunc("POST /forge/map/save", s.sameOriginOnly(s.handleMapSave))
+	mux.HandleFunc("POST /forge/map/save/overwrite", s.sameOriginOnly(s.handleMapOverwrite))
+	mux.HandleFunc("POST /forge/map/discard", s.sameOriginOnly(s.handleMapDiscard))
+	mux.HandleFunc("POST /forge/map/reload", s.sameOriginOnly(s.handleMapReload))
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -149,7 +149,7 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 	}
 	// Only where the list is on screen. A map added to the project by Tiled
 	// while Forge is running should appear and one deleted should go — but that
-	// is a directory listing, and running it on every tick of every mode's
+	// is a directory listing, and running it on every render of every mode's
 	// stream is a cost that buys nothing on SCHEMA.
 	if slug == "map" {
 		s.cfg.MapSession.Refresh()

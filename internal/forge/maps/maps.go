@@ -284,6 +284,11 @@ func isMap(name string) bool {
 // map" told the second group to add a section they already have.
 func (s *Session) Configured() string { return s.cfg.MapPath }
 
+// Root is the directory this session will serve maps from. It is what the
+// server's external-change poller watches, so that a map added or removed by
+// Tiled while Forge is open still reaches the page.
+func (s *Session) Root() string { return s.cfg.Root }
+
 // Maps is the project's maps, configured one first.
 func (s *Session) Maps() []Map {
 	s.mu.Lock()

@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/eventbus"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
@@ -133,7 +134,12 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	}
 
 	srv := server.New(server.Config{
-		Addr:           cfg.Forge.Addr,
+		Addr: cfg.Forge.Addr,
+		// Built here rather than left to the server to default, because this is
+		// the composition root and later epics have a second consumer: LIVE
+		// publishes world_version ticks from outside the HTTP handlers, and it
+		// has to reach the same bus the streams are listening on.
+		Bus:            eventbus.New(slog.Default()),
 		Session:        editing,
 		Engine:         engine,
 		PollInterval:   cfg.Forge.PollInterval(),

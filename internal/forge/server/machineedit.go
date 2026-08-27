@@ -13,11 +13,11 @@ import (
 )
 
 func (s *Server) registerMachineEditRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /forge/agents/machine", sameOriginOnly(s.handleMachineEdit))
-	mux.HandleFunc("POST /forge/agents/save", sameOriginOnly(s.handleMachineSave))
-	mux.HandleFunc("POST /forge/agents/discard", sameOriginOnly(s.handleMachineDiscard))
-	mux.HandleFunc("POST /forge/agents/reload", sameOriginOnly(s.handleMachineReload))
-	mux.HandleFunc("POST /forge/agents/save/overwrite", sameOriginOnly(s.handleMachineOverwrite))
+	mux.HandleFunc("POST /forge/agents/machine", s.sameOriginOnly(s.handleMachineEdit))
+	mux.HandleFunc("POST /forge/agents/save", s.sameOriginOnly(s.handleMachineSave))
+	mux.HandleFunc("POST /forge/agents/discard", s.sameOriginOnly(s.handleMachineDiscard))
+	mux.HandleFunc("POST /forge/agents/reload", s.sameOriginOnly(s.handleMachineReload))
+	mux.HandleFunc("POST /forge/agents/save/overwrite", s.sameOriginOnly(s.handleMachineOverwrite))
 }
 
 // machineSession answers with the session or writes the reason there is none.
@@ -159,9 +159,12 @@ func (s *Server) handleMachineSave(w http.ResponseWriter, r *http.Request) {
 	// Every machine gets its own report, because every machine got its own
 	// verdict — a single "saved" over a set where one was refused would be the
 	// most misleading thing the footer could say.
-	for _, result := range results {
-		s.ReportSave(result.Path, result.Err)
+	paths := make([]string, len(results))
+	errs := make([]error, len(results))
+	for i, result := range results {
+		paths[i], errs[i] = result.Path, result.Err
 	}
+	s.ReportSaves(paths, errs)
 	s.setEditProblem("")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -189,9 +192,7 @@ func (s *Server) handleMachineDiscard(w http.ResponseWriter, r *http.Request) {
 		s.refuseMachineEdit(w, r, err)
 		return
 	}
-	for _, path := range sess.Paths() {
-		s.ClearSaveReport(path)
-	}
+	s.ClearSaveReports(sess.Paths())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -333,9 +334,7 @@ func (s *Server) handleMachineReload(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	for _, path := range sess.Paths() {
-		s.ClearSaveReport(path)
-	}
+	s.ClearSaveReports(sess.Paths())
 	if err := sess.ReloadAll(); err != nil {
 		s.refuseMachineEdit(w, r, err)
 		return

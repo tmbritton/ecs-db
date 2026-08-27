@@ -279,7 +279,7 @@ func Build(def *agent.MachineDefinition, sel string) Chart {
 // Authored order throughout, never map order: states are usually written in the
 // order they run, the file is read in diffs, and — the reason this is a rule
 // rather than a preference — a map range here would give the canvas a different
-// drawing on every tick of the page stream.
+// drawing on every render of the page stream.
 // buildLevel lays out the states at one level of the tree, in their own
 // coordinate system starting at (0,0). The caller offsets them into place: the
 // root not at all, a compound state by its own inner margin and title height.

@@ -80,7 +80,7 @@ func (s *Session) Inspect(path string) (Inspection, error) {
 // stopped resolving. So dropping dirty() would start counting a stranded
 // machine's problems, which no Save this footer offers would write. It is also
 // the cheap filter: without it every held machine would be cloned through the
-// emitter and the parser and validated on every tick of a two-second stream.
+// emitter and the parser and validated on every render of every open stream.
 //
 // reformatOnly then removes what is dirty in layout only, which is what Save
 // skips for the same reason: nobody edited it.
@@ -97,7 +97,7 @@ func (s *Session) Invalid() map[string]int {
 	}
 	// Both are loop invariants, and Schema() is not cheap: it takes the schema
 	// session's lock and deep-copies the whole schema, so inside the loop it
-	// was one clone and one lock acquisition per dirty machine, per tick, for
+	// was one clone and one lock acquisition per dirty machine, per render, for
 	// the same value.
 	registry := project.BuildRegistry(s.cfg.HasMap)
 	current := s.cfg.Schema()
@@ -182,7 +182,7 @@ func (s *Session) FreeID(base string) string {
 	defer s.mu.Unlock()
 
 	// The whole set once, rather than one lookup per candidate. This runs on
-	// every AGENTS render, including every tick of every open page's stream,
+	// every AGENTS render, including every render of every open page's stream,
 	// and each lookup reads and parses every file in every behaviours
 	// directory — so asking per candidate turns a proposal into N directory
 	// walks a second.

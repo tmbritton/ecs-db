@@ -61,9 +61,9 @@ func (s State) String() string {
 // story's original shape. Forge exists to edit schema.json; a version captured
 // once at startup goes stale the first time someone bumps it, and the readout
 // would then report a mismatch that does not exist — in the one tool whose job
-// is making that edit. Re-reading per check costs a small file parse every poll
-// and is always current. When Epic 11 introduces a project model, this becomes
-// its accessor rather than a path.
+// is making that edit. Re-reading per check costs a small file parse and is
+// always current. When Epic 11 introduces a project model, this becomes its
+// accessor rather than a path.
 type Config struct {
 	DBPath     string
 	SchemaPath string

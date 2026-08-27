@@ -8,13 +8,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/config"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
+	"github.com/tmbritton/ecs-db/internal/forge/eventbus"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
@@ -52,7 +54,17 @@ type Config struct {
 	Engine status.Config
 	// PollInterval is how often the engine status is re-checked. Zero falls
 	// back rather than panicking time.NewTicker.
+	//
+	// It describes the engine poll and nothing else. Everything else Forge
+	// shows is state this server changed, and is pushed the moment it does —
+	// see push.go. The game's database is written by another process, so it is
+	// the one thing that has to be asked rather than told.
 	PollInterval time.Duration
+	// Bus carries change notifications from the mutation routes to the open
+	// SSE streams. Nil is defaulted in New, because every handler test builds a
+	// Config without one and a nil bus would panic on the first mutation
+	// rather than on the line that forgot it.
+	Bus *eventbus.EventBus
 	// Machines are the behaviour machines the project resolved, for the binding
 	// dropdowns and the context-seeds panel. Empty is a legitimate state — a
 	// project may have none.
@@ -110,6 +122,19 @@ type Server struct {
 	mu      sync.Mutex
 	ln      net.Listener
 	streams int
+	// renders counts stream render passes, so a test can prove a burst of
+	// events collapses into one. Not observable from the wire: the diff
+	// suppresses the duplicate bytes either way, and the waste is what is left.
+	renders int
+	// pollCancel stops the engine poller. Non-nil exactly while at least one
+	// stream is open — see enginePollStartedLocked.
+	pollCancel context.CancelFunc
+
+	// pages is what each page load shipped, so the stream that follows it can
+	// skip sending the browser a copy of what it already has. Its own lock: it
+	// is touched on every page load and every stream connect, and neither
+	// wants to queue behind the rest of the server's state.
+	pages pageRenders
 	// Why the last edit was refused. Cleared by the next one that succeeds, and
 	// by a full page load, so a stale explanation never outlives the state it
 	// described or leaks into a tab that did nothing wrong.
@@ -173,6 +198,12 @@ func New(cfg Config, static fs.FS) *Server {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = config.DefaultForgePollSeconds * time.Second
 	}
+	// Every handler test builds a Config without a bus. Defaulting here means
+	// the boundary that actually publishes cannot be nil, whatever constructed
+	// the Config — the same guard Addr and PollInterval already get.
+	if cfg.Bus == nil {
+		cfg.Bus = eventbus.New(slog.Default())
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		cfg: cfg, static: static,
@@ -195,12 +226,12 @@ func (s *Server) routes() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticHandler()))
 	mux.HandleFunc("GET /dev/tokens", s.handleDevTokens)
 	mux.HandleFunc("POST /dev/noop", s.handleDevNoop)
-	mux.HandleFunc("POST /forge/schema/save", sameOriginOnly(s.handleSchemaSave))
-	mux.HandleFunc("POST /forge/schema/save/confirm", sameOriginOnly(s.handleSchemaSaveConfirm))
-	mux.HandleFunc("POST /forge/schema/save/cancel", sameOriginOnly(s.handleSchemaSaveCancel))
-	mux.HandleFunc("POST /forge/schema/discard", sameOriginOnly(s.handleSchemaDiscard))
-	mux.HandleFunc("POST /forge/schema/reload", sameOriginOnly(s.handleSchemaReload))
-	mux.HandleFunc("POST /forge/schema/overwrite", sameOriginOnly(s.handleSchemaOverwrite))
+	mux.HandleFunc("POST /forge/schema/save", s.sameOriginOnly(s.handleSchemaSave))
+	mux.HandleFunc("POST /forge/schema/save/confirm", s.sameOriginOnly(s.handleSchemaSaveConfirm))
+	mux.HandleFunc("POST /forge/schema/save/cancel", s.sameOriginOnly(s.handleSchemaSaveCancel))
+	mux.HandleFunc("POST /forge/schema/discard", s.sameOriginOnly(s.handleSchemaDiscard))
+	mux.HandleFunc("POST /forge/schema/reload", s.sameOriginOnly(s.handleSchemaReload))
+	mux.HandleFunc("POST /forge/schema/overwrite", s.sameOriginOnly(s.handleSchemaOverwrite))
 	s.registerSchemaEditRoutes(mux)
 	s.registerMachineEditRoutes(mux)
 	s.registerCanvasRoutes(mux)
@@ -225,15 +256,6 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	content, ok := modes.Registry[m.Slug]
-	if !ok {
-		// mode.All and modes.Registry are checked against each other in
-		// modes/registry_test.go, so this is unreachable — but rendering a nil
-		// component panics, and a 500 is a better failure than a dead process.
-		slog.ErrorContext(r.Context(), "no content registered for mode", "mode", m.Slug)
-		http.Error(w, "mode not available", http.StatusInternalServerError)
-		return
-	}
 	// Rendered server-side on load so the page is never blank before the first
 	// patch arrives; the stream takes over from there.
 	// A full page load starts clean: an edit refused in another tab is not this
@@ -245,10 +267,46 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	s.setEditProblem("")
 	s.closeCanvasMenu()
 	s.hold(saveNone)
+	// And tell the other tabs, because those three fields are per-server and
+	// every open page renders them. This is a GET, so it is not wrapped by
+	// sameOriginOnly and gets no publish from there — which made loading a page
+	// the one mutation that told nobody.
+	//
+	// It used to heal itself: the two-second poll re-rendered every stream
+	// whether or not anything had been published, so another tab's stale
+	// dialog cleared within a tick. With the poll gone it is permanent, and
+	// permanent in the worst way — opening a second tab leaves the first
+	// showing a save confirmation whose buttons no longer do anything, because
+	// takeHeld has already been reset out from under them.
+	s.publish(EventChanged)
 	data := s.modeData(r)
-	s.render(w, r, templates.Shell(
-		m, streamQuery(r, m.Slug, data), status.Check(s.cfg.Engine), s.saveReports(), s.footer(m.Slug, data),
-		content(data), s.confirmation(data)))
+
+	// The same render the stream would do, so that the stream can recognise
+	// its own output and not send the page a copy of what it already has.
+	// mode.All and modes.Registry are checked against each other in
+	// modes/registry_test.go, so a missing mode is unreachable — but rendering
+	// a nil component panics, and a 500 is a better failure than a dead
+	// process.
+	regions, version, err := s.renderRegions(m, data)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "rendering mode page", "mode", m.Slug, "err", err)
+		http.Error(w, "mode not available", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, templates.Shell(m, streamSubscription(r, m.Slug, data, s.rememberPage(version)), regions))
+}
+
+// streamSubscription is the query a page's SSE subscription carries: which view
+// to render, and the stamp identifying what this page load already holds.
+func streamSubscription(r *http.Request, slug string, data modes.Data, stamp string) string {
+	q := streamQuery(r, slug, data)
+	if stamp == "" {
+		return q
+	}
+	if q == "" {
+		return "v=" + stamp
+	}
+	return q + "&v=" + stamp
 }
 
 // streamQuery is the selection the page's SSE subscription has to carry, so
@@ -472,8 +530,8 @@ func (s *Server) migrationPreview() migration.Preview {
 		// which Stale() would read as "not stale" and quietly say nothing.
 		//
 		// Debug rather than Error: this runs on every render of every open
-		// stream, and a broken schema.json would otherwise fill the log at the
-		// poll interval.
+		// stream, and a broken schema.json would otherwise put a line in the log
+		// for every edit anyone makes.
 		slog.Debug("parsing the last saved schema", "path", sess.Path(), "err", err)
 	}
 	var current schema.DatabaseSchema
@@ -540,19 +598,36 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 
 	sse := datastar.NewSSE(w, r, datastar.WithContext(ctx))
 
+	// Subscribed before the first render, not after it. The subscription is
+	// buffered, so an edit made while this loop is rendering is waiting at the
+	// select below rather than lost — and "the edit I made during a render
+	// never showed up" is a bug that reproduces once a week and never on
+	// demand.
+	changed := s.cfg.Bus.Subscribe(forgeEvents...)
+	defer s.cfg.Bus.Unsubscribe(changed)
+
 	s.mu.Lock()
 	s.streams++
+	s.enginePollStartedLocked()
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		s.streams--
+		if s.streams == 0 {
+			s.enginePollStoppedLocked()
+		}
 		s.mu.Unlock()
 	}()
 
-	ticker := time.NewTicker(s.cfg.PollInterval)
-	defer ticker.Stop()
+	// What the page that opened this stream already holds, if it said so with a
+	// stamp this server issued and has not yet spent. Empty for a subscription
+	// built by anything but the shell, for a second subscriber reusing the
+	// URL, and for a browser reconnecting after a dropped connection — all of
+	// which need the full send, the last because it has missed whatever
+	// happened while it was away.
+	pageVersion, _ := s.takePage(r.URL.Query().Get("v"))
 
-	var lastStatus, lastSaves, lastFooter, lastContent, lastConfirm string
+	last := make([]string, 0, 8)
 	for {
 		// Everything that changes on the page goes down this one connection.
 		// Engine status shows on every mode, so it is pushed whatever m is;
@@ -561,12 +636,14 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 		// other.
 		//
 		// Suppressing identical patches is not just economy: a stream that
-		// emits every tick forever makes the browser's EventStream log useless
-		// for debugging the busier traffic that lands on it later.
-		// Gathered once per tick and shared by the two regions that read it.
-		// It costs a read-only open of the game's database — two, on SCHEMA —
-		// and both regions asking separately doubled that on every tick of
-		// every open stream.
+		// re-sends unchanged regions makes the browser's EventStream log useless
+		// for debugging the busier traffic that lands on it later. It matters
+		// less than it did — nothing wakes this loop unless something changed —
+		// but a publish is coarse, and most changes leave most regions alone.
+		// Gathered once per pass and shared by the regions that read it. It
+		// costs a read-only open of the game's database — two, on SCHEMA — and
+		// both regions asking separately doubled that on every pass of every
+		// open stream.
 		var gathered *modes.Data
 		data := func() modes.Data {
 			if gathered == nil {
@@ -576,52 +653,122 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 			return *gathered
 		}
 
-		for _, part := range []struct {
-			name   string
-			render func() (string, error)
-			last   *string
-		}{
-			{"engine status", s.renderEngineStatus, &lastStatus},
-			{"save reports", s.renderSaveReports, &lastSaves},
-			{"save footer", func() (string, error) { return s.renderFooter(m.Slug, data()) }, &lastFooter},
-			{"mode content", func() (string, error) { return s.renderModeContent(m, data()) }, &lastContent},
-			{"save confirmation", func() (string, error) { return s.renderConfirmRegion(data()) }, &lastConfirm},
-		} {
-			cur, err := part.render()
+		regions := s.regions(m, data)
+		for len(last) < len(regions) {
+			last = append(last, "")
+		}
+
+		rendered := make([]string, len(regions))
+		sum := fnv.New64a()
+		for i, region := range regions {
+			cur, err := region.render()
 			if err != nil {
-				slog.ErrorContext(ctx, "rendering "+part.name, "err", err)
-				continue
+				// Logged and skipped rather than fatal: the next pass is
+				// moments away, and a dropped connection is not.
+				slog.ErrorContext(ctx, "rendering "+region.name, "err", err)
+				cur = last[i]
 			}
-			if cur == *part.last {
+			rendered[i] = cur
+			_, _ = sum.Write([]byte(cur))
+			_, _ = sum.Write([]byte{0})
+		}
+
+		// The page that opened this stream rendered these very bytes a moment
+		// ago. Sending them back made every navigation parse the page and then
+		// immediately morph it into a byte-identical copy of itself.
+		//
+		// The first pass only, and then cleared whether or not it matched. It
+		// described the page at the moment it loaded; from here on `last`
+		// describes what this stream has actually sent, which is the stronger
+		// thing to compare against. Left in play it would go on matching, and
+		// suppress any change that happened to restore the state the page
+		// loaded with.
+		if pageVersion != "" && pageVersion == strconv.FormatUint(sum.Sum64(), 16) {
+			copy(last, rendered)
+		}
+		pageVersion = ""
+
+		for i, cur := range rendered {
+			if cur == last[i] {
 				continue
 			}
 			if err := sse.PatchElements(cur); err != nil {
 				return // client gone
 			}
-			*part.last = cur
+			last[i] = cur
 		}
+
+		s.countRender()
 
 		select {
 		case <-sse.Context().Done():
 			return
-		case <-ticker.C:
+		case <-changed:
+			// One re-render for a burst, not one per event: the render reads
+			// current state, so a second pass over the same state can only
+			// produce bytes the diff would throw away.
+			drain(changed)
 		}
 	}
 }
 
 // ReportSave records what became of a save and lets every open page know.
 //
-// The report reaches the browser on the next poll of the page-level stream
-// rather than through a channel of its own: one stream per page is the
-// architecture, and a second notification path would be a second thing to get
-// right. Epic 12's save button is the caller.
+// The report travels down the page-level stream rather than a channel of its
+// own: one stream per page is the architecture, and a second notification path
+// would be a second thing to get right.
+//
+// It publishes for itself rather than leaning on sameOriginOnly having wrapped
+// whoever called it. That middleware does cover every route today, so this is a
+// second publish on the request path — which costs nothing, because the stream
+// drains a burst into one render. What it buys is that the method keeps the
+// promise its own name makes: this is exported, and a caller outside a request
+// would otherwise record a save that no open page ever heard about.
 func (s *Server) ReportSave(path string, saveErr error) {
+	s.recordSave(path, saveErr)
+	s.publish(EventSaves)
+}
+
+// ReportSaves is ReportSave over a set, with one publish for the set.
+//
+// Saving a project saves every dirty machine, and a publish per machine would
+// put a project's worth of events into every open stream's hundred-slot buffer
+// to say a thing one event says — overflowing it, and logging a dropped-event
+// warning, for a completely ordinary Save All. The stream coalesces a burst
+// into one render either way; this is about not manufacturing the burst.
+func (s *Server) ReportSaves(paths []string, errs []error) {
+	for i, path := range paths {
+		var err error
+		if i < len(errs) {
+			err = errs[i]
+		}
+		s.recordSave(path, err)
+	}
+	s.publish(EventSaves)
+}
+
+func (s *Server) recordSave(path string, saveErr error) {
 	s.saves.Record(savereport.Observe(path, saveErr, status.Check(s.cfg.Engine).State))
 }
 
 // ClearSaveReport removes a file's report, for a caller that wants to dismiss
 // it — closing the file, say.
-func (s *Server) ClearSaveReport(path string) { s.saves.Clear(path) }
+// ClearSaveReport withdraws a report, and tells the open pages for the same
+// reason ReportSave does: a report that stays on screen after it stopped being
+// true is worse than one that never appeared.
+func (s *Server) ClearSaveReport(path string) {
+	s.saves.Clear(path)
+	s.publish(EventSaves)
+}
+
+// ClearSaveReports is ClearSaveReport over a set, with one publish for the set.
+// See ReportSaves.
+func (s *Server) ClearSaveReports(paths []string) {
+	for _, path := range paths {
+		s.saves.Clear(path)
+	}
+	s.publish(EventSaves)
+}
 
 // footer renders the save footer from the session's real state. A project that
 // failed to open has no session and therefore nothing to save.
@@ -798,9 +945,6 @@ func (s *Server) renderFooter(slug string, data modes.Data) (string, error) {
 	return buf.String(), nil
 }
 
-// renderModeContent re-renders the open mode so an edit appears without a
-// reload. The selection comes from the events request's own query string, which
-// the page put there when it subscribed.
 // renameKind names which of the two namespaces a rename belongs to.
 type renameKind int
 
@@ -887,19 +1031,6 @@ func (s *Server) forgetRenames() {
 	s.renamedMachineTo = nil
 }
 
-func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error) {
-	build, ok := modes.Registry[m.Slug]
-	if !ok {
-		return "", fmt.Errorf("no content registered for mode %q", m.Slug)
-	}
-	var buf bytes.Buffer
-	c := templates.ModeContentRegion(build(data))
-	if err := c.Render(context.Background(), &buf); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
-
 // saveReports pairs each save outcome with the two ways out of a conflict *for
 // that file*.
 //
@@ -968,8 +1099,8 @@ func (s *Server) renderSaveReports() (string, error) {
 }
 
 // renderEngineStatus checks the database and renders the readout to a string.
-// The first iteration of the stream loop runs before any tick, so a client that
-// reconnects sees current state immediately rather than after a poll interval.
+// The stream renders before it waits, so a client that reconnects sees current
+// state immediately rather than when something next changes.
 func (s *Server) renderEngineStatus() (string, error) {
 	var buf bytes.Buffer
 	c := components.EngineStatus(components.EngineStatusProps{Status: status.Check(s.cfg.Engine)})
@@ -1049,8 +1180,8 @@ func (s *Server) handleSchemaSaveConfirm(w http.ResponseWriter, r *http.Request)
 	// The answer to a question nobody asked is not consent. Without this, a
 	// POST straight to this route saves destructively having shown no dialog
 	// at all — and, more likely in practice, the still-visible "Save anyway"
-	// button saves after Cancel, in the window before the next poll removes
-	// the dialog from the page.
+	// button saves after Cancel, in the window before the patch that removes
+	// the dialog reaches the page.
 	switch s.takeHeld() {
 	case saveNormal:
 		s.runSchemaAction(w, r, func(sess *session.Session) error { return sess.Save() }, true)
