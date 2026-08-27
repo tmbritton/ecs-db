@@ -18,67 +18,40 @@ import (
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
-// Options is what the view state contributes: which layers Forge is hiding and
-// which tile the palette has selected.
+// Options is what the caller contributes to a canvas.
+//
+// One field, and it used to be five. Zoom, which layers are hidden, which layer
+// is active and which tile is selected are all the browser's now — signals it
+// owns outright — so the server neither takes them nor renders them, and a
+// re-render has nothing of theirs to undo.
 type Options struct {
-	// Hidden layers, by index into Map.Layers.
-	//
-	// **Authoritative, and the caller seeds it** — from the file's own visible
-	// attribute when the view state says nothing. Not OR'd with the file, which
-	// is what this did first: a layer hidden in Tiled then had an eye you could
-	// click that changed the URL, flipped nothing on screen and never changed
-	// its own state, so the one place an author would go to look at a hidden
-	// layer could not show it.
-	//
-	// Forge's view, never the file's contents. Toggling it changes what is drawn
-	// and never what is written, and the engine imports a hidden layer's tiles
-	// either way.
-	Hidden map[int]bool
-	// Active is the layer a stroke would land on, by index. Story 4 paints into
-	// it; this story marks it, because the most common way to lose an hour in a
-	// tile editor is painting into the layer you were not looking at.
-	Active int
-	// SelectedGID is the palette's selection, or 0 for none. A global id, so
-	// one number identifies a tile across every tileset the map declares.
-	SelectedGID uint32
-	// AssetURL turns a resolved image path into something the browser can
-	// fetch. Required; a nil one would render every tile pointing at nothing.
+	// AssetURL turns a tileset's image path into a URL the browser may fetch.
+	// Injected because the route belongs to the server package, and a canvas
+	// that built the URL itself would have to know about routing.
 	AssetURL func(path string) string
-	// Scale is how many screen pixels one map pixel gets. Zero means FitScale.
-	//
-	// A display concern and nothing else: the map is still measured in cells and
-	// the file is still measured in pixels, and this multiplies neither. It
-	// exists because a 16px tileset at 1:1 is a picture nobody can see, and
-	// because a 32px one at 3x is a picture that does not fit — an editor whose
-	// canvas is unreadable and an editor whose canvas runs off the screen are
-	// the same complaint from opposite ends.
-	//
-	// An integer, so a tile boundary always lands on a device pixel and
-	// pixelated art stays crisp. Story 5's pointer arithmetic divides by
-	// TileW*Scale, which is one more factor and not a second coordinate system.
-	Scale int
 }
 
 // Canvas is a map, ready to draw.
 type Canvas struct {
-	// Cols and Rows are cells; W and H are the pixels they occupy on screen,
-	// scaled. Both, because the grid is laid out in one and the tiles are
-	// placed in the other.
+	// Cols and Rows are cells; W and H are the map's own pixels — unscaled,
+	// because zoom is a CSS transform the browser applies and the server has no
+	// opinion about it after the page opens. Both, because the grid is laid out
+	// in one and the tiles are placed in the other.
 	Cols, Rows   int
 	TileW, TileH int
 	W, H         int
-	// Scale is how many screen pixels one map pixel got. Every cell's matrix
-	// already has it applied; this is here so the grid and Story 5's pointer
-	// maths can use the same number.
-	Scale int
 
-	// Cells are every non-empty cell of every drawn layer, in draw order — so
-	// a template that emits them in order gets the stacking right without
-	// knowing what stacking is.
+	// Cells are every non-empty cell of every layer, in draw order. The
+	// template emits them grouped, via CellsByLayer, so that a layer can be
+	// hidden without asking the server for the map — which means the stacking
+	// now rests on Layers being in file order rather than on this list alone.
 	Cells []Cell
 	// Layers is every tile layer the file has, in file order, whether drawn or
 	// not: the panel lists what the map holds, not what is currently visible.
 	Layers []Layer
+	// CellsByLayer indexes Cells by layer, so a template can emit one group per
+	// layer without walking every cell once per layer. Same slices, same order.
+	CellsByLayer map[int][]Cell
 	// Tilesets is the palette.
 	Tilesets []Tileset
 	// Problems is one line per distinct reason cells could not be drawn.
@@ -177,6 +150,10 @@ func FitScale(cols, rows, tileW, tileH int) int {
 type Cell struct {
 	X, Y  int
 	Layer string
+	// LayerIndex is which layer this cell belongs to, which is what the
+	// template groups by so a layer can be hidden client-side. The name is not
+	// enough: Tiled permits two layers to share one.
+	LayerIndex int
 	// Image is the URL to draw from, empty for an unresolved cell.
 	Image string
 	// SX, SY is the source rectangle's origin within that image; SW, SH its
@@ -192,17 +169,6 @@ type Cell struct {
 	Problem string
 }
 
-// CellW and CellH are a cell's size on screen: the file's tile size times the
-// zoom.
-//
-// One accessor rather than the product written out at each call site — the grid
-// writes it, the status line writes it, and Story 5's pointer arithmetic divides
-// by it, which is three chances to multiply by the wrong one of two numbers that
-// are both called a size.
-func (c Canvas) CellW() int { return c.TileW * c.Scale }
-
-func (c Canvas) CellH() int { return c.TileH * c.Scale }
-
 // Unresolved reports whether this cell is a marker rather than a tile.
 func (c Cell) Unresolved() bool { return c.Problem != "" }
 
@@ -210,8 +176,6 @@ func (c Cell) Unresolved() bool { return c.Problem != "" }
 type Layer struct {
 	Index int
 	Name  string
-	// Hidden is what Forge is drawing right now.
-	Hidden bool
 	// HiddenInFile is what the map says, which is where Hidden starts. The two
 	// are shown separately because they mean different things: one is a view
 	// and the other is a fact about the file — and neither changes what the
@@ -225,8 +189,6 @@ type Layer struct {
 	// panel that only knew about the checkbox showed an open eye over a layer
 	// that draws nothing, with no explanation anywhere.
 	Transparent bool
-	// Active is the layer a stroke would land on.
-	Active bool
 }
 
 // Tileset is one palette section.
@@ -259,15 +221,10 @@ func Build(m *tiled.Map, opts Options) Canvas {
 	if m == nil || opts.AssetURL == nil {
 		return Canvas{}
 	}
-	scale := opts.Scale
-	if scale < 1 {
-		scale = FitScale(m.Width, m.Height, m.TileWidth, m.TileHeight)
-	}
 	c := Canvas{
 		Cols: m.Width, Rows: m.Height,
 		TileW: m.TileWidth, TileH: m.TileHeight,
-		Scale: scale,
-		W:     m.Width * m.TileWidth * scale, H: m.Height * m.TileHeight * scale,
+		W: m.Width * m.TileWidth, H: m.Height * m.TileHeight,
 		Cells:    make([]Cell, 0),
 		Layers:   make([]Layer, 0, len(m.Layers)),
 		Tilesets: make([]Tileset, 0, len(m.Tilesets)),
@@ -278,29 +235,29 @@ func Build(m *tiled.Map, opts Options) Canvas {
 		c.Layers = append(c.Layers, Layer{
 			Index:        i,
 			Name:         layer.Name,
-			Hidden:       opts.Hidden[i],
 			HiddenInFile: !layer.Visible,
 			Empty:        allEmpty(layer.Data),
 			Transparent:  layer.Opacity == 0,
-			Active:       i == opts.Active,
 		})
 	}
-	// The layers are replaced rather than edited in place, and the view state is
-	// written over them wholesale rather than only clearing.
+	// Every layer is drawn, including the ones the file hides.
 	//
-	// Replaced, because Build would otherwise leave the caller's map permanently
-	// changed: a second Build with nothing hidden would then report the file
-	// hides a layer that it does not — a false statement about the .tmx on the
-	// one row whose job is telling view state and file state apart. It is safe
-	// today only because Resolved re-parses, and the moment anybody memoises
-	// that it stops being.
+	// Which layers are *shown* is the browser's now: the eye toggles a signal
+	// and CSS hides a group, with no round trip and nothing for a later
+	// re-render to undo. So the server's job is to emit them all and say which
+	// ones the file starts hidden — a layer omitted here would have an eye that
+	// could not turn it back on.
 	//
-	// Wholesale, because Hidden is the whole answer: a layer the file hides can
-	// be shown, which is the point of an eye you can click.
+	// Replaced rather than edited in place, because Build would
+	// otherwise leave the caller's map permanently changed: a second Build
+	// would then report the file hides nothing, a false statement about the
+	// .tmx on the one row whose job is telling view state and file state apart.
+	// It is safe today only because Resolved re-parses, and the moment anybody
+	// memoises that it stops being.
 	layers := make([]tiled.Layer, len(m.Layers))
 	copy(layers, m.Layers)
 	for i := range layers {
-		layers[i].Visible = !opts.Hidden[i]
+		layers[i].Visible = true
 	}
 	m = &tiled.Map{
 		Name: m.Name, Width: m.Width, Height: m.Height,
@@ -311,14 +268,14 @@ func Build(m *tiled.Map, opts Options) Canvas {
 
 	seen := map[string]bool{}
 	for _, p := range m.Placements() {
-		cell := Cell{X: p.X, Y: p.Y, Layer: p.Layer, Problem: p.Problem}
+		cell := Cell{X: p.X, Y: p.Y, Layer: p.Layer, LayerIndex: p.LayerIndex, Problem: p.Problem}
 		if p.Problem != "" {
 			// A marker occupies its cell exactly: there is no tile to take a
 			// size from, and the thing worth showing is which cell is wrong.
 			cell.SW, cell.SH = m.TileWidth, m.TileHeight
-			cell.A, cell.D, cell.Alpha = float64(scale), float64(scale), 1
-			cell.TX = float64(p.X * m.TileWidth * scale)
-			cell.TY = float64(p.Y * m.TileHeight * scale)
+			cell.A, cell.D, cell.Alpha = 1, 1, 1
+			cell.TX = float64(p.X * m.TileWidth)
+			cell.TY = float64(p.Y * m.TileHeight)
 			if !seen[p.Problem] {
 				seen[p.Problem] = true
 				c.Problems = append(c.Problems, p.Problem)
@@ -326,17 +283,24 @@ func Build(m *tiled.Map, opts Options) Canvas {
 			c.Cells = append(c.Cells, cell)
 			continue
 		}
-		// Scaled by post-multiplication, so the flips still happen in the
-		// engine's order and only the result is made bigger. Scaling the tile
-		// before its transform would flip it about the wrong point.
+		// Unscaled. Zoom is a CSS transform on the whole canvas now, so a cell
+		// carries only the flips and the translation the map itself gives it —
+		// and changing zoom moves no bytes rather than re-rendering every cell.
 		mx := p.Transform()
-		f := float64(scale)
 		cell.Image = opts.AssetURL(p.Image)
 		cell.SX, cell.SY, cell.SW, cell.SH = p.SX, p.SY, p.SW, p.SH
-		cell.A, cell.B, cell.C, cell.D = mx.A*f, mx.B*f, mx.C*f, mx.D*f
-		cell.TX, cell.TY = mx.TX*f, mx.TY*f
+		cell.A, cell.B, cell.C, cell.D = mx.A, mx.B, mx.C, mx.D
+		cell.TX, cell.TY = mx.TX, mx.TY
 		cell.Alpha = p.Alpha
 		c.Cells = append(c.Cells, cell)
+	}
+
+	// Grouped once, here, rather than by the template filtering the flat list
+	// per layer: that was O(layers x cells) on every canvas render, which for a
+	// 100x100 map with eight layers is ~640k comparisons for each push.
+	c.CellsByLayer = make(map[int][]Cell, len(c.Layers))
+	for _, cell := range c.Cells {
+		c.CellsByLayer[cell.LayerIndex] = append(c.CellsByLayer[cell.LayerIndex], cell)
 	}
 
 	c.Tilesets = palette(m, opts, paletteScale(m.TileWidth))
@@ -391,7 +355,6 @@ func palette(m *tiled.Map, opts Options, scale int) []Tileset {
 					// A collection tile is a whole file, so the picture to
 					// scale is the tile itself.
 					SheetW: tile.Image.Width * scale, SheetH: tile.Image.Height * scale,
-					Selected: ref.FirstGID+local == opts.SelectedGID,
 				})
 			}
 		} else {
@@ -409,7 +372,6 @@ func palette(m *tiled.Map, opts Options, scale int) []Tileset {
 					// contents the right size rather than a transform, which
 					// would scale the element's own box as well.
 					SheetW: ts.Image.Width * scale, SheetH: ts.Image.Height * scale,
-					Selected: ref.FirstGID+uint32(local) == opts.SelectedGID,
 				})
 			}
 		}
@@ -438,3 +400,26 @@ func allEmpty(data []uint32) bool {
 	}
 	return true
 }
+
+// InitialScale is the zoom a map opens at: the largest step that fits it in the
+// budget, and 1 for a canvas that could not be built at all.
+//
+// The zoom itself is the browser's from here on — see modes.MapSignals — so
+// this is the one moment the server has an opinion about it. A map that will
+// not resolve gets 1 rather than 0: nothing is drawn either way, and a zoom of
+// zero would make every derived size on the page read as a map of no size.
+func InitialScale(c Canvas) int {
+	// FitScale already answers 1 for a canvas with no size, so there is no
+	// separate fallback here — an earlier one looked like a guard and was
+	// unreachable, and its test passed by exercising FitScale's guard instead.
+	return FitScale(c.Cols, c.Rows, c.TileW, c.TileH)
+}
+
+// Drawn reports whether this canvas has a map on it.
+//
+// Not "has cells": an empty map is a map, and it still has a size, a grid and a
+// zoom worth offering. What this rules out is a canvas that could not be built
+// at all — no tilesets resolved, the file would not parse — where every derived
+// number is zero and a control marking none of its steps is worse than no
+// control.
+func (c Canvas) Drawn() bool { return c.Cols > 0 && c.Rows > 0 && c.TileW > 0 && c.TileH > 0 }

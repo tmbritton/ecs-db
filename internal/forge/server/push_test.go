@@ -287,12 +287,18 @@ func TestEnginePoller_StopsWithTheLastStream(t *testing.T) {
 		s.mu.Lock()
 		stopped := s.pollCancel == nil
 		s.mu.Unlock()
-		if stopped {
+		// Gone, not merely told to go. A cancelled poller may still be inside
+		// status.Check with the game's database open, and "the last tab closed"
+		// has to mean the handles are released — otherwise Shutdown returns
+		// while a goroutine is still writing -wal beside a file the caller
+		// believes it is finished with.
+		if stopped && s.enginePollers() == 0 {
 			return
 		}
 		select {
 		case <-deadline:
-			t.Fatal("the poller outlived the last stream")
+			t.Fatalf("the poller outlived the last stream: cancelled=%v running=%d",
+				stopped, s.enginePollers())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

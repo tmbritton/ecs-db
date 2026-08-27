@@ -85,24 +85,18 @@ templ mapToolbar(data Data) {
 				data-testid="lens-replay"
 			>REPLAY</button>
 		</div>
-		if len(zoomSteps(data)) > 0 {
+		if data.Canvas.Drawn() {
 			<div class="segmented" role="group" aria-label="Zoom" data-testid="zoom-control">
-				for _, z := range zoomSteps(data) {
-					if z.Current {
-						<span
-							class="segmented__on"
-							aria-current="true"
-							data-testid={ "zoom-" + itoa(z.N) }
-							data-current="true"
-						>{ itoa(z.N) }×</span>
-					} else {
-						<a
-							href={ URL(z.Href) }
-							class="segmented__link"
-							data-testid={ "zoom-" + itoa(z.N) }
-							data-current="false"
-						>{ itoa(z.N) }×</a>
-					}
+				for _, n := range Steps() {
+					<button
+						type="button"
+						data-on:click={ "$zoom = " + itoa(n) }
+						class="segmented__link"
+						data-class={ "{'segmented__on': $zoom === " + itoa(n) + "}" }
+						data-attr:data-current={ flag("$zoom === " + itoa(n)) }
+						data-attr:aria-current={ flag("$zoom === " + itoa(n)) }
+						data-testid={ "zoom-" + itoa(n) }
+					>{ itoa(n) }×</button>
 				}
 			</div>
 		}
@@ -117,32 +111,50 @@ templ mapToolbar(data Data) {
 // stacking is.
 templ mapCanvas(data Data) {
 	<div class="map-viewport" data-testid="map-viewport">
+		// Two boxes, because a transform does not change the box it is on: the
+		// outer one takes up the scaled space so the viewport scrolls right,
+		// the inner one is scaled and holds the cells at their own size.
 		<div
 			class="map-canvas"
 			data-testid="map-canvas"
-			style={ canvasBoxStyle(data.Canvas.W, data.Canvas.H) }
-			data-cell-w={ itoa(data.Canvas.CellW()) }
-			data-cell-h={ itoa(data.Canvas.CellH()) }
+			style={ canvasVars(data.Canvas) }
+			data-style={ "{'--map-zoom': $zoom}" }
+			data-attr:data-cell-w={ "$zoom * " + itoa(data.Canvas.TileW) }
+			data-attr:data-cell-h={ "$zoom * " + itoa(data.Canvas.TileH) }
 		>
-		<div class="map-canvas__grid" style={ gridStyle(data.Canvas) } aria-hidden="true"></div>
-		for _, c := range data.Canvas.Cells {
-			if c.Unresolved() {
-				<div
-					class="map-cell map-cell--unresolved"
-					style={ cellStyle(c) }
-					data-testid="map-cell-unresolved"
-					data-cell={ cellID(c) }
-					title={ c.Problem }
-				>?</div>
-			} else {
-				<div
-					class="map-cell"
-					style={ cellStyle(c) }
-					data-testid="map-cell"
-					data-cell={ cellID(c) }
-				></div>
-			}
-		}
+			// The grid is outside the scaled box on purpose: inside it, an 8×
+			// zoom would draw 8px lines. Its own spacing scales by calc so the
+			// squares still line up with the tiles.
+			<div class="map-canvas__grid" aria-hidden="true"></div>
+			<div class="map-canvas__scaled">
+				for _, l := range data.Canvas.Layers {
+					<div
+						class="map-layer"
+						data-testid={ "map-layer-" + itoa(l.Index) }
+						data-signals__ifmissing={ hideSeed(l) }
+						data-class={ "{'map-layer--hidden': " + hideSignal(l) + "}" }
+					>
+						for _, c := range cellsOfLayer(data.Canvas, l.Index) {
+							if c.Unresolved() {
+								<div
+									class="map-cell map-cell--unresolved"
+									style={ cellStyle(c) }
+									data-testid="map-cell-unresolved"
+									data-cell={ cellID(c) }
+									title={ c.Problem }
+								>?</div>
+							} else {
+								<div
+									class="map-cell"
+									style={ cellStyle(c) }
+									data-testid="map-cell"
+									data-cell={ cellID(c) }
+								></div>
+							}
+						}
+					</div>
+				}
+			</div>
 		</div>
 	</div>
 }
@@ -154,19 +166,15 @@ templ mapCanvas(data Data) {
 // panel above.
 templ mapStatus(data Data) {
 	<div class="map-status mono" data-testid="map-status">
-		if data.Canvas.Scale < 1 {
+		if !data.Canvas.Drawn() {
 			<span class="map-status__problem" data-testid="map-not-drawn">not drawn — see above</span>
 		} else {
 			<span data-testid="map-size">{ itoa(data.Canvas.Cols) }×{ itoa(data.Canvas.Rows) } cells</span>
 			<span data-testid="map-tile-size">{ itoa(data.Canvas.TileW) }×{ itoa(data.Canvas.TileH) } px</span>
-			<span data-testid="map-zoom">{ zoomLabel(data.Canvas) }</span>
+			<span data-testid="map-zoom" data-text={ zoomLabelExpr(data.Canvas) }>{ zoomLabelSeed(data.Canvas) }</span>
 			<span data-testid="map-layer-count">{ layerCount(data.Canvas) }</span>
-			<span data-testid="map-active-layer">{ activeLayerName(data.Canvas) }</span>
-			if data.MapView.SelectedGID != 0 {
-				<span data-testid="map-selected-tile">tile { gidLabel(data.MapView.SelectedGID) }</span>
-			} else {
-				<span data-testid="map-selected-tile">no tile selected</span>
-			}
+			<span data-testid="map-active-layer" data-text={ activeLayerExpr(data.Canvas) }>{ activeLayerSeed(data.Canvas) }</span>
+			<span data-testid="map-selected-tile" data-text="$tile ? 'tile ' + $tile : 'no tile selected'">no tile selected</span>
 			if len(data.Canvas.Problems) > 0 {
 				<span class="map-status__problem" data-testid="map-canvas-problem">{ data.Canvas.Problems[0] }</span>
 			}
@@ -180,33 +188,31 @@ templ mapLayers(data Data) {
 	<div class="section-heading" data-testid="layer-heading"><span>Layers</span></div>
 	for _, l := range data.Canvas.Layers {
 		<div
-			class={ "layer-row", kv("layer-row--active", l.Active), kv("layer-row--muted", l.Hidden) }
+			class="layer-row"
+			data-class={ layerRowClasses(l) }
 			data-testid={ "layer-" + l.Name }
-			data-hidden={ boolAttr(l.Hidden) }
-			data-active={ boolAttr(l.Active) }
+			data-attr:data-hidden={ flag(hideSignal(l)) }
+			data-attr:data-active={ flag(eq("$layer", uint32(l.Index))) }
 		>
-			<a
-				href={ URL(data.MapView.WithLayerToggled(l.Index).Href()) }
+			<button
+				type="button"
+				data-on:click={ "$" + hideSignalName(l) + " = !$" + hideSignalName(l) }
 				class="layer-row__eye"
 				data-testid={ "layer-eye-" + l.Name }
-				title={ layerTitle(l) }
+				title={ layerTitleSeed(l) }
+				data-attr:title={ layerTitleExpr(l) }
 				aria-label={ "show or hide " + l.Name }
-			>
-				if l.Hidden {
-					—
-				} else {
-					👁
-				}
-			</a>
-			<a
-				href={ URL(data.MapView.WithActiveLayer(l.Index).Href()) }
+				data-attr:aria-pressed={ flag("!" + hideSignal(l)) }
+				data-text={ "$" + hideSignalName(l) + " ? '—' : '👁'" }
+			>{ eyeSeed(l) }</button>
+			<button
+				type="button"
+				data-on:click={ "$layer = " + itoa(l.Index) }
 				class="layer-row__name"
 				data-testid={ "layer-select-" + l.Name }
 				title="paint into this layer"
-				if l.Active {
-					aria-current="true"
-				}
-			>{ l.Name }</a>
+				data-attr:aria-current={ flag(eq("$layer", uint32(l.Index))) }
+			>{ l.Name }</button>
 			if l.HiddenInFile {
 				<span class="badge-override mono" data-testid={ "layer-file-hidden-" + l.Name }>file</span>
 			}
@@ -237,15 +243,21 @@ templ mapPalette(data Data) {
 			}
 			<div class="palette__tiles">
 				for _, t := range set.Tiles {
-					<a
-						href={ URL(data.MapView.WithTile(t.GID).Href()) }
-						class={ "palette-tile", kv("palette-tile--selected", t.Selected) }
+					// A button, not a link: it goes nowhere. Clicking the tile
+					// already in hand puts it down again, which is how you paint
+					// nothing without reaching for the eraser.
+					<button
+						type="button"
+						data-on:click={ toggleSignal("$tile", t.GID) }
+						data-class={ selectedWhen("$tile", t.GID, "palette-tile--selected") }
+						data-attr:data-selected={ flag(eq("$tile", t.GID)) }
+						data-attr:aria-pressed={ flag(eq("$tile", t.GID)) }
+						class="palette-tile"
 						style={ paletteStyle(t) }
 						data-testid={ "palette-tile-" + gidLabel(t.GID) }
-						data-selected={ boolAttr(t.Selected) }
 						title={ "global id " + gidLabel(t.GID) }
 						aria-label={ "tile " + gidLabel(t.GID) }
-					></a>
+					></button>
 				}
 			</div>
 		</div>

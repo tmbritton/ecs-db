@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/starfederation/datastar-go/datastar"
@@ -126,15 +127,22 @@ type Server struct {
 	// events collapses into one. Not observable from the wire: the diff
 	// suppresses the duplicate bytes either way, and the waste is what is left.
 	renders int
-	// pollCancel stops the engine poller. Non-nil exactly while at least one
-	// stream is open — see enginePollStartedLocked.
+	// pollCancel stops the engine poller and pollDone reports that it has
+	// actually stopped. Both non-nil exactly while at least one stream is open
+	// — see enginePollStartedLocked.
 	pollCancel context.CancelFunc
+	pollDone   chan struct{}
 
 	// pages is what each page load shipped, so the stream that follows it can
 	// skip sending the browser a copy of what it already has. Its own lock: it
 	// is touched on every page load and every stream connect, and neither
 	// wants to queue behind the rest of the server's state.
 	pages pageRenders
+
+	// pollersRunning counts live engine pollers. Its own atomic rather than a
+	// field under s.mu, because the poller decrements it as it exits and the
+	// thing waiting for that holds no lock.
+	pollersRunning atomic.Int64
 	// Why the last edit was refused. Cleared by the next one that succeeds, and
 	// by a full page load, so a stale explanation never outlives the state it
 	// described or leaks into a tab that did nothing wrong.
@@ -336,23 +344,15 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	// Only where it means something. machineData runs for every mode, so
 	// without this every page — MAP, TILES, SCHEMA — put an absolute path from
 	// the developer's filesystem into its subscription URL.
+	//
+	// Which map, and nothing else. It used to carry the zoom, the hidden
+	// layers, the active layer and the tile in hand as well, because a stream
+	// subscribed with only the path re-rendered the canvas with none of them
+	// and undid your selection twice a second. Those are signals now, and a
+	// signal is not in this URL because it is not in any URL — which is what
+	// makes them survive a re-render instead of being clobbered by one.
 	if slug == "map" && data.SelectedMap != "" {
-		// Every part of the view, not just the map: a stream subscribed with
-		// only the path re-renders with no layer hidden and no tile selected,
-		// so the canvas undoes your selection twice a second.
 		q.Set("map", data.SelectedMap)
-		if hide := r.URL.Query().Get("hide"); hide != "" {
-			q.Set("hide", hide)
-		}
-		if layer := r.URL.Query().Get("layer"); layer != "" {
-			q.Set("layer", layer)
-		}
-		if zoom := r.URL.Query().Get("zoom"); zoom != "" {
-			q.Set("zoom", zoom)
-		}
-		if tile := r.URL.Query().Get("tile"); tile != "" {
-			q.Set("tile", tile)
-		}
 	}
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)
@@ -613,10 +613,14 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		s.streams--
+		stop := func() {}
 		if s.streams == 0 {
-			s.enginePollStoppedLocked()
+			stop = s.enginePollStoppedLocked()
 		}
 		s.mu.Unlock()
+		// Outside the lock: the poller takes s.mu to publish, so waiting for it
+		// while holding s.mu would deadlock.
+		stop()
 	}()
 
 	// What the page that opened this stream already holds, if it said so with a

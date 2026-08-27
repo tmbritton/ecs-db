@@ -1,7 +1,7 @@
 # Story 0: Push, not poll
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🚧 In progress — the bus, the connect burst and the region split are done; MAP's links and view transitions are not  
+**Status:** 🚧 In progress — the bus, the connect burst, the region split and MAP's view state are done; view transitions are not  
 **Priority:** Highest — every later story lands on this architecture
 
 **Depends on:** Story 3
@@ -68,8 +68,8 @@ afterwards.
       cannot target
 - [x] The database is opened once per poll interval for the whole server, not
       once per interval per open tab
-- [ ] MAP has no `<a href>` left except choosing which map to edit
-- [ ] Zoom, selected tile, layer visibility and active layer survive a
+- [x] MAP has no `<a href>` left except choosing which map to edit
+- [x] Zoom, selected tile, layer visibility and active layer survive a
       re-render, because the server no longer renders them
 - [ ] What navigation remains does not read as a hard refresh
 - [ ] A fine-grained edit is **not** animated — a view transition has a

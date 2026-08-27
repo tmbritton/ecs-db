@@ -2,7 +2,6 @@ package modes
 
 import (
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -10,171 +9,6 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 )
-
-// MapView is the URL's view state for MAP mode: which map, which layers Forge
-// is hiding, and which tile the palette has selected.
-//
-// A struct rather than three parameters because every link in the mode has to
-// carry all of it — a layer toggle that dropped the tile selection would
-// deselect your brush every time you looked at a different layer.
-type MapView struct {
-	Path string
-	// Hidden is the complete set of layers Forge is not drawing, seeded from the
-	// file's own visible attributes when the URL says nothing. Complete, so a
-	// layer the file hides can be turned on — the URL is the answer, not one
-	// half of an OR with the file.
-	Hidden map[int]bool
-	// Active is the layer a stroke would land on. Story 4 paints into it.
-	Active int
-	// Zoom is how many screen pixels one map pixel gets, or 0 for the scale
-	// that fits the map. In the URL like every other part of the view, so a
-	// link to a map is a link to how you were looking at it.
-	Zoom        int
-	SelectedGID uint32
-}
-
-// Href is the link to this view.
-func (v MapView) Href() string {
-	q := url.Values{}
-	if v.Path != "" {
-		q.Set("map", v.Path)
-	}
-	if hide := hiddenList(v.Hidden); hide != "" {
-		q.Set("hide", hide)
-	}
-	if v.Active != 0 {
-		q.Set("layer", strconv.Itoa(v.Active))
-	}
-	if v.Zoom != 0 {
-		q.Set("zoom", strconv.Itoa(v.Zoom))
-	}
-	if v.SelectedGID != 0 {
-		q.Set("tile", strconv.FormatUint(uint64(v.SelectedGID), 10))
-	}
-	if len(q) == 0 {
-		return "/forge/map"
-	}
-	return "/forge/map?" + q.Encode()
-}
-
-// WithMap is this view pointed at another map, keeping nothing else: a layer
-// index and a tile id mean different things in a different map, so carrying
-// them over would hide a layer nobody asked about and select a tile that is not
-// there.
-func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
-
-// WithLayerToggled flips one layer's visibility.
-func (v MapView) WithLayerToggled(i int) MapView {
-	next := MapView{
-		Path: v.Path, Active: v.Active, Zoom: v.Zoom,
-		SelectedGID: v.SelectedGID, Hidden: map[int]bool{},
-	}
-	for k, on := range v.Hidden {
-		if on {
-			next.Hidden[k] = true
-		}
-	}
-	if next.Hidden[i] {
-		delete(next.Hidden, i)
-	} else {
-		next.Hidden[i] = true
-	}
-	return next
-}
-
-// WithTile is this view with another tile selected, or with none when the tile
-// given is the one already selected — so clicking the current tile clears it.
-// WithActiveLayer is this view painting into another layer.
-func (v MapView) WithActiveLayer(i int) MapView {
-	return MapView{Path: v.Path, Hidden: v.Hidden, Active: i, Zoom: v.Zoom, SelectedGID: v.SelectedGID}
-}
-
-// WithZoom is this view at another magnification.
-func (v MapView) WithZoom(n int) MapView {
-	return MapView{Path: v.Path, Hidden: v.Hidden, Active: v.Active, Zoom: n, SelectedGID: v.SelectedGID}
-}
-
-func (v MapView) WithTile(gid uint32) MapView {
-	next := MapView{Path: v.Path, Hidden: v.Hidden, Active: v.Active, Zoom: v.Zoom, SelectedGID: gid}
-	if v.SelectedGID == gid {
-		next.SelectedGID = 0
-	}
-	return next
-}
-
-// ParseHidden reads the hide parameter. Anything that is not a layer index is
-// ignored rather than refused: a hand-edited or stale URL should show you the
-// map, not an error page.
-func ParseHidden(raw string) map[int]bool {
-	if raw == "" {
-		return nil
-	}
-	out := map[int]bool{}
-	for _, part := range strings.Split(raw, ",") {
-		if i, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && i >= 0 {
-			out[i] = true
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// ParseLayer reads the layer parameter, on ParseHidden's terms.
-func ParseLayer(raw string) int {
-	i, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || i < 0 {
-		return 0
-	}
-	return i
-}
-
-// ParseZoom reads the zoom parameter, on ParseHidden's terms — and only the
-// steps the control offers. A hand-typed 137 would draw a tile the size of the
-// panel from a URL nothing in the UI can produce.
-func ParseZoom(raw string) int {
-	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil {
-		return 0
-	}
-	for _, step := range mapcanvas.Steps() {
-		if step == n {
-			return n
-		}
-	}
-	return 0
-}
-
-// ParseGID reads the tile parameter, on the same terms.
-func ParseGID(raw string) uint32 {
-	v, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
-	if err != nil {
-		return 0
-	}
-	return uint32(v)
-}
-
-// hiddenList renders the set in ascending order, so one view has one URL and
-// the page stream's identical-patch suppression is not defeated by map
-// iteration order.
-func hiddenList(hidden map[int]bool) string {
-	if len(hidden) == 0 {
-		return ""
-	}
-	idx := make([]int, 0, len(hidden))
-	for i, on := range hidden {
-		if on {
-			idx = append(idx, i)
-		}
-	}
-	sort.Ints(idx)
-	parts := make([]string, len(idx))
-	for i, v := range idx {
-		parts[i] = strconv.Itoa(v)
-	}
-	return strings.Join(parts, ",")
-}
 
 // cellStyle places one tile: its own size, the slice of the sheet it is, and
 // the matrix that puts it where it goes — flips included, because the
@@ -209,16 +43,12 @@ func paletteStyle(t mapcanvas.PaletteTile) templ.SafeCSS {
 			"background-position:" + itoa(-t.SX) + "px " + itoa(-t.SY) + "px")
 }
 
-func canvasBoxStyle(w, h int) templ.SafeCSS {
-	return templ.SafeCSS("width:" + itoa(w) + "px;height:" + itoa(h) + "px")
-}
-
-// gridStyle draws the cell grid with a repeating gradient rather than an
-// element per cell: the grid is decoration, and 300 more elements to look at
-// lines is 300 more things for a patch to diff.
-func gridStyle(c mapcanvas.Canvas) templ.SafeCSS {
+// canvasVars are the map's own dimensions, in map pixels. The size on screen
+// is these times --map-zoom, computed in CSS, so changing zoom moves no bytes.
+func canvasVars(c mapcanvas.Canvas) templ.SafeCSS {
 	return templ.SafeCSS(
-		"background-size:" + itoa(c.CellW()) + "px " + itoa(c.CellH()) + "px")
+		"--map-w:" + itoa(c.W) + ";--map-h:" + itoa(c.H) +
+			";--tile-w:" + itoa(c.TileW) + ";--tile-h:" + itoa(c.TileH))
 }
 
 // ftoa is a coordinate written as a number at every magnitude — never in
@@ -246,67 +76,225 @@ func layerCount(c mapcanvas.Canvas) string {
 
 // layerTitle says what a row's state means, because several are possible and
 // only one of them is about the file.
-func layerTitle(l mapcanvas.Layer) string {
-	switch {
-	case l.Hidden && l.HiddenInFile:
+// layerTitleExpr is the eye's tooltip, chosen in the browser because what it
+// describes is.
+//
+// It used to be a Go function over Layer.Hidden — and when visibility became a
+// signal, Build stopped setting that field while the function went on reading
+// it. Every eye then said "drawn", including the ones that were not: server-
+// rendered view state, frozen at page load, which is the exact thing this mode
+// stopped doing everywhere else.
+func layerTitleExpr(l mapcanvas.Layer) string {
+	hidden, shown := "not drawn in Forge. The file still says visible, and the engine imports it either way", "drawn"
+	if l.HiddenInFile {
+		hidden = "not drawn — the map's own visible attribute hides it. Click to look at it anyway"
+		shown = "drawn here, though the map's visible attribute hides it"
+	} else if l.Transparent {
+		shown = "drawn, and invisible: the map sets this layer's opacity to 0"
+	}
+	return hideSignal(l) + " ? " + quoteJS(hidden) + " : " + quoteJS(shown)
+}
+
+// layerTitleSeed is the same tooltip for first paint, before Datastar has run.
+func layerTitleSeed(l mapcanvas.Layer) string {
+	if l.HiddenInFile {
 		return "not drawn — the map's own visible attribute hides it. Click to look at it anyway"
-	case l.Hidden:
-		return "not drawn in Forge. The file still says visible, and the engine imports it either way"
-	case l.HiddenInFile:
-		return "drawn here, though the map's visible attribute hides it"
-	case l.Transparent:
+	}
+	if l.Transparent {
 		return "drawn, and invisible: the map sets this layer's opacity to 0"
-	default:
-		return "drawn"
 	}
+	return "drawn"
 }
 
-// zoomSteps is the zoom control's rows: each step, the view that selects it,
-// and whether it is the one in force.
-type zoomStep struct {
-	N       int
-	Href    string
-	Current bool
-}
-
-// A zero canvas is a map whose tilesets did not resolve: it renders, with the
-// reason on the panel above, and there is nothing to zoom. A control marking
-// none of its six steps is worse than no control, which is what this returns.
-func zoomSteps(data Data) []zoomStep {
-	if data.Canvas.Scale < 1 {
-		return nil
+// The text these controls carry before Datastar has run, and if it never does.
+//
+// data-text replaces an element's contents on hydration, so seeding them costs
+// nothing and buys a first paint that is not a column of blank boxes and three
+// missing status fields. The seed is the same value the signal is seeded from,
+// so the two cannot disagree.
+func eyeSeed(l mapcanvas.Layer) string {
+	if l.HiddenInFile {
+		return "—"
 	}
-	all := mapcanvas.Steps()
-	out := make([]zoomStep, 0, len(all))
-	for _, n := range all {
-		out = append(out, zoomStep{
-			N:    n,
-			Href: data.MapView.WithZoom(n).Href(),
-			// Against the scale actually in force, not against the parameter:
-			// a view that asked for nothing is at the fitted scale, and the
-			// control has to mark the step the canvas is really drawn at.
-			Current: n == data.Canvas.Scale,
-		})
-	}
-	return out
+	return "👁"
 }
 
-// zoomLabel is the magnification and what it makes a cell, because "3x" says
-// nothing on its own about whether the map will fit.
-// Only ever called for a canvas that was built — mapStatus says "not drawn" for
-// one that was not, because its size and its layer count are as meaningless as
-// its zoom.
-func zoomLabel(c mapcanvas.Canvas) string {
-	return itoa(c.Scale) + "× · " + itoa(c.CellW()) + "px cells"
+func zoomLabelSeed(c mapcanvas.Canvas) string {
+	n := mapcanvas.InitialScale(c)
+	return itoa(n) + "× · " + itoa(n*c.TileW) + "px cells"
 }
 
-// activeLayerName is what the status line calls the layer a stroke would land
-// on, or says when there is none to land on.
-func activeLayerName(c mapcanvas.Canvas) string {
+func activeLayerSeed(c mapcanvas.Canvas) string {
 	for _, l := range c.Layers {
-		if l.Active {
+		if !l.HiddenInFile {
 			return "painting " + l.Name
 		}
 	}
-	return "no layer"
+	return "painting nothing"
+}
+
+// The Datastar expressions MAP's view controls are wired with.
+//
+// Written here rather than inline in the template for the reason every other
+// expression in this package is: a Datastar attribute whose plugin name does
+// not resolve is skipped in silence, so the expressions are worth having in one
+// place where a test can read them.
+
+// eq is the expression for "this signal currently holds this value".
+func eq(signal string, v uint32) string {
+	return signal + " === " + strconv.FormatUint(uint64(v), 10)
+}
+
+// flag is eq as the string "true" or "false".
+//
+// Datastar's attr plugin writes a bare attribute for a boolean — true becomes
+// `aria-pressed=""` and false removes it — which is right for `disabled` and
+// wrong for everything here. ARIA states are enumerated strings, and the data
+// attributes the browser suite selects on are asserted in both states, which
+// an absent attribute cannot express.
+func flag(expr string) string { return "(" + expr + ") ? 'true' : 'false'" }
+
+// toggleSignal sets a signal to v, or back to zero if it is already v. Clicking
+// the tile in hand puts it down.
+func toggleSignal(signal string, v uint32) string {
+	n := strconv.FormatUint(uint64(v), 10)
+	return signal + " = " + signal + " === " + n + " ? 0 : " + n
+}
+
+// selectedWhen is a data-class object literal adding one class while a signal
+// holds a value.
+func selectedWhen(signal string, v uint32, class string) string {
+	return "{'" + class + "': " + eq(signal, v) + "}"
+}
+
+// hideSignalName is the signal carrying one layer's visibility. One per layer
+// rather than an array: Datastar tracks a signal, and mutating an element of an
+// array signal is not a change it can see.
+func hideSignalName(l mapcanvas.Layer) string { return "hide" + itoa(l.Index) }
+
+func hideSignal(l mapcanvas.Layer) string { return "$" + hideSignalName(l) }
+
+// layerRowClasses is the row's own state: which layer a stroke lands on, and
+// whether this one is being drawn.
+func layerRowClasses(l mapcanvas.Layer) string {
+	return "{'layer-row--active': " + eq("$layer", uint32(l.Index)) +
+		", 'layer-row--muted': " + hideSignal(l) + "}"
+}
+
+// zoomLabelExpr is the status line's "3× · 48px cells", computed in the browser
+// because the zoom it describes is.
+func zoomLabelExpr(c mapcanvas.Canvas) string {
+	return "$zoom + '× · ' + ($zoom * " + itoa(c.TileW) + ") + 'px cells'"
+}
+
+// activeLayerExpr names the layer a stroke lands on. A lookup table rather than
+// a computation: the layer names are the server's to know and the choice is the
+// browser's, so the expression carries the one and reads the other.
+func activeLayerExpr(c mapcanvas.Canvas) string {
+	if len(c.Layers) == 0 {
+		return "'no layer'"
+	}
+	names := make([]string, 0, len(c.Layers))
+	for _, l := range c.Layers {
+		names = append(names, quoteJS(l.Name))
+	}
+	return "'painting ' + ([" + strings.Join(names, ",") + "][$layer] ?? 'nothing')"
+}
+
+// quoteJS writes a string as a JavaScript single-quoted literal. Layer names
+// come from a .tmx that anyone may have written, so a name containing a quote
+// or a backslash must not be able to end the literal and become expression.
+func quoteJS(s string) string {
+	var b strings.Builder
+	b.WriteByte('\'')
+	for _, r := range s {
+		switch r {
+		case '\\', '\'':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '\n':
+			b.WriteString("\\n")
+		case '\r':
+			b.WriteString("\\r")
+		case ' ':
+			b.WriteString("\\u2028")
+		case ' ':
+			b.WriteString("\\u2029")
+		case '@':
+			// Not a JavaScript concern. Datastar rewrites `@name(` into an
+			// action call *after* it has finished protecting string literals,
+			// so the rewrite reaches inside them: a layer called "@post(x)"
+			// makes the status line read `__action("post",evt,x)`. Corruption
+			// of someone's layer name rather than execution of it — literals
+			// are protected from the $signal pass, which is the one that could
+			// matter — but a name is a name and should arrive as it was written.
+			b.WriteString("\\x40")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('\'')
+	return b.String()
+}
+
+// cellsOfLayer is the cells belonging to one layer, in draw order. Build groups
+// them once; this is the lookup.
+func cellsOfLayer(c mapcanvas.Canvas, index int) []mapcanvas.Cell {
+	return c.CellsByLayer[index]
+}
+
+// Steps re-exports the zoom levels the control offers, so the template does not
+// reach into mapcanvas for a list it only renders.
+func Steps() []int { return mapcanvas.Steps() }
+
+// MapView is which map is being edited, and nothing else.
+//
+// It used to carry the zoom, the tile in hand, the active layer and which
+// layers were drawn, all of them in the query string. They are signals now, for
+// a reason that is not preference: a page's SSE subscription is built when it
+// loads and cannot change afterwards, so anything the server renders from it is
+// frozen at that moment — and the next unrelated event would re-render the view
+// as it was and undo whatever had happened since. What the server does not
+// render, a re-render cannot clobber.
+//
+// The map itself stays, because it is not view state: it says which file is
+// being edited, it belongs in a URL somebody can paste, and changing it is a
+// page load rather than a repaint.
+type MapView struct {
+	Path string
+}
+
+// Href is the page for this view.
+func (v MapView) Href() string {
+	if v.Path == "" {
+		return "/forge/map"
+	}
+	return "/forge/map?" + url.Values{"map": {v.Path}}.Encode()
+}
+
+// WithMap is this view pointed at another map. Nothing carries over, because
+// nothing else is left to carry: what used to survive this call — a layer
+// index, a tile id — meant different things in a different map anyway.
+func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
+
+// hideSeed declares one layer's visibility signal, seeded from the file, and
+// only if the page does not already have it.
+//
+// The signals a page opens with are written once on <main>, which is never
+// patched — that is what makes them survive a re-render. But a map reloaded
+// from disk with an extra layer produces a patched canvas referring to a signal
+// the page never declared, and Datastar auto-creates a missing signal as the
+// empty string: falsy, so the new layer would come up *drawn* even when the
+// .tmx hides it, silently contradicting the one rule this seeding exists for.
+//
+// __ifmissing is what makes re-declaring safe. Without it every patch would
+// reset visibility to what the file says and undo the eye on each push.
+//
+// What this does not fix is a reload that *reorders* layers: index 3 then means
+// a different layer and keeps the old value. That is visible rather than silent
+// — the row shows which layers are hidden, and clicking corrects it — and the
+// alternative is a stable per-layer identity, which .tmx does not give us: names
+// are not unique and ids are not on tile layers.
+func hideSeed(l mapcanvas.Layer) string {
+	return `{"` + hideSignalName(l) + `":` + strconv.FormatBool(l.HiddenInFile) + `}`
 }

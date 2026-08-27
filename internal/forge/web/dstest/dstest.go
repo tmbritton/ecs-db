@@ -61,6 +61,15 @@ var nonDatastarAttrs = map[string]bool{
 	// Whether a fields-table row has a validation message under it.
 	"problem": true,
 
+	// ── MAP ──────────────────────────────────────────────────────────────────
+	//
+	// Which map game.toml names, so a test can assert the "loaded" mark without
+	// reading the badge's wording.
+	"configured": true,
+	// Which cell of which layer a tile div is, which Story 5's pointer handling
+	// reads to work out what was painted on.
+	"cell": true,
+
 	// ── AGENTS: the canvas and the two inspectors ────────────────────────────
 	//
 	// The statechart carries most of its state in plain data attributes,

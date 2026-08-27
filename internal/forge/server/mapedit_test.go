@@ -562,6 +562,10 @@ func TestMapCanvas_ListsTheLayersAndTheTilesetPalette(t *testing.T) {
 	}
 }
 
+// The eye is a view control and never an edit, which is as true now that it is
+// a signal as it was when it was a query parameter — more so, since the request
+// it used to make is gone. What has to stay true is that the server draws the
+// layer either way, so the eye has something to hide and something to show.
 func TestMapCanvas_HidingALayerIsAViewAndNotAnEdit(t *testing.T) {
 	srv, _, sess, configured := mapServer(t)
 	before, err := os.ReadFile(configured)
@@ -569,53 +573,87 @@ func TestMapCanvas_HidingALayerIsAViewAndNotAnEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := mapPage(t, srv, "/forge/map?hide=0&map="+url.QueryEscape(configured))
-	if strings.Contains(body, `data-testid="map-cell"`) {
-		t.Errorf("the hidden layer was still drawn:\n%s", body)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+	if !strings.Contains(body, `data-testid="map-cell"`) {
+		t.Fatalf("nothing was drawn:\n%s", body)
 	}
-	if !strings.Contains(body, `data-hidden="true"`) {
-		t.Error("the layer row does not show as hidden")
+	// The cells are grouped, and the group hides from a signal. Without the
+	// group there is nothing for the eye to act on but a round trip.
+	if !strings.Contains(body, `class="map-layer"`) {
+		t.Errorf("the cells are not grouped by layer:\n%s", body)
 	}
-	// The file is untouched and the session is clean: an eye is not an edit.
+	if !strings.Contains(body, "$hide0") {
+		t.Errorf("the layer group does not hide from a signal:\n%s", body)
+	}
+
+	// The file is untouched and the session is clean.
 	after, err := os.ReadFile(configured)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(after) != string(before) {
-		t.Error("hiding a layer wrote to the file")
+		t.Error("rendering the map wrote to the file")
 	}
 	if dirty, _ := sess.Dirty(); len(dirty) != 0 {
-		t.Errorf("hiding a layer marked the map unsaved: %v", dirty)
+		t.Errorf("rendering the map marked it unsaved: %v", dirty)
 	}
 }
 
-func TestMapCanvas_SelectingATileIsInTheURLAndSurvivesAReload(t *testing.T) {
+// The tile in hand is the browser's. What the server ships is a control that
+// reads the signal and a status line that reads it too — and, crucially, no
+// selection of its own, because one it rendered would come back on every patch
+// and overwrite whatever had been picked since.
+func TestMapCanvas_SelectingATileIsTheBrowsersAlone(t *testing.T) {
 	srv, _, _, configured := mapServer(t)
-	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)+"&tile=2")
 
-	if !strings.Contains(body, `data-testid="palette-tile-2"`) {
-		t.Fatalf("the palette is missing:\n%s", body)
+	body := unescaped(mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)))
+	if !strings.Contains(body, `data-testid="palette-tile-1"`) {
+		t.Fatalf("there is no palette:\n%s", body)
 	}
-	if !strings.Contains(body, `data-selected="true"`) {
-		t.Errorf("the selected tile is not marked:\n%s", body)
+	if !strings.Contains(body, "$tile = $tile === 1 ? 0 : 1") {
+		t.Errorf("the palette does not put a tile in hand, or take it out again:\n%s", body)
 	}
-	if !strings.Contains(body, "tile 2") {
-		t.Errorf("the status line does not name the selected tile:\n%s", body)
+	// The class is named in the expression that applies it, and nowhere else.
+	// A static one would come back on the next patch and overwrite the choice.
+	if staticClass.MatchString(body) {
+		t.Errorf("the server rendered a tile selection of its own:\n%s", body)
+	}
+	if !strings.Contains(body, `"tile":0`) {
+		t.Errorf("the page does not open with an empty hand:\n%s", body)
 	}
 }
 
-// Every link in the mode carries the whole view, or looking at a different
-// layer would deselect your brush.
-func TestMapCanvas_LinksKeepTheRestOfTheView(t *testing.T) {
-	srv, _, _, configured := mapServer(t)
-	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)+"&tile=2&hide=1")
+// A class attribute — not a data-class expression — carrying the selected
+// modifier. Only the second is legitimate.
+var staticClass = regexp.MustCompile(`\sclass="[^"]*palette-tile--selected`)
 
-	// The layer toggle keeps the tile and the map.
-	if !strings.Contains(body, "tile=2") {
-		t.Errorf("a link dropped the tile selection:\n%s", body)
+// unescaped reads a page the way a browser does. Datastar expressions live in
+// attributes, so every quote in them arrives as an entity, and a test matching
+// the source form would be asserting about HTML escaping rather than about the
+// expression.
+func unescaped(body string) string {
+	return strings.NewReplacer("&#34;", `"`, "&#39;", "'", "&amp;", "&").Replace(body)
+}
+
+// There is one link left on the page, and it is the only one that should be:
+// choosing which map to edit. Everything else became a button over a signal.
+//
+// A link is a navigation, and a navigation is ~92ms, a document teardown and a
+// fresh SSE connection. That is the right price for opening a different file
+// and an absurd one for putting a tile in your hand.
+func TestMapCanvas_OnlyChoosingAMapIsStillALink(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+
+	main := body[strings.Index(body, `id="mode-content"`):]
+	for _, gone := range []string{"hide=", "layer=", "zoom=", "tile="} {
+		if strings.Contains(main, gone) {
+			t.Errorf("view state is still in a link (%s):\n%s", gone, main)
+		}
 	}
-	if !strings.Contains(body, "hide=1") {
-		t.Errorf("a link dropped the hidden layers:\n%s", body)
+	if !strings.Contains(main, "/forge/map?map=") {
+		t.Errorf("there is no way to open another map:\n%s", main)
 	}
 }
 
@@ -697,42 +735,54 @@ func TestMapCanvas_TheStatusLineSaysHowBigTheMapIs(t *testing.T) {
 	}
 }
 
-// The layer a stroke lands on. Story 4 paints into it, and its own notes say
-// the panel showing which one is active is not decoration.
-func TestMapCanvas_TheActiveLayerIsMarkedAndSelectable(t *testing.T) {
+// Which layer a stroke lands on is the browser's, and the status line reads it
+// from the same signal the panel writes — so the two cannot disagree, which
+// they could while one was rendered and the other was a link.
+func TestMapCanvas_TheActiveLayerIsTheBrowsers(t *testing.T) {
 	srv, _, _, configured := mapServer(t)
-	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+	body := unescaped(mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)))
 
-	// The first layer is active by default: a map always has somewhere to paint.
-	if !strings.Contains(body, `data-active="true"`) {
-		t.Errorf("no layer is marked active:\n%s", body)
-	}
 	if !strings.Contains(body, `data-testid="layer-select-ground"`) {
 		t.Errorf("a layer cannot be made active:\n%s", body)
 	}
-	if !strings.Contains(body, "painting ground") {
-		t.Errorf("the status line does not say where a stroke would land:\n%s", body)
+	if !strings.Contains(body, "$layer = 0") {
+		t.Errorf("choosing a layer sets no signal:\n%s", body)
+	}
+	// The first layer the file draws, so a map always has somewhere to paint
+	// before anyone has chosen.
+	if !strings.Contains(body, `"layer":0`) {
+		t.Errorf("the page does not open painting into a layer:\n%s", body)
+	}
+	// The status line names it from the signal rather than from the render.
+	if !strings.Contains(body, "'painting ' + (['ground'][$layer]") {
+		t.Errorf("the status line does not read the layer signal:\n%s", body)
 	}
 }
 
-// Two controls on one row, because conflating them means you cannot look at a
-// layer without also painting into it.
+// Two controls on one row, and they must stay two: the eye changes what is
+// drawn, the name changes where a stroke lands. They write different signals.
 func TestMapCanvas_TheEyeAndTheNameAreDifferentControls(t *testing.T) {
 	srv, _, _, configured := mapServer(t)
-	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
+	body := unescaped(mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)))
 
 	if !strings.Contains(body, `data-testid="layer-eye-ground"`) {
 		t.Errorf("the row has no visibility toggle:\n%s", body)
 	}
-	// The eye's link changes hide and not layer; the name's does the reverse.
-	if !strings.Contains(body, "hide=0") {
+	if !strings.Contains(body, "$hide0 = !$hide0") {
 		t.Errorf("the eye does not toggle visibility:\n%s", body)
+	}
+	if !strings.Contains(body, "$layer = 0") {
+		t.Errorf("the name does not choose where to paint:\n%s", body)
 	}
 }
 
-// A layer the file hides can be looked at. It could not be while Forge's view
-// state was OR'd with the file: the eye changed the URL, flipped nothing, and
-// never changed its own state.
+// A layer the file hides comes up hidden and can still be shown.
+//
+// Both halves matter and they pull opposite ways. The server has to draw it —
+// a layer left out of the canvas has an eye that can never turn it on — while
+// the page has to start with it not shown, which is the signal's seed. And the
+// "file" badge has to keep saying what the file says however the eye is set,
+// because that row is the only thing telling view state and file state apart.
 func TestMapCanvas_ALayerTheFileHidesStartsHiddenAndCanBeShown(t *testing.T) {
 	srv, _, sess, configured := mapServer(t)
 	raw, err := os.ReadFile(configured)
@@ -751,22 +801,18 @@ func TestMapCanvas_ALayerTheFileHidesStartsHiddenAndCanBeShown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	at := "/forge/map?map=" + url.QueryEscape(configured)
-	body := mapPage(t, srv, at)
-	if strings.Contains(body, `data-testid="map-cell"`) {
-		t.Errorf("a layer the file hides was drawn on first load:\n%s", body)
+	body := unescaped(mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)))
+
+	// Drawn, so the eye has something to show.
+	if !strings.Contains(body, `data-testid="map-cell"`) {
+		t.Errorf("a layer the file hides was left out of the canvas:\n%s", body)
+	}
+	// And not shown, because that is what the file says.
+	if !strings.Contains(body, `"hide0":true`) {
+		t.Errorf("the page does not start with the layer hidden:\n%s", body)
 	}
 	if !strings.Contains(body, `data-testid="layer-file-hidden-ground"`) {
 		t.Errorf("the row does not say the file hides it:\n%s", body)
-	}
-
-	// Turning it on: the URL says which layers are hidden, and this one is not.
-	body = mapPage(t, srv, at+"&hide=")
-	if !strings.Contains(body, `data-testid="map-cell"`) {
-		t.Errorf("a layer the file hides could not be shown:\n%s", body)
-	}
-	if !strings.Contains(body, `data-testid="layer-file-hidden-ground"`) {
-		t.Error("showing it claimed the file no longer hides it")
 	}
 }
 
@@ -796,52 +842,40 @@ func TestMapCanvas_ALayerAtZeroOpacitySaysSo(t *testing.T) {
 	}
 }
 
-// Zoom is in the URL like every other part of the view, and the control marks
-// the scale actually in force — which for a view that has asked for nothing is
-// the fitted one, not the parameter.
-func TestMapCanvas_ZoomIsAControlAndIsInTheURL(t *testing.T) {
+// Zoom is a control the browser owns outright: every step is offered, the
+// current one is marked from the signal, and the canvas scales from a custom
+// property rather than from anything the server baked into three hundred cells.
+//
+// The one thing the server still decides is what the page opens at.
+func TestMapCanvas_ZoomIsAControlTheBrowserOwns(t *testing.T) {
 	srv, _, _, configured := mapServer(t)
-	at := "/forge/map?map=" + url.QueryEscape(configured)
 
-	body := mapPage(t, srv, at)
+	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
 	if !strings.Contains(body, `data-testid="zoom-control"`) {
 		t.Fatalf("there is no zoom control:\n%s", body)
 	}
-	// The fixture is 2x2 at 16px, so it fits at the largest step FitScale
-	// offers and the control says so without anyone asking.
-	if !strings.Contains(body, `data-testid="zoom-4" data-current="true"`) {
-		t.Errorf("the control does not mark the fitted scale:\n%s", body)
-	}
-
-	body = mapPage(t, srv, at+"&zoom=1")
-	if !strings.Contains(body, `data-testid="zoom-1" data-current="true"`) {
-		t.Errorf("asking for 1x did not select it:\n%s", body)
-	}
-	if !strings.Contains(body, "1× · 16px cells") {
-		t.Errorf("the status line does not say what a cell comes to:\n%s", body)
-	}
-
-	// And at the fitted default the cell is four times its size in the file,
-	// which is the half of the readout that 1x cannot show.
-	body = mapPage(t, srv, at)
-	if !strings.Contains(body, "4× · 64px cells") {
-		t.Errorf("the status line does not scale the cell size:\n%s", body)
-	}
-	if !strings.Contains(body, `data-cell-w="64"`) {
-		t.Errorf("the canvas does not carry its cell size for Story 5:\n%s", body)
-	}
-}
-
-// A zoom the control cannot produce is ignored rather than honoured: a
-// hand-typed 137 would draw one tile the size of the panel.
-func TestMapCanvas_AZoomOutsideTheStepsIsIgnored(t *testing.T) {
-	srv, _, _, configured := mapServer(t)
-	at := "/forge/map?map=" + url.QueryEscape(configured)
-	for _, bad := range []string{"137", "0", "-2", "nonsense", "2.5"} {
-		body := mapPage(t, srv, at+"&zoom="+url.QueryEscape(bad))
-		if !strings.Contains(body, `data-testid="zoom-4" data-current="true"`) {
-			t.Errorf("zoom=%q was honoured:\n%s", bad, body)
+	// Every step, each marking itself from the signal — there is no server
+	// round trip in which to re-render a different one as current.
+	for _, n := range []string{"1", "2", "3", "4", "6", "8"} {
+		if !strings.Contains(body, `data-testid="zoom-`+n+`"`) {
+			t.Errorf("the control does not offer %sx:\n%s", n, body)
 		}
+		if !strings.Contains(body, "$zoom = "+n) {
+			t.Errorf("the %sx step sets no signal:\n%s", n, body)
+		}
+	}
+	// The fixture is 2x2 at 16px, so it opens at the largest step FitScale
+	// offers, and that is the initial value of the signal.
+	if !strings.Contains(unescaped(body), `"zoom":4`) {
+		t.Errorf("the page does not open at the fitted scale:\n%s", body)
+	}
+	// The canvas carries the map's own size and scales in CSS. A baked pixel
+	// size would mean asking the server for every cell again to change zoom.
+	if !strings.Contains(body, "--map-w:32") {
+		t.Errorf("the canvas does not carry the map's own size:\n%s", body)
+	}
+	if !strings.Contains(body, "--map-zoom") {
+		t.Errorf("the canvas does not scale from the signal:\n%s", body)
 	}
 }
 

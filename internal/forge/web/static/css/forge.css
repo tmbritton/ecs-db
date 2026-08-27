@@ -2489,13 +2489,6 @@ option:disabled {
   border-left: 0;
 }
 
-.segmented__on {
-  padding: 3px 11px;
-  border-left: 2px solid var(--border);
-  background: var(--active);
-  color: var(--amber);
-}
-
 .segmented__off {
   padding: 3px 11px;
   background: none;
@@ -2506,6 +2499,24 @@ option:disabled {
   cursor: not-allowed;
 }
 
+/* Controls that became <button> when their state moved into a signal: the
+   palette tile, the layer eye, the layer name and the zoom steps. They were
+   anchors while every one of them was a navigation; none of them goes anywhere
+   now, and a link that does not link is a link a keyboard user is lied to
+   about. The reset is here so they still look like what they looked like. */
+.palette-tile,
+.layer-row__eye,
+.layer-row__name,
+.segmented__link {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+
 .segmented__link {
   padding: 3px 11px;
   border-left: 2px solid var(--border);
@@ -2513,9 +2524,27 @@ option:disabled {
   text-decoration: none;
 }
 
-.segmented__link:hover {
+/* Not the current one. It carries both classes, and :hover is (0,2,0) against
+   __on's (0,1,0) — so hovering the active step used to take its highlight off,
+   which source order alone does not fix. */
+.segmented__link:not(.segmented__on):hover {
   color: var(--amber);
   background: var(--hover);
+}
+
+/* After __link, not before it, and with the same specificity rather than more.
+   The highlighted segment carries both classes now — data-class adds __on to a
+   button that is already __link, where it used to be a different element — so
+   __on has to win, and source order is what makes it win without also
+   out-specifying `.segmented > :first-child`. Bumping this to
+   `.segmented__link.segmented__on` did win the colour and then took the
+   first-child rule with it, giving the leftmost segment a divider it should
+   not have and making it 2px wider than every other. */
+.segmented__on {
+  padding: 3px 11px;
+  border-left: 2px solid var(--border);
+  background: var(--active);
+  color: var(--amber);
 }
 
 /* The viewport scrolls; the canvas inside it is the map's full size. A map
@@ -2530,9 +2559,47 @@ option:disabled {
   padding: 8px;
 }
 
+/* The map's own size times the zoom. --map-w/h are map pixels, written once by
+   the server; --map-zoom is a signal the browser owns, so changing zoom is a
+   custom-property write and a repaint rather than a request. */
 .map-canvas {
   position: relative;
   background: var(--canvas);
+  --map-zoom: 1;
+  width: calc(var(--map-w) * var(--map-zoom) * 1px);
+  height: calc(var(--map-h) * var(--map-zoom) * 1px);
+}
+
+/* The cells live at map scale and the whole box is scaled once. A transform
+   does not affect layout, which is why this is a second element inside the one
+   that takes up the space.
+   
+   Its own size in *map* pixels, not `inset: 0`. Inset would make it the size of
+   .map-canvas, which is already multiplied by the zoom — and scaling that again
+   gives a visual box of map x zoom squared. The map still draws correctly,
+   because every cell is placed by its own matrix, so the only symptom is the
+   viewport's scroll range: at 8x it was eight times too long in each axis, the
+   thumb an eighth of its proper size, and the map occupying 1.6% of what you
+   could scroll to. Silent, and about to become Story 5's hit-testing area. */
+.map-canvas__scaled {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: calc(var(--map-w) * 1px);
+  height: calc(var(--map-h) * 1px);
+  transform: scale(var(--map-zoom));
+  transform-origin: 0 0;
+}
+
+/* Cells are grouped by layer so the eye can hide one without the server
+   re-rendering the map. display:contents, so grouping them costs no box and no
+   change to how they stack. */
+.map-layer {
+  display: contents;
+}
+
+.map-layer--hidden > .map-cell {
+  display: none;
 }
 
 /* The grid is one repeating gradient rather than an element per cell: it is
@@ -2545,6 +2612,11 @@ option:disabled {
   background-image:
     linear-gradient(to right, var(--hover) 1px, transparent 1px),
     linear-gradient(to bottom, var(--hover) 1px, transparent 1px);
+  /* Outside the scaled box, with its spacing scaled by hand: inside it, the
+     lines would be scaled too and an 8× zoom would draw them 8px wide. */
+  background-size:
+    calc(var(--tile-w) * var(--map-zoom) * 1px)
+    calc(var(--tile-h) * var(--map-zoom) * 1px);
 }
 
 .map-cell {

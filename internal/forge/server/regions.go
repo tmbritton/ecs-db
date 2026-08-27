@@ -105,8 +105,12 @@ func (s *Server) renderRegions(m mode.Mode, data modes.Data) (templates.Regions,
 	// send, not rendered a second time from the same Data. Two renders that
 	// merely ought to agree is what the version stamp would then be asserting
 	// about, and the stamp is only worth having if it cannot be wrong.
+	signals := ""
+	if content.Signals != nil {
+		signals = content.Signals(data)
+	}
 	modeContent, err := renderToString(
-		templates.ModeContentRegion(content.Page(rendered[first : first+count])))
+		templates.ModeContentRegion(content.Page(rendered[first:first+count]), signals))
 	if err != nil {
 		return templates.Regions{}, "", fmt.Errorf("assembling %s: %w", m.Slug, err)
 	}

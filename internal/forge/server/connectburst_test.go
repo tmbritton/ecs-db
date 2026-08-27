@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -254,5 +255,35 @@ func TestModePage_CarriesEveryRegionExactlyOnce(t *testing.T) {
 				t.Errorf("%s: id %q appears %d times in the page, want exactly 1", m.Slug, id, n)
 			}
 		}
+	}
+}
+
+// The stream's subscription has to name the map the page is showing.
+//
+// Without it the stream renders whatever selectMap falls back to — the first in
+// the list — so a page editing the second map would have the first one patched
+// over it on the next event. With one map in the project the fallback and the
+// selection are the same thing and nothing goes wrong, which is exactly why
+// this needs two.
+func TestStreamQuery_NamesTheMapThePageIsShowing(t *testing.T) {
+	srv, s, sess, configured := mapServer(t)
+
+	other := ""
+	for _, path := range sess.Paths() {
+		if path != configured {
+			other = path
+			break
+		}
+	}
+	if other == "" {
+		t.Fatalf("the fixture holds one map, so this can prove nothing: %v", sess.Paths())
+	}
+
+	_, body := get(t, srv, "/forge/map?map="+url.QueryEscape(other))
+	sub := subscriptionOf(t, body)
+
+	req := mustRequest(t, srv.URL+"/forge/map/events?"+strings.TrimPrefix(sub, "/forge/map/events?"))
+	if got := s.modeData(req).SelectedMap; got != other {
+		t.Errorf("the page shows %q and its stream renders %q", other, got)
 	}
 }

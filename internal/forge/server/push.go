@@ -138,18 +138,45 @@ func (s *Server) enginePollStartedLocked() {
 		return
 	}
 	ctx, cancel := context.WithCancel(s.streamsCtx)
-	s.pollCancel = cancel
-	go s.pollEngine(ctx)
+	done := make(chan struct{})
+	s.pollCancel, s.pollDone = cancel, done
+	s.pollersRunning.Add(1)
+	go func() {
+		defer close(done)
+		defer s.pollersRunning.Add(-1)
+		s.pollEngine(ctx)
+	}()
 }
 
+// enginePollStoppedLocked hands back a function that stops the poller and waits
+// for it to actually be gone.
+//
+// Two steps, because a cancelled poller is not a stopped one: it may be inside
+// status.Check, which opens the game's database, and SQLite writes -wal and
+// -shm beside it. So "the last tab closed" has to mean the file handles are
+// released, not that a signal was sent — otherwise Shutdown can return while a
+// goroutine is still touching the database, and a test's TempDir cleanup can
+// race a file being created in it.
+//
+// The wait happens outside s.mu, and must: the poller calls publish, which
+// takes s.mu, so waiting for it under the lock would deadlock.
+//
 // Callers hold s.mu.
-func (s *Server) enginePollStoppedLocked() {
+func (s *Server) enginePollStoppedLocked() func() {
 	if s.pollCancel == nil {
-		return
+		return func() {}
 	}
-	s.pollCancel()
-	s.pollCancel = nil
+	cancel, done := s.pollCancel, s.pollDone
+	s.pollCancel, s.pollDone = nil, nil
+	return func() {
+		cancel()
+		<-done
+	}
 }
+
+// pollersRunning is how many engine pollers are alive, for a test that has to
+// tell "signalled to stop" from "stopped".
+func (s *Server) enginePollers() int64 { return s.pollersRunning.Load() }
 
 // pollEngine watches what Forge cannot be told about: the game's database,
 // written by another process, and the project's files, which anything on the

@@ -126,6 +126,13 @@ type Placement struct {
 	// which a Draw carries, because a renderer works in pixels.
 	X, Y  int
 	Layer string
+	// LayerIndex is where that layer sits in Map.Layers.
+	//
+	// Alongside the name and not instead of it, because Tiled permits two
+	// layers to share a name and an editor that keyed anything on the name
+	// would then treat them as one. Forge groups the cells it draws by this so
+	// a layer can be hidden without re-asking the server for the map.
+	LayerIndex int
 	// Problem is why this cell could not be drawn, or empty.
 	Problem string
 }
@@ -151,7 +158,7 @@ func (m *Map) Placements() []Placement {
 	// File order, first layer first: a later layer covers an earlier one. The
 	// reverse of the loader's walk, which wants the topmost tile in a cell and
 	// starts from the end — the same list read for two different questions.
-	for _, layer := range m.Layers {
+	for i, layer := range m.Layers {
 		// Visibility is honoured here and nowhere else. The loader ignores it
 		// on purpose: hiding a layer is what the editor shows you, not what the
 		// map holds. Drawing is the thing the checkbox is actually about.
@@ -168,7 +175,7 @@ func (m *Map) Placements() []Placement {
 				if tile.GID == 0 {
 					continue // an empty cell, not a blank tile
 				}
-				place := Placement{X: x, Y: y, Layer: layer.Name}
+				place := Placement{X: x, Y: y, Layer: layer.Name, LayerIndex: i}
 				d, why := m.drawOf(tile, x, y)
 				if why != "" {
 					place.Problem = why

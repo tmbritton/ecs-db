@@ -17,5 +17,5 @@ import (
 // What it is for is the tests that want to ask what a mode looks like without
 // having to know how many pieces it comes in.
 func (s *Server) renderModeContent(m mode.Mode, data modes.Data) (string, error) {
-	return renderToString(templates.ModeContentRegion(modes.Render(m.Slug, data)))
+	return renderToString(templates.ModeContentRegion(modes.Render(m.Slug, data), ""))
 }

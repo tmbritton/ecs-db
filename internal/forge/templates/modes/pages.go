@@ -5,8 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
+
+	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 )
 
 // The Page functions in Registry, curried.
@@ -65,4 +69,43 @@ func Render(slug string, data Data) templ.Component {
 		}
 		return content.Page(rendered).Render(ctx, w)
 	})
+}
+
+// MapSignals is MAP's client-owned view state: what is zoomed to, which tile is
+// in hand, which layer a stroke lands on, and which layers are drawn.
+//
+// None of it is in the URL and none of it is rendered by the server, which is
+// not a preference but a correctness requirement. The stream's subscription is
+// built when the page loads and cannot change afterwards, so anything the
+// server renders from it is frozen at that moment — and the next unrelated
+// event, a save or another tab's edit, would re-render the view as it was and
+// undo whatever has happened since.
+//
+// Seeded here and then let go of. `hide<N>` starts from what the *file* says,
+// so a layer the map hides comes up hidden and its eye can still turn it on.
+func MapSignals(data Data) string {
+	var b strings.Builder
+	b.WriteString(`{"zoom":`)
+	b.WriteString(strconv.Itoa(mapcanvas.InitialScale(data.Canvas)))
+	b.WriteString(`,"tile":0,"layer":`)
+	b.WriteString(strconv.Itoa(activeLayerIndex(data.Canvas)))
+	for _, layer := range data.Canvas.Layers {
+		b.WriteString(`,"hide`)
+		b.WriteString(strconv.Itoa(layer.Index))
+		b.WriteString(`":`)
+		b.WriteString(strconv.FormatBool(layer.HiddenInFile))
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// activeLayerIndex is the layer a stroke lands on when the page opens: the
+// first one the file draws, so that painting works before anyone has chosen.
+func activeLayerIndex(c mapcanvas.Canvas) int {
+	for _, layer := range c.Layers {
+		if !layer.HiddenInFile {
+			return layer.Index
+		}
+	}
+	return 0
 }

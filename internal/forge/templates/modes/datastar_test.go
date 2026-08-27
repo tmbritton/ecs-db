@@ -42,13 +42,25 @@ func TestModes_DatastarAttributesResolve(t *testing.T) {
 	// canvas and both inspectors carry more data-on: bindings than the other
 	// two modes together, and a Datastar attribute naming a plugin that does
 	// not exist renders perfectly and does nothing.
+	// MAP included, and it is the reason this list grew again. It carried no
+	// handlers at all while its controls were links, so nobody added it — and
+	// then every one of those links became a signal and the mode went from zero
+	// Datastar attributes to more than SCHEMA has. The first version of them
+	// used `data-attr-aria-pressed`, which parses as a plugin named
+	// "attr-aria-pressed", and every one of them rendered perfectly and did
+	// nothing.
 	seen := dstest.AssertAttrs(t, plugins,
 		renderMode(t, data),
 		renderEnts(t, entsWithSelection()),
 		renderAgents(t, transitionFixture(t, guardedGo)),
-		renderAgents(t, inspectorFixture(t, "state:idle")))
+		renderAgents(t, inspectorFixture(t, "state:idle")),
+		render(t, Render("map", mapRegionFixture())))
 	// Without this the scan passes on a template that emits no handlers at all.
-	dstest.RequireSeen(t, seen, "on:click", "on:change", "testid", "type")
+	// The signals themselves are declared on <main id="mode-content">, which the
+	// shell renders rather than any mode, so they are not in this scan — see
+	// regions_test.go for that half.
+	dstest.RequireSeen(t, seen, "on:click", "on:change", "testid", "type",
+		"attr:aria-pressed", "class", "text", "style")
 }
 
 // The dash form parses as a plugin name rather than an event key and is
@@ -61,8 +73,15 @@ func TestModes_UseTheColonForm(t *testing.T) {
 		Available:  true,
 		Statements: []storage.Statement{{Kind: "drop_table", SQL: "DROP TABLE comp_health", Destructive: true}},
 	}
-	rendered := renderMode(t, data) + renderEnts(t, entsWithSelection())
-	for _, bad := range []string{"data-on-click", "data-on-change", "data-on-load"} {
+	rendered := renderMode(t, data) + renderEnts(t, entsWithSelection()) +
+		render(t, Render("map", mapRegionFixture()))
+	// data-attr- is the same mistake in a different plugin, and MAP shipped it
+	// on ten attributes: the key is separated by a colon, and a dash makes the
+	// whole thing a plugin name nothing registers.
+	for _, bad := range []string{
+		"data-on-click", "data-on-change", "data-on-load",
+		"data-attr-", "data-class-", "data-signals-", "data-text-", "data-style-",
+	} {
 		if strings.Contains(rendered, bad) {
 			t.Errorf("%s names an unregistered plugin and is silently ignored", bad)
 		}

@@ -45,7 +45,7 @@ func shellRegions(t *testing.T, engine status.Status, reports []components.SaveR
 		EngineStatus: renderToString(t, components.EngineStatus(components.EngineStatusProps{Status: engine})),
 		SaveReports:  renderToString(t, components.SaveReports(components.SaveReportsProps{Reports: reports})),
 		SaveFooter:   renderToString(t, SaveFooterRegion(NoFooter())),
-		ModeContent:  renderToString(t, ModeContentRegion(body)),
+		ModeContent:  renderToString(t, ModeContentRegion(body, "")),
 		SaveConfirm:  renderToString(t, SaveConfirmRegion(nil)),
 	}
 }

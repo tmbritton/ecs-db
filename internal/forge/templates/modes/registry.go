@@ -38,6 +38,19 @@ type Region struct {
 type Content struct {
 	Regions []Region
 	Page    func(rendered []string) templ.Component
+	// Signals is the client-owned view state this mode declares, as a JSON
+	// object literal, or empty for a mode that has none.
+	//
+	// It is emitted on `<main id="mode-content">`, which a page load renders and
+	// the stream never patches — the regions inside it are what get patched. So
+	// a signal declared here survives every patch, which is the whole point:
+	// what the server does not render, a re-render cannot clobber.
+	//
+	// Seeded from Data because the *initial* value is the server's to know — a
+	// layer the map file hides must come up hidden. After that the browser owns
+	// it and the server never hears about it again, except when a request that
+	// needs it carries the signals along.
+	Signals func(Data) string
 }
 
 // Registry maps a mode slug to its content.
@@ -60,7 +73,8 @@ var Registry = map[string]Content{
 			{"map-canvas-region", MapCanvasRegion},
 			{"map-foot", MapFootRegion},
 		},
-		Page: MapPage,
+		Page:    MapPage,
+		Signals: MapSignals,
 	},
 	"tiles":   stubContent("TILES", "Tileset metadata: collision, animation, terrain and class.", "Epic 16"),
 	"ents":    {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},

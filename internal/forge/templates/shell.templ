@@ -129,8 +129,15 @@ templ SaveConfirmRegion(confirm Component) {
 // load. The stream does not patch it — a mode is patched through its own
 // regions, which sit inside this — so it is a wrapper and a layout anchor
 // rather than a target.
-templ ModeContentRegion(content Component) {
-	<main id="mode-content" class="shell__content" data-testid="mode-content">
+templ ModeContentRegion(content Component, signals string) {
+	<main
+		id="mode-content"
+		class="shell__content"
+		data-testid="mode-content"
+		if signals != "" {
+			data-signals={ signals }
+		}
+	>
 		@content
 	</main>
 }

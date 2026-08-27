@@ -8,7 +8,6 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
-	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
 func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
@@ -167,14 +166,10 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 	}
 	data.ConfiguredMap = s.cfg.MapSession.Configured()
 	data.SelectedMap = selectMap(data.Maps, r.URL.Query().Get("map"))
-	q := r.URL.Query()
-	data.MapView = modes.MapView{
-		Path:        data.SelectedMap,
-		Hidden:      modes.ParseHidden(q.Get("hide")),
-		Active:      modes.ParseLayer(q.Get("layer")),
-		Zoom:        modes.ParseZoom(q.Get("zoom")),
-		SelectedGID: modes.ParseGID(q.Get("tile")),
-	}
+	// Which map, and nothing else. Zoom, the tile in hand, the active layer and
+	// which layers are drawn are signals the browser owns — see modes.MapView
+	// for why they had to stop being query parameters.
+	data.MapView = modes.MapView{Path: data.SelectedMap}
 	// Only where it is drawn. Resolving a map means parsing it and reading its
 	// tilesets, and no mode but MAP renders a cell of it.
 	if slug != "map" || data.SelectedMap == "" {
@@ -186,37 +181,7 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 		// A canvas that refused to render would take the map list with it.
 		return
 	}
-	// A view that says nothing about layers starts from what the file says, and
-	// from then on the URL is the whole answer. Seeded here rather than inside
-	// the canvas because only a URL can be authoritative — a canvas that OR'd
-	// the two gave a file-hidden layer an eye that could not be turned on.
-	if !q.Has("hide") {
-		data.MapView.Hidden = hiddenInFile(m)
-	}
-	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{
-		Hidden:      data.MapView.Hidden,
-		Active:      data.MapView.Active,
-		SelectedGID: data.MapView.SelectedGID,
-		AssetURL:    assetURL,
-		// Zero means the scale that fits the map, which is what a view that has
-		// not asked gets.
-		Scale: data.MapView.Zoom,
-	})
-}
-
-// hiddenInFile is the map's own idea of which layers are not drawn.
-func hiddenInFile(m *tiled.Map) map[int]bool {
-	var out map[int]bool
-	for i, layer := range m.Layers {
-		if layer.Visible {
-			continue
-		}
-		if out == nil {
-			out = map[int]bool{}
-		}
-		out[i] = true
-	}
-	return out
+	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{AssetURL: assetURL})
 }
 
 // selectMap resolves ?map= to a map the project has, falling back to the first

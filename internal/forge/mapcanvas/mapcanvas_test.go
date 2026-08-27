@@ -37,7 +37,7 @@ func oneSheet() []tiled.TilesetRef {
 // Scale 1 unless a test is about zoom: everything else here is about where a
 // tile goes and which slice of the sheet it is, and a fitted default would
 // multiply every expected coordinate by a number the test does not care about.
-func opts() mapcanvas.Options { return mapcanvas.Options{AssetURL: url, Scale: 1} }
+func opts() mapcanvas.Options { return mapcanvas.Options{AssetURL: url} }
 
 func TestBuild_PlacesEveryNonEmptyCell(t *testing.T) {
 	m := mapOf(2, 2, 16, 16, oneSheet(), layer("ground", 2, 2, true, 1, 0, 2, 3))
@@ -79,78 +79,60 @@ func TestBuild_AFlippedTileCarriesTheEnginesTransform(t *testing.T) {
 	}
 }
 
-// Layer order is the engine's: a later layer covers an earlier one, and a
-// template that emits the cells in order gets the stacking right without
-// knowing what stacking is.
-func TestBuild_CellsComeOutInDrawOrder(t *testing.T) {
+// Every layer is drawn, including the ones the file hides.
+//
+// Which layers are *shown* is the browser's: the eye toggles a signal and CSS
+// hides a group. So a layer left out here would be a layer whose eye could
+// never turn it back on — and the server would have to be asked for the map
+// again to change what is on screen, which is the round trip this removed.
+func TestBuild_DrawsEveryLayerIncludingTheOnesTheFileHides(t *testing.T) {
 	m := mapOf(1, 1, 16, 16, oneSheet(),
 		layer("floor", 1, 1, true, 1),
-		layer("wall", 1, 1, true, 2),
+		layer("wall", 1, 1, false, 2),
 	)
+
 	c := mapcanvas.Build(m, opts())
 	if len(c.Cells) != 2 {
-		t.Fatalf("got %d cells", len(c.Cells))
-	}
-	if c.Cells[0].Layer != "floor" || c.Cells[1].Layer != "wall" {
-		t.Errorf("cells are in %q then %q", c.Cells[0].Layer, c.Cells[1].Layer)
-	}
-}
-
-func TestBuild_HidingALayerStopsItBeingDrawnAndNothingElse(t *testing.T) {
-	m := mapOf(1, 1, 16, 16, oneSheet(),
-		layer("floor", 1, 1, true, 1),
-		layer("wall", 1, 1, true, 2),
-	)
-	o := opts()
-	o.Hidden = map[int]bool{1: true}
-
-	c := mapcanvas.Build(m, o)
-	if len(c.Cells) != 1 || c.Cells[0].Layer != "floor" {
 		t.Fatalf("cells: %+v", c.Cells)
 	}
-	// The panel still lists it: the map holds a wall layer whether or not
-	// Forge is drawing it.
 	if len(c.Layers) != 2 {
 		t.Fatalf("layers: %+v", c.Layers)
 	}
-	if !c.Layers[1].Hidden {
-		t.Error("the hidden layer is not marked hidden")
+	// In draw order, first layer first, so a later layer covers an earlier one.
+	// Asserted as a sequence rather than a set: order is the whole reason the
+	// flat list exists, and a map keyed by index would report the same thing
+	// whichever way round they came out.
+	var order []string
+	for _, cell := range c.Cells {
+		order = append(order, cell.Layer)
 	}
-	if c.Layers[1].HiddenInFile {
-		t.Error("hiding a layer in Forge claimed the file hides it")
+	if len(order) != 2 || order[0] != "floor" || order[1] != "wall" {
+		t.Errorf("cells are not in draw order: %v", order)
+	}
+	// And each cell says which layer it belongs to, because that is what the
+	// canvas groups by. The name is not enough — Tiled permits two layers to
+	// share one.
+	if c.Cells[0].LayerIndex != 0 || c.Cells[1].LayerIndex != 1 {
+		t.Errorf("cells do not carry their layer index: %+v", c.Cells)
+	}
+	// Grouped once by Build, and the groups keep the flat list's order.
+	if len(c.CellsByLayer[0]) != 1 || c.CellsByLayer[0][0].Layer != "floor" {
+		t.Errorf("layer 0's group is wrong: %+v", c.CellsByLayer[0])
+	}
+	if len(c.CellsByLayer[1]) != 1 || c.CellsByLayer[1][0].Layer != "wall" {
+		t.Errorf("layer 1's group is wrong: %+v", c.CellsByLayer[1])
 	}
 }
 
-// The file's own visible attribute and Forge's view state are different facts.
-// The engine imports a hidden layer's tiles either way, so a panel that
-// conflated them would make one look like the other.
-//
-// Hidden is authoritative and the caller seeds it, so a layer the file hides is
-// reported as such and can still be *shown* — which is the point of an eye you
-// can click, and which an OR against the file made impossible.
-func TestBuild_ALayerTheFileHidesCanStillBeLookedAt(t *testing.T) {
+// What the file says is still reported, because it is what seeds the signal —
+// a layer the map hides must come up hidden — and because the panel's "file"
+// badge is the one row whose job is telling view state and file state apart.
+func TestBuild_ReportsWhichLayersTheFileHides(t *testing.T) {
 	m := mapOf(1, 1, 16, 16, oneSheet(), layer("secret", 1, 1, false, 1))
 
-	seeded := opts()
-	seeded.Hidden = map[int]bool{0: true} // what the server seeds from the file
-	c := mapcanvas.Build(m, seeded)
-	if len(c.Cells) != 0 {
-		t.Errorf("a layer the view hides was drawn: %+v", c.Cells)
-	}
-	if !c.Layers[0].Hidden || !c.Layers[0].HiddenInFile {
-		t.Errorf("layer: %+v", c.Layers[0])
-	}
-
-	// Turned on: the file still says hidden, and Forge draws it.
-	shown := mapcanvas.Build(m, opts())
-	if len(shown.Cells) != 1 {
-		t.Errorf("a layer the file hides could not be shown: %+v", shown.Cells)
-	}
-	if shown.Layers[0].Hidden {
-		t.Error("it is still reported as hidden")
-	}
-	if !shown.Layers[0].HiddenInFile {
-		t.Error("showing it claimed the file no longer hides it")
+	c := mapcanvas.Build(m, opts())
+	if len(c.Layers) != 1 || !c.Layers[0].HiddenInFile {
+		t.Fatalf("layers: %+v", c.Layers)
 	}
 }
 
@@ -158,22 +140,21 @@ func TestBuild_ALayerTheFileHidesCanStillBeLookedAt(t *testing.T) {
 // second Build with nothing hidden would otherwise report the file hides a
 // layer that it does not — a false statement about the .tmx.
 func TestBuild_DoesNotChangeTheMapItWasGiven(t *testing.T) {
-	m := mapOf(1, 1, 16, 16, oneSheet(), layer("ground", 1, 1, true, 1))
-	o := opts()
-	o.Hidden = map[int]bool{0: true}
+	// A layer the file hides, because that is the field Build overwrites: it
+	// forces every layer visible so the placements include them all, and doing
+	// that in place would leave the caller holding a map that no longer says
+	// what the .tmx says.
+	m := mapOf(1, 1, 16, 16, oneSheet(), layer("secret", 1, 1, false, 1))
 
-	if got := mapcanvas.Build(m, o); len(got.Cells) != 0 {
+	if got := mapcanvas.Build(m, opts()); len(got.Cells) != 1 {
 		t.Fatalf("cells: %+v", got.Cells)
 	}
-	if !m.Layers[0].Visible {
-		t.Fatal("Build cleared the caller's layer")
+	if m.Layers[0].Visible {
+		t.Fatal("Build made the caller's hidden layer visible")
 	}
 	second := mapcanvas.Build(m, opts())
-	if len(second.Cells) != 1 {
-		t.Errorf("a second build drew %d cells, want 1", len(second.Cells))
-	}
-	if second.Layers[0].HiddenInFile {
-		t.Error("a second build claims the file hides a layer it does not")
+	if !second.Layers[0].HiddenInFile {
+		t.Error("a second build no longer reports that the file hides the layer")
 	}
 }
 
@@ -191,25 +172,8 @@ func TestBuild_ALayerAtZeroOpacityIsMarkedTransparent(t *testing.T) {
 	if !c.Layers[0].Transparent {
 		t.Error("it is not marked transparent")
 	}
-	if c.Layers[0].Hidden {
+	if c.Layers[0].HiddenInFile {
 		t.Error("transparent is not the same as hidden, and the panel says so")
-	}
-}
-
-// The layer a stroke lands on. Story 4 paints into it; marking it is this
-// story's, because the most common way to lose an hour in a tile editor is
-// painting into the layer you were not looking at.
-func TestBuild_MarksTheActiveLayer(t *testing.T) {
-	m := mapOf(1, 1, 16, 16, oneSheet(),
-		layer("floor", 1, 1, true, 1),
-		layer("wall", 1, 1, true, 2),
-	)
-	o := opts()
-	o.Active = 1
-
-	c := mapcanvas.Build(m, o)
-	if c.Layers[0].Active || !c.Layers[1].Active {
-		t.Errorf("active layer: %+v", c.Layers)
 	}
 }
 
@@ -268,10 +232,7 @@ func TestBuild_ProblemsAreListedOncePerReason(t *testing.T) {
 
 func TestPalette_OffersEveryTileOfASheet(t *testing.T) {
 	m := mapOf(1, 1, 16, 16, oneSheet(), layer("ground", 1, 1, true, 1))
-	o := opts()
-	o.SelectedGID = 3
-
-	c := mapcanvas.Build(m, o)
+	c := mapcanvas.Build(m, opts())
 	if len(c.Tilesets) != 1 {
 		t.Fatalf("tilesets: %+v", c.Tilesets)
 	}
@@ -289,9 +250,6 @@ func TestPalette_OffersEveryTileOfASheet(t *testing.T) {
 	// scale, which for 16px art doubles it.
 	if set.Tiles[2].SX != 0 || set.Tiles[2].SY != 32 {
 		t.Errorf("tile 2 is at (%d,%d)", set.Tiles[2].SX, set.Tiles[2].SY)
-	}
-	if !set.Tiles[2].Selected {
-		t.Error("gid 3 is selected and the palette does not say so")
 	}
 	if set.Tiles[0].Selected {
 		t.Error("an unselected tile is marked selected")
@@ -384,68 +342,11 @@ func TestPalette_IsInFirstGIDOrderWhateverTheFileSays(t *testing.T) {
 
 func TestBuild_RefusesToInventAnAssetRoute(t *testing.T) {
 	m := mapOf(1, 1, 16, 16, oneSheet(), layer("ground", 1, 1, true, 1))
-	if got := mapcanvas.Build(m, mapcanvas.Options{Scale: 1}); len(got.Cells) != 0 {
+	if got := mapcanvas.Build(m, mapcanvas.Options{}); len(got.Cells) != 0 {
 		t.Error("a canvas was built with no way to turn a path into a URL")
 	}
 	if got := mapcanvas.Build(nil, opts()); len(got.Cells) != 0 {
 		t.Error("a canvas was built from no map")
-	}
-}
-
-// Scale is a display concern: the map is still measured in cells and the file
-// still in pixels. It exists because a 16px tileset at 1:1 draws a picture
-// nobody can see.
-func TestBuild_ScaleMultipliesWhatIsDrawnAndNotWhatIsMeasured(t *testing.T) {
-	m := mapOf(2, 2, 16, 16, oneSheet(), layer("ground", 2, 2, true, 1, 2, 3, 4))
-	o := opts()
-	o.Scale = 3
-
-	c := mapcanvas.Build(m, o)
-	if c.Cols != 2 || c.Rows != 2 || c.TileW != 16 {
-		t.Errorf("scale changed the map's measurements: %dx%d cells of %dpx", c.Cols, c.Rows, c.TileW)
-	}
-	if c.W != 96 || c.H != 96 {
-		t.Errorf("canvas is %dx%d px, want 96x96", c.W, c.H)
-	}
-	if c.Scale != 3 {
-		t.Errorf("scale is %d", c.Scale)
-	}
-	// The cell at (1,0) starts three tiles' worth along.
-	var at *mapcanvas.Cell
-	for i := range c.Cells {
-		if c.Cells[i].X == 1 && c.Cells[i].Y == 0 {
-			at = &c.Cells[i]
-		}
-	}
-	if at == nil {
-		t.Fatal("no cell at (1,0)")
-	}
-	if at.TX != 48 {
-		t.Errorf("cell (1,0) is at x=%v, want 48", at.TX)
-	}
-	if at.A != 3 || at.D != 3 {
-		t.Errorf("the matrix does not scale: %v,%v", at.A, at.D)
-	}
-	// The source rectangle is unscaled — it is a window onto the sheet, and the
-	// matrix is what makes what shows through it bigger.
-	if at.SW != 16 || at.SH != 16 {
-		t.Errorf("source size is %dx%d, want the tile's own 16x16", at.SW, at.SH)
-	}
-}
-
-// Scaling happens after the flips, so a flipped tile is still flipped about the
-// right point. Scaling first would mirror it about the wrong axis.
-func TestBuild_ScaleAppliesAfterTheFlips(t *testing.T) {
-	const flipH = 0x80000000
-	m := mapOf(1, 1, 16, 16, oneSheet(), layer("ground", 1, 1, true, 1|flipH))
-	o := opts()
-	o.Scale = 2
-
-	c := mapcanvas.Build(m, o)
-	want := tiled.Draw{SW: 16, SH: 16, FlipH: true}.Transform()
-	got := c.Cells[0]
-	if got.A != want.A*2 || got.TX != want.TX*2 {
-		t.Errorf("got A=%v TX=%v, want %v and %v", got.A, got.TX, want.A*2, want.TX*2)
 	}
 }
 
@@ -465,31 +366,6 @@ func TestPalette_ScalesTheSheetAndTheWindowTogether(t *testing.T) {
 	// oneSheet is 2 columns of 4 tiles at 16px: 32x32 natural, 64x64 doubled.
 	if tile.SheetW != 64 || tile.SheetH != 64 {
 		t.Errorf("sheet is %dx%d, want 64x64", tile.SheetW, tile.SheetH)
-	}
-}
-
-// **Zoom is a canvas concern.** The palette lives in a fixed-width rail and
-// structurally cannot follow it: at 8x a 32px tile became a 256px swatch, flex
-// shrank each one's width to fit while its height and its background-size did
-// not, and every tile in the palette became a distorted crop of itself.
-func TestPalette_DoesNotFollowTheCanvasZoom(t *testing.T) {
-	m := mapOf(1, 1, 16, 16, oneSheet(), layer("ground", 1, 1, true, 1))
-
-	var sizes []int
-	for _, zoom := range mapcanvas.Steps() {
-		o := opts()
-		o.Scale = zoom
-		c := mapcanvas.Build(m, o)
-		if got := c.Scale; got != zoom {
-			t.Fatalf("canvas scale is %d, want %d", got, zoom)
-		}
-		sizes = append(sizes, c.Tilesets[0].Tiles[0].SW)
-	}
-	for i, got := range sizes {
-		if got != sizes[0] {
-			t.Errorf("zoom %d gave a %dpx swatch, want %dpx at every zoom",
-				mapcanvas.Steps()[i], got, sizes[0])
-		}
 	}
 }
 
@@ -597,14 +473,24 @@ func TestFitScale_TheShippedMapFits(t *testing.T) {
 	}
 }
 
-func TestBuild_AScaleBelowOneFitsTheMap(t *testing.T) {
+// The one moment the server has an opinion about zoom: what the page opens at.
+// After that it is a signal and the server never hears about it again.
+func TestInitialScale_FitsTheMap(t *testing.T) {
 	m := mapOf(6, 4, 16, 16, oneSheet(), layer("ground", 6, 4, true, make([]uint32, 24)...))
-	for _, s := range []int{0, -4} {
-		o := opts()
-		o.Scale = s
-		if got := mapcanvas.Build(m, o); got.Scale != mapcanvas.FitScale(6, 4, 16, 16) {
-			t.Errorf("scale %d became %d, want the fitted one", s, got.Scale)
-		}
+	c := mapcanvas.Build(m, opts())
+
+	if got, want := mapcanvas.InitialScale(c), mapcanvas.FitScale(6, 4, 16, 16); got != want {
+		t.Errorf("a map opens at %dx, want the fitted %dx", got, want)
+	}
+}
+
+// A canvas that could not be built at all opens at 1x rather than 0x. Nothing
+// is drawn either way, and a zoom of zero would make every size derived from it
+// on the page read as a map of no size — which is a different and untrue thing
+// from a map that could not be drawn.
+func TestInitialScale_IsOneForACanvasThatCouldNotBeBuilt(t *testing.T) {
+	if got := mapcanvas.InitialScale(mapcanvas.Canvas{}); got != 1 {
+		t.Errorf("an unbuilt canvas opens at %dx, want 1x", got)
 	}
 }
 
@@ -624,22 +510,5 @@ func TestSteps_HandsOutACopy(t *testing.T) {
 	}
 	if len(second) == len(first) {
 		t.Error("a caller appended to the shared steps")
-	}
-}
-
-// A cell's size on screen is the file's tile size times the zoom, and it is one
-// accessor because three places want it: the grid, the status line, and Story
-// 5's pointer arithmetic.
-func TestCanvas_CellSizeIsTheTileTimesTheZoom(t *testing.T) {
-	m := mapOf(2, 2, 16, 16, oneSheet(), layer("ground", 2, 2, true, 1, 1, 1, 1))
-	o := opts()
-	o.Scale = 3
-
-	c := mapcanvas.Build(m, o)
-	if c.CellW() != 48 || c.CellH() != 48 {
-		t.Errorf("a 16px tile at 3x is %dx%d on screen, want 48x48", c.CellW(), c.CellH())
-	}
-	if c.TileW != 16 {
-		t.Errorf("the file's tile size changed to %d", c.TileW)
 	}
 }
