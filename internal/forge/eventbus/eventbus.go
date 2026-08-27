@@ -175,10 +175,6 @@ func (eb *EventBus) Subscribers(eventType string) int {
 func (eb *EventBus) Publish(event Event) {
 	subs := eb.subscribersOf(event.Type)
 
-	eb.logger.Debug("event bus publishing event",
-		slog.String("event_type", event.Type),
-		slog.Int("subscriber_count", len(subs)))
-
 	// One timer for the whole publish rather than a time.After per subscriber,
 	// which would spawn a goroutine each.
 	timeout := time.NewTimer(eb.publishTimeout)
@@ -208,10 +204,6 @@ func (eb *EventBus) Publish(event Event) {
 			slog.String("event_type", event.Type),
 			slog.Int("timed_out", timeoutCount),
 			slog.Int("successful", successCount))
-	} else {
-		eb.logger.Debug("event published successfully",
-			slog.String("event_type", event.Type),
-			slog.Int("delivered_to", successCount))
 	}
 }
 
@@ -228,10 +220,15 @@ func (eb *EventBus) Publish(event Event) {
 // room would discard an event the subscriber was going to act on in order to
 // deliver one that says the same thing.
 func (eb *EventBus) PublishNonBlocking(event Event) {
-	subs := eb.subscribersOf(event.Type)
-
+	// The read lock is held across the sends, where Publish takes a copy and
+	// releases it first. It can be, because a non-blocking send cannot block:
+	// there is no subscriber that can hold the lock open, so Unsubscribe waits
+	// on a bounded loop of channel writes rather than on a browser. That saves
+	// the copy — a slice allocated on every publish for the life of the
+	// process — and removes any question of the two overlapping.
+	eb.mutex.RLock()
 	delivered, dropped := 0, 0
-	for _, ch := range subs {
+	for _, ch := range eb.subscribers[event.Type] {
 		select {
 		case ch <- event:
 			delivered++
@@ -239,22 +236,34 @@ func (eb *EventBus) PublishNonBlocking(event Event) {
 			dropped++
 		}
 	}
+	eb.mutex.RUnlock()
 
 	if dropped > 0 {
 		eb.logger.Warn("event bus dropped an event for full subscribers",
 			slog.String("event_type", event.Type),
 			slog.Int("dropped", dropped),
 			slog.Int("delivered", delivered))
-		return
 	}
-	eb.logger.Debug("event published successfully",
-		slog.String("event_type", event.Type),
-		slog.Int("delivered_to", delivered))
 }
 
+// Nothing is logged on a publish that worked.
+//
+// Two reasons, and the second is the one that decided it. A line per publish is
+// not information — the normal case is not worth reporting, and the signals
+// that are (a drop, a timeout) are reported. And slog builds its variadic args
+// at the call site whatever the level is set to, so a Debug call on a hot path
+// allocates whether or not it ever prints; guarding inside a helper does not
+// help, because the slice is already built by the time the helper is entered.
+// Forge publishes once per edit and would never notice, but a bus shared with
+// something publishing per frame would, and this is meant to be shared.
+
 // subscribersOf is a copy taken under the lock, so that sending — which may
-// block — happens outside it. Holding the lock across a send would let one
-// stalled subscriber block Subscribe and Unsubscribe for every other caller.
+// block — happens outside it. Holding the lock across a blocking send would let
+// one stalled subscriber block Subscribe and Unsubscribe for every other
+// caller, for up to PublishTimeout each.
+//
+// Publish's alone. PublishNonBlocking cannot stall, so it holds the lock
+// instead and skips the copy.
 func (eb *EventBus) subscribersOf(eventType string) []chan Event {
 	eb.mutex.RLock()
 	defer eb.mutex.RUnlock()
