@@ -1108,3 +1108,38 @@ func TestParse_DispatchesOnWhatTheFileHolds(t *testing.T) {
 		})
 	}
 }
+
+// TileOf and Raw have to be exact inverses, or a map loses something every time
+// Forge writes it.
+//
+// All four flags, including RotatedHex. It is meaningless on an orthogonal map,
+// which is exactly why it is the one that gets dropped — and dropping it turns a
+// tile Tiled rotated into a tile 268 million ids too low on the way back.
+func TestTile_RawIsTheInverseOfTileOf(t *testing.T) {
+	for _, raw := range []uint32{
+		0,
+		1,
+		0x0FFFFFFF,                  // the largest id the mask allows
+		1 | 0x80000000,              // H
+		1 | 0x40000000,              // V
+		1 | 0x20000000,              // D
+		1 | 0x10000000,              // hex
+		1 | 0x80000000 | 0x40000000, // H+V, a 180 turn
+		1 | 0x80000000 | 0x20000000, // H+D, a 90 turn
+		1 | 0x40000000 | 0x20000000, // V+D, a 270 turn
+		0x0FFFFFFF | 0x80000000 | 0x40000000 | 0x20000000 | 0x10000000, // everything at once
+	} {
+		if got := tiled.TileOf(raw).Raw(); got != raw {
+			t.Errorf("TileOf(%#x).Raw() = %#x", raw, got)
+		}
+	}
+}
+
+// And an id with a flag bit set in the id itself cannot exist: the mask is what
+// separates them, so Raw must not let a caller smuggle one back in.
+func TestTile_RawKeepsFlagsOutOfTheID(t *testing.T) {
+	got := tiled.Tile{GID: 0xFFFFFFFF}.Raw()
+	if got != 0x0FFFFFFF {
+		t.Errorf("an id with flag bits set packed to %#x, want the id masked to %#x", got, 0x0FFFFFFF)
+	}
+}

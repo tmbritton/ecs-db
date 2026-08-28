@@ -15,6 +15,7 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/save/overwrite", s.sameOriginOnly(s.handleMapOverwrite))
 	mux.HandleFunc("POST /forge/map/discard", s.sameOriginOnly(s.handleMapDiscard))
 	mux.HandleFunc("POST /forge/map/reload", s.sameOriginOnly(s.handleMapReload))
+	mux.HandleFunc("POST /forge/map/paint", s.sameOriginOnly(s.handlePaint))
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -39,6 +40,30 @@ func (s *Server) mapSession(w http.ResponseWriter) (*maps.Session, bool) {
 // caller knows.
 func (s *Server) mapPath(sess *maps.Session, want string) (string, error) {
 	return matchMap(sess.Paths(), want)
+}
+
+// mapShown resolves the map a stroke lands on.
+//
+// Unlike mapPath, an empty ?map= is not a refusal: it means the map the page is
+// showing, resolved by selectMap — the same call the page itself made. It has
+// to be that same rule rather than merely a reasonable one, because a route
+// defaulting differently from the page is exactly how a stroke lands on a file
+// nobody was looking at.
+//
+// Reload and discard keep mapPath and mapHeld, which insist on a name. Both
+// throw work away, and defaulting a destructive route to whatever happened to
+// be first is a different kind of mistake from refusing one.
+func (s *Server) mapShown(sess *maps.Session, want string) (string, error) {
+	if want != "" {
+		// A named map still has to exist. Falling back here would turn a typo
+		// into an edit of the wrong file.
+		return matchMap(sess.Paths(), want)
+	}
+	all := sess.Maps()
+	if len(all) == 0 {
+		return "", fmt.Errorf("this project has no maps open")
+	}
+	return selectMap(all, ""), nil
 }
 
 // mapHeld is the same against everything the session holds a file for,

@@ -5,6 +5,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tmbritton/ecs-db/internal/forge/paint"
+	"github.com/tmbritton/ecs-db/internal/tiled"
+
 	"github.com/a-h/templ"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
@@ -167,10 +170,19 @@ func selectedWhen(signal string, v uint32, class string) string {
 	return "{'" + class + "': " + eq(signal, v) + "}"
 }
 
-// hideSignalName is the signal carrying one layer's visibility. One per layer
+// HideSignal is the signal carrying one layer's visibility. One per layer
 // rather than an array: Datastar tracks a signal, and mutating an element of an
 // array signal is not a change it can see.
-func hideSignalName(l mapcanvas.Layer) string { return "hide" + itoa(l.Index) }
+//
+// Exported because the paint route reads the same signal back off a request, to
+// refuse a stroke aimed at a layer the view is hiding. That is a name shared
+// across a package boundary, and if the two halves ever disagreed the lookup
+// would return the zero value, the refusal would quietly stop happening, and
+// nothing would say so — strokes would land on an invisible layer. One
+// function, so they cannot disagree.
+func HideSignal(layerIndex int) string { return "hide" + itoa(layerIndex) }
+
+func hideSignalName(l mapcanvas.Layer) string { return HideSignal(l.Index) }
 
 func hideSignal(l mapcanvas.Layer) string { return "$" + hideSignalName(l) }
 
@@ -297,4 +309,156 @@ func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
 // are not unique and ids are not on tile layers.
 func hideSeed(l mapcanvas.Layer) string {
 	return `{"` + hideSignalName(l) + `":` + strconv.FormatBool(l.HiddenInFile) + `}`
+}
+
+// A Tool is one of the three things a stroke can do.
+type Tool struct {
+	Kind  string
+	Glyph string
+	Title string
+}
+
+// Tools are the tools the toolbar offers, in the prototype's order. The kinds
+// are paint.Stamp, paint.Fill and paint.Erase — named as strings here because
+// the template writes them into a signal, and the server parses that signal
+// back into a paint.Kind. paint's own switch is what refuses anything else.
+func Tools() []Tool {
+	return []Tool{
+		{Kind: "stamp", Glyph: "🖌", Title: "paint the tile in hand"},
+		{Kind: "fill", Glyph: "▧", Title: "fill a rectangle with the tile in hand"},
+		{Kind: "erase", Glyph: "⌫", Title: "clear a cell"},
+	}
+}
+
+// turnKey is the index the browser computes for a stamp's three flags. It has
+// to agree with turnTables below, and nothing else depends on the ordering.
+const turnKey = "(($flipD?4:0)+($flipH?2:0)+($flipV?1:0))"
+
+// turnTables enumerates paint.RotateCW over all eight flag combinations and
+// returns the three JS array literals the browser indexes with turnKey.
+//
+// Generated from paint.RotateCW rather than transcribed from it, because the
+// rotation cycle is not guessable by eye — a quarter turn changes two flags,
+// not one — and a hand-written copy would drift silently: the browser would
+// send flags the server accepts as valid, so nothing would report the
+// disagreement except a tile pointing the wrong way on screen.
+func turnTables() (d, h, v string) {
+	var db, hb, vb strings.Builder
+	db.WriteByte('[')
+	hb.WriteByte('[')
+	vb.WriteByte('[')
+	for key := 0; key < 8; key++ {
+		before := tiled.Tile{GID: 1, FlipD: key&4 != 0, FlipH: key&2 != 0, FlipV: key&1 != 0}
+		after := paint.RotateCW(before)
+		if key > 0 {
+			db.WriteByte(',')
+			hb.WriteByte(',')
+			vb.WriteByte(',')
+		}
+		db.WriteString(strconv.FormatBool(after.FlipD))
+		hb.WriteString(strconv.FormatBool(after.FlipH))
+		vb.WriteString(strconv.FormatBool(after.FlipV))
+	}
+	db.WriteByte(']')
+	hb.WriteByte(']')
+	vb.WriteByte(']')
+	return db.String(), hb.String(), vb.String()
+}
+
+// turnAction advances the stamp a quarter turn clockwise.
+//
+// The rotation is the browser's — the server is told the flags with the stroke
+// rather than remembering which way the stamp is facing, for the same reason
+// every other view control on this page is a signal. All three flags are read
+// before any is written, or the second assignment would rotate a state the
+// first one just changed.
+func turnAction() string {
+	d, h, v := turnTables()
+	return "const k = " + turnKey + ";" +
+		"$flipD = " + d + "[k];" +
+		"$flipH = " + h + "[k];" +
+		"$flipV = " + v + "[k]"
+}
+
+// turnLabelList names each of the eight flag combinations, indexed by turnKey.
+//
+// Walked with RotateCW rather than written out, for the same reason the tables
+// are: a hand-written map had two of them swapped, and nothing could see it —
+// eight distinct non-empty strings is all a test of a literal map can check.
+//
+// The eight symmetries of a square fall into two orbits under a quarter turn:
+// the unmirrored one starting at upright, and the mirrored one starting at a
+// horizontal mirror. Every state is therefore a mirror-or-not plus an angle,
+// which is what these say. Note that a plain vertical mirror lands on
+// "mirrored 180°" — a top-to-bottom mirror is a left-to-right one turned half
+// way round, and naming it after the button that reaches it is not possible:
+// each reflected state is reachable by both buttons, from different angles.
+func turnLabelList() []string {
+	names := make([]string, 8)
+	for _, orbit := range []struct {
+		start  tiled.Tile
+		labels [4]string
+	}{
+		{tiled.Tile{GID: 1}, [4]string{"upright", "90°", "180°", "270°"}},
+		{tiled.Tile{GID: 1, FlipH: true}, [4]string{"mirrored", "mirrored 90°", "mirrored 180°", "mirrored 270°"}},
+	} {
+		at := orbit.start
+		for _, label := range orbit.labels {
+			names[turnKeyOf(at)] = label
+			at = paint.RotateCW(at)
+		}
+	}
+	return names
+}
+
+// turnLabels is that list as a JavaScript array literal.
+
+func turnLabels() string { return jsStringArray(turnLabelList()) }
+
+// jsStringArray writes strings as a JavaScript array literal, each element
+// through quoteJS like every other string this file puts in an expression.
+//
+// Separate from turnLabels so the escaping can be tested with a string that
+// actually needs escaping. None of the eight orientation labels does, so a test
+// going through turnLabels cannot tell quoteJS from raw quotes — which is what
+// a mutation over the real labels showed.
+func jsStringArray(items []string) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, s := range items {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(quoteJS(s))
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// turnKeyOf is turnKey's arithmetic in Go: D is the 4s bit, H the 2s, V the 1s.
+func turnKeyOf(t tiled.Tile) int {
+	key := 0
+	if t.FlipD {
+		key |= 4
+	}
+	if t.FlipH {
+		key |= 2
+	}
+	if t.FlipV {
+		key |= 1
+	}
+	return key
+}
+
+// turnLabelExpr says which way the stamp is facing, in words, because three
+// booleans do not read as an angle.
+func turnLabelExpr() string {
+	return "'stamp ' + " + turnLabels() + "[" + turnKey + "]"
+}
+
+// turnLabelSeed is what the note reads before Datastar hydrates. The signals
+// start the stamp upright, so this is that orientation's label — taken from the
+// same list the expression indexes, so the two cannot disagree.
+func turnLabelSeed() string {
+	return "stamp " + turnLabelList()[turnKeyOf(tiled.Tile{})]
 }

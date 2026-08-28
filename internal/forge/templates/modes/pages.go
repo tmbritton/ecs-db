@@ -87,11 +87,14 @@ func MapSignals(data Data) string {
 	var b strings.Builder
 	b.WriteString(`{"zoom":`)
 	b.WriteString(strconv.Itoa(mapcanvas.InitialScale(data.Canvas)))
+	// The tool and the stamp's orientation. They are the browser's, and travel
+	// to the server with each stroke; see turnAction.
+	b.WriteString(`,"tool":"stamp","flipH":false,"flipV":false,"flipD":false`)
 	b.WriteString(`,"tile":0,"layer":`)
 	b.WriteString(strconv.Itoa(activeLayerIndex(data.Canvas)))
 	for _, layer := range data.Canvas.Layers {
-		b.WriteString(`,"hide`)
-		b.WriteString(strconv.Itoa(layer.Index))
+		b.WriteString(`,"`)
+		b.WriteString(HideSignal(layer.Index))
 		b.WriteString(`":`)
 		b.WriteString(strconv.FormatBool(layer.HiddenInFile))
 	}

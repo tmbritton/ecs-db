@@ -114,6 +114,34 @@ func TileOf(raw uint32) Tile {
 	}
 }
 
+// Raw packs a tile back into the global id a .tmx holds, flags and all.
+//
+// The inverse of TileOf, and it has to stay exactly that: every paint operation
+// ends here, so a flag this drops is a flag the map loses the next time Forge
+// saves it. RotatedHex is the one at risk — meaningless on an orthogonal map,
+// which is what makes it easy to leave out and hard to notice.
+//
+// The id is masked rather than trusted. A caller that built a Tile by hand and
+// left a flag bit in GID would otherwise write an id 268 million too high, which
+// is the same corruption the three-bit clear mask produces from the other
+// direction.
+func (t Tile) Raw() uint32 {
+	raw := t.GID & gidMask
+	if t.FlipH {
+		raw |= flagFlipH
+	}
+	if t.FlipV {
+		raw |= flagFlipV
+	}
+	if t.FlipD {
+		raw |= flagFlipD
+	}
+	if t.RotatedHex {
+		raw |= flagRotatedHex
+	}
+	return raw
+}
+
 // ObjectGroup is an object layer.
 type ObjectGroup struct {
 	ID         int

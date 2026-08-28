@@ -100,9 +100,58 @@ templ mapToolbar(data Data) {
 				}
 			</div>
 		}
-		<span class="map-toolbar__note mono" data-testid="map-tools-note">
-			painting arrives in Epic 15 Story 4
-		</span>
+		if data.Canvas.Drawn() {
+			// The tools. Which one is chosen, and how the stamp is turned, are
+			// the browser's — the server is told them with the stroke rather
+			// than remembering them, for the reason every other view control
+			// here is a signal.
+			<div class="segmented" role="group" aria-label="Tool" data-testid="tool-control">
+				for _, tool := range Tools() {
+					<button
+						type="button"
+						data-on:click={ "$tool = '" + tool.Kind + "'" }
+						class="segmented__link"
+						data-class={ "{'segmented__on': $tool === '" + tool.Kind + "'}" }
+						data-attr:data-current={ flag("$tool === '" + tool.Kind + "'") }
+						data-attr:aria-current={ flag("$tool === '" + tool.Kind + "'") }
+						data-testid={ "tool-" + tool.Kind }
+						title={ tool.Title }
+					>{ tool.Glyph }</button>
+				}
+			</div>
+			<div class="segmented" role="group" aria-label="Stamp orientation" data-testid="turn-control">
+				<button
+					type="button"
+					data-on:click={ turnAction() }
+					class="segmented__link"
+					data-testid="turn-cw"
+					title="rotate the stamp a quarter turn clockwise"
+				>⟳</button>
+				// The mirrors are actions, not toggles, and deliberately have no
+				// on-state. $flipH is a raw flag rather than "is it mirrored":
+				// a quarter turn sets it, so a lit button would report a turned
+				// stamp as mirrored. The note beside them says which way the
+				// stamp is actually facing.
+				<button
+					type="button"
+					data-on:click="$flipH = !$flipH"
+					class="segmented__link"
+					data-testid="flip-h"
+					title="mirror the stamp left to right"
+				>⇋</button>
+				<button
+					type="button"
+					data-on:click="$flipV = !$flipV"
+					class="segmented__link"
+					data-testid="flip-v"
+					title="mirror the stamp top to bottom"
+				>⇅</button>
+			</div>
+			// Seeded, like every other data-text here: an empty element is a
+			// blank gap until Datastar hydrates, and the stamp always starts
+			// upright anyway.
+			<span class="map-toolbar__note mono" data-testid="map-tools-note" data-text={ turnLabelExpr() }>{ turnLabelSeed() }</span>
+		}
 	</div>
 }
 
