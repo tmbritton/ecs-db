@@ -567,35 +567,49 @@ func TestStreamQuery_UsesTheNamespaceModeDataResolved(t *testing.T) {
 	}
 }
 
-// The page's stream has to carry the canvas selection, or its first frame
-// re-renders the mode content with nothing selected and silently clears it.
+// The stream has to re-render the canvas with the selection the page has, or
+// its first frame silently clears it.
 //
-// Asserted on the subscription the page actually writes, not on the address
-// bar. A test that rebuilt the stream URL from the address bar — which the
-// browser spec was doing — passes whether this branch exists or not, because
-// the address bar carries ?sel= either way.
-func TestStreamQuery_CarriesTheCanvasSelection(t *testing.T) {
-	srv, _, dir := machineServer(t)
+// The subscription carries the page's id and not the selection itself. It used
+// to carry ?sel=, and that is precisely what made selecting a node a page load:
+// a subscription URL is fixed when the page opens, so the only way to change
+// what it asked for was to open another page. The selection is recorded against
+// the id instead, and the stream looks it up on every render.
+func TestStreamQuery_IdentifiesThePageSoTheStreamCanFindItsSelection(t *testing.T) {
+	srv, s, dir := machineServer(t)
 	path := filepath.Join(dir, "core", "behaviors", "wander.json")
 
 	_, body := get(t, srv, "/forge/agents?machine="+url.QueryEscape(path)+"&sel=state:idle")
-	if init := dataInit(t, body); !strings.Contains(init, "sel=state%3Aidle") {
-		t.Errorf("the subscription does not carry the selection:\n%s", init)
+	init := dataInit(t, body)
+	if !strings.Contains(init, "page=") {
+		t.Fatalf("the subscription does not identify the page:\n%s", init)
+	}
+	if strings.Contains(init, "sel=") {
+		t.Errorf("the subscription still freezes a selection into its URL:\n%s", init)
+	}
+
+	page := pageIDIn(t, init)
+	if got := s.pageSel(page); got != "state:idle" {
+		t.Errorf("the page has %q selected, not what its URL asked for", got)
 	}
 
 	// And only what resolved. A selection naming a state that is not there is
-	// dropped by the chart, and a stream that went on asking for it would
-	// re-render a canvas with a selection the page does not have.
+	// dropped by the chart, and recording it would leave the page asking for a
+	// selection it does not have for as long as it stays open.
 	_, body = get(t, srv, "/forge/agents?machine="+url.QueryEscape(path)+"&sel=state:gone")
-	if init := dataInit(t, body); strings.Contains(init, "sel=") {
-		t.Errorf("the subscription carries a selection that resolved to nothing:\n%s", init)
+	if got := s.pageSel(pageIDIn(t, dataInit(t, body))); got != "" {
+		t.Errorf("the page recorded %q, a selection that resolved to nothing", got)
 	}
+}
 
-	// Only on AGENTS, on the same terms as the machine path itself.
-	_, body = get(t, srv, "/forge/schema?sel=state:idle")
-	if init := dataInit(t, body); strings.Contains(init, "sel=") {
-		t.Errorf("a mode with no canvas subscribes with a canvas selection:\n%s", init)
+// pageIDIn pulls the page id out of a subscription URL.
+func pageIDIn(t *testing.T, init string) string {
+	t.Helper()
+	m := regexp.MustCompile(`page=([0-9a-f]{32})`).FindStringSubmatch(init)
+	if m == nil {
+		t.Fatalf("no page id in %q", init)
 	}
+	return m[1]
 }
 
 // The SSE loop suppresses a patch by comparing the rendered string, so anything

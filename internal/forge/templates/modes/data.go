@@ -21,6 +21,10 @@ import (
 // property Epic 10 Story 5 established and the reason the registry is a lookup
 // rather than a switch. A mode ignores what it does not use.
 type Data struct {
+	// PageID identifies this page to the server across the requests it makes,
+	// so that what it has selected is its own rather than every tab's. Issued
+	// on render; see server.pageStates.
+	PageID string
 	// Schema is the working value from the editing session, already a copy —
 	// Session.Read hands out a deep one, so a template cannot reach the
 	// session through it.

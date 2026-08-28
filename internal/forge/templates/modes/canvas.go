@@ -191,29 +191,31 @@ func historyMark(n ChartNode) string {
 	return "H"
 }
 
-// selectStateHref and selectEdgeHref are how selection is made.
+// selectStateAction, selectEdgeAction and clearSelectionAction are how
+// selection is made.
 //
-// A URL and not a signal: selection survives a reload, it can be linked, and
-// the inspectors in Stories 6 and 7 read it from the request rather than from
-// client state. One parameter for both kinds, so exactly one thing being
-// selected is structural rather than a rule about which of two wins.
-func selectStateHref(data Data, path string) string {
-	return selectionHref(data, chart.SelState+path)
-}
+// A request rather than a link, and rather than a signal, and the reason is the
+// same in both directions. It cannot be a link because selecting a node in the
+// editor should not reload the page. It cannot be a signal because selection
+// decides what the *inspector* renders — the server has to know it — and a
+// stream whose URL was fixed when the page loaded would go on rendering the
+// inspector for whatever was selected then.
+//
+// So the server records it against the page, and the page says which page it is
+// with every request. One parameter for both kinds, so exactly one thing being
+// selected stays structural rather than a rule about which of two wins.
+func selectStateAction(path string) string { return selectAction(chart.SelState + path) }
 
-func selectEdgeHref(data Data, id string) string {
-	return selectionHref(data, chart.SelEdge+id)
-}
+func selectEdgeAction(id string) string { return selectAction(chart.SelEdge + id) }
 
-// clearSelectionHref is the canvas ground: clicking off everything deselects.
-func clearSelectionHref(data Data) string { return selectionHref(data, "") }
+// clearSelectionAction is the canvas ground: clicking off everything deselects.
+func clearSelectionAction() string { return selectAction("") }
 
-func selectionHref(data Data, sel string) string {
-	href := machineHref(data.SelectedMachine)
-	if sel != "" {
-		href += "&sel=" + urlValue(sel)
+func selectAction(sel string) string {
+	if sel == "" {
+		return "@post('/forge/agents/select')"
 	}
-	return href
+	return "@post('/forge/agents/select?sel=" + urlValue(sel) + "')"
 }
 
 // selectionLabel is what is selected, in words.

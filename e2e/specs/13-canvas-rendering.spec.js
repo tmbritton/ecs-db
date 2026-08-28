@@ -2,15 +2,16 @@
 //
 // Three things here can only be shown in a browser. The first is z-order: an
 // edge label that falls over a state has to be the thing that gets clicked, and
-// no Go test can tell you which element is on top. The second is that selection
-// is a URL — it changes the address bar, it survives a reload, and it comes
-// back from a link rather than from client state. The third is that the chart
-// is stable on the page stream: two renders of an unchanged machine are
-// byte-identical, so the patch is suppressed and nothing on the canvas moves.
+// no Go test can tell you which element is on top. The second is that selecting
+// costs no page load — it is a request against this page, recorded server-side
+// and arriving back on the stream, where it used to be a link and a full
+// document load. The third is that the chart is stable on the page stream: two
+// renders of an unchanged machine are byte-identical, so the patch is
+// suppressed and nothing on the canvas moves.
 
 const fs = require("fs");
 const path = require("path");
-const { test, expect, byTestId } = require("../fixtures");
+const { test, expect, byTestId, settled } = require("../fixtures");
 
 const PROJECT = path.resolve(__dirname, "../fixtures/project");
 const BEHAVIORS = path.join(PROJECT, "behaviors");
@@ -53,6 +54,11 @@ async function openMachine(page, id) {
   await page.goto("/forge/agents");
   await byTestId(page, `machine-${id}`).click();
   await expect(byTestId(page, "statechart")).toBeVisible();
+  // Visible is not the same as interactive: the view transition from the
+  // previous page paints over this one, and real pointer input does not
+  // reach the DOM underneath while it animates. Several tests below click
+  // nodes and edge labels straight after this.
+  await settled(page);
 }
 
 test("draws a node per state and an edge per transition", async ({ page }) => {
@@ -110,18 +116,29 @@ test("the initial state is marked, and it is the one the file names", async ({ p
   ).toHaveAttribute("data-initial", "true");
 });
 
-test("clicking a node selects it, and a reload keeps it selected", async ({ page }) => {
+test("clicking a node selects it, without loading a page", async ({ page }) => {
   await openMachine(page, NESTED);
   await expect(byTestId(page, "canvas-selection")).toHaveText("nothing selected");
 
+  let navigations = 0;
+  page.on("framenavigated", () => navigations++);
+
   await byTestId(page, "select-state-combat.attacking").click();
 
-  await expect(page).toHaveURL(/sel=state%3Acombat\.attacking/);
   await expect(byTestId(page, "state-combat.attacking")).toHaveAttribute("data-selected", "true");
   await expect(byTestId(page, "canvas-selection")).toHaveText("state combat.attacking");
+  expect(navigations, "selecting a node loaded a page").toBe(0);
 
+  // The selection is no longer in the URL, and so no longer survives a reload.
+  //
+  // That is the trade for the line above. It was a link because the inspector's
+  // contents depend on what is selected, and only the server can render those —
+  // so selection had to reach the server, and a query parameter was the way it
+  // did. It reaches the server as a request against this page now, which costs
+  // no page load and is not bookmarkable. Reloading an editor is rare;
+  // reloading it on every click was not.
   await page.reload();
-  await expect(byTestId(page, "state-combat.attacking")).toHaveAttribute("data-selected", "true");
+  await expect(byTestId(page, "canvas-selection")).toHaveText("nothing selected");
 });
 
 test("selecting one thing deselects the other", async ({ page }) => {
@@ -179,7 +196,6 @@ test("clicking an edge over a node selects the edge, not the node", async ({ pag
   expect(l.y + l.height).toBeLessThanOrEqual(c.y + c.height);
 
   await label.click();
-  await expect(page).toHaveURL(/sel=edge%3A/);
   await expect(label).toHaveAttribute("data-selected", "true");
   await expect(over).toHaveAttribute("data-selected", "false");
 });
@@ -242,7 +258,12 @@ test("nothing on the canvas moves between two renders", async ({ page }) => {
     if (!m) throw new Error(`could not read the subscription out of: ${init}`);
     return m[1];
   });
-  expect(stream, "the subscription does not carry the selection").toContain("sel=");
+  // The page's id, not the selection itself. The stream has to render what
+  // *this* page has selected — a stream that rendered someone else's, or none,
+  // would redraw the canvas with nothing selected on its very first frame —
+  // and the selection is looked up from the id rather than frozen into the URL,
+  // because a URL that cannot change is what made selecting a node a page load.
+  expect(stream, "the subscription does not identify the page").toContain("page=");
 
   const frames = await page.evaluate(async (src) => {
     const resp = await fetch(src);
@@ -273,13 +294,53 @@ test("nothing on the canvas moves between two renders", async ({ page }) => {
   expect(frames.chart, `the canvas was redrawn ${frames.chart} times in ~6s`).toBe(1);
 });
 
+// The edge label is a chip: mono, small, on the canvas colour, inside a border
+// that changes colour with its state. Asserted as computed style, because the
+// thing that broke it was a CSS reset landing later in the file than these
+// rules — every selector a single class, so source order decided it, and the
+// labels silently became 13px body text on a transparent background with no
+// border at all. Selecting one changed nothing you could see.
+//
+// The suite could not see it either: `data-selected` and the footer readout
+// were both correct throughout. Hence computed style rather than attributes.
+test("an edge label keeps its own type and box, and marks selection visibly", async ({ page }) => {
+  await openMachine(page, NESTED);
+  const label = byTestId(page, "edge-idle|on|SPOTTED|0");
+
+  const style = () =>
+    label.evaluate((el) => {
+      const c = getComputedStyle(el);
+      return {
+        font: c.fontFamily.split(",")[0].replaceAll('"', ""),
+        size: c.fontSize,
+        border: c.borderTopWidth,
+        transparent: c.backgroundColor === "rgba(0, 0, 0, 0)",
+        color: c.color,
+      };
+    });
+
+  const before = await style();
+  expect(before.font, "the label is not mono").toBe("JetBrains Mono");
+  expect(before.size, "the label is not label-sized").toBe("10px");
+  expect(before.border, "the label has no box").not.toBe("0px");
+  expect(before.transparent, "the label has no background, so edges run through it").toBe(false);
+
+  await label.click();
+  await expect(label).toHaveAttribute("data-selected", "true");
+  const after = await style();
+  expect(after.color, "selecting an edge changes nothing you can see").not.toBe(before.color);
+});
+
 test("accessibility", async ({ page }) => {
   await openMachine(page, NESTED);
 
-  // Every node is a link, so the canvas can be walked with a keyboard rather
-  // than only pointed at.
+  // Every node is a button, so the canvas can be walked with a keyboard rather
+  // than only pointed at. A button and not a link because selecting a node no
+  // longer goes anywhere — a link that does not link is a link a keyboard user
+  // is lied to about, and it was one for exactly as long as selecting reloaded
+  // the page.
   const node = byTestId(page, "select-state-idle");
-  await expect(node).toHaveRole("link");
+  await expect(node).toHaveRole("button");
   // What kind of state it is, since the borders that say so are only borders.
   await expect(byTestId(page, "select-state-combat")).toHaveAttribute("title", "compound state");
   await expect(byTestId(page, "select-state-combat.back")).toHaveAttribute("title", "deep history");
@@ -290,14 +351,14 @@ test("accessibility", async ({ page }) => {
   // And what is selected is said in words, not left to a border colour.
   await expect(byTestId(page, "canvas-selection")).toHaveText("state idle");
 
-  // The ground is a link with no text, so it carries its own name.
+  // The ground is a control with no text, so it carries its own name.
   await expect(byTestId(page, "canvas-ground")).toHaveAttribute("aria-label", "Clear selection");
 
   // The edge layer is decoration around elements that carry the meaning; a
   // screen reader reading out a pile of <path> coordinates helps nobody.
   await expect(page.locator("svg.chart__edges")).toHaveAttribute("aria-hidden", "true");
-  // The labels are not — they are the transitions, and they are links.
-  await expect(byTestId(page, "edge-idle|on|SPOTTED|0")).toHaveRole("link");
+  // The labels are not — they are the transitions, and they are controls.
+  await expect(byTestId(page, "edge-idle|on|SPOTTED|0")).toHaveRole("button");
 });
 
 // A node's box is sized by the server — chart.headHeight is titleH plus one

@@ -220,9 +220,10 @@ func TestCanvasDisconnect_RemovesTheTransitionNamed(t *testing.T) {
 	s, srv, machine := canvasFixture(t)
 	q := "&machine=" + url.QueryEscape(machine)
 
-	// 200 and not 204: a delete shifts every later index, so it answers with a
-	// redirect that lets go of the selection.
-	if code := post(t, srv, "/forge/agents/transition?op=delete&from=idle&kind=on&event=GO&index=0"+q); code != 200 {
+	// 204 like every other edit. A delete shifts every later index, so it also
+	// lets go of the selection — but that is now a change to the page's own
+	// record rather than a redirect, and the chart follows on the stream.
+	if code := post(t, srv, "/forge/agents/transition?op=delete&from=idle&kind=on&event=GO&index=0"+q); code != 204 {
 		t.Fatalf("delete: %d (%s)", code, problemOf(s))
 	}
 	def, _ := s.cfg.MachineSession.Working(machine)

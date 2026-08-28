@@ -11,14 +11,11 @@ package server
 
 import (
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
@@ -31,6 +28,7 @@ func (s *Server) registerCanvasRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/agents/transition", s.sameOriginOnly(s.handleTransitionEdit))
 	mux.HandleFunc("POST /forge/agents/action", s.sameOriginOnly(s.handleActionEdit))
 	mux.HandleFunc("POST /forge/agents/menu", s.sameOriginOnly(s.handleCanvasMenu))
+	mux.HandleFunc("POST /forge/agents/select", s.sameOriginOnly(s.handleSelect))
 }
 
 // handleStateEdit dispatches on which parameter is present, the same shape as
@@ -135,7 +133,7 @@ func (s *Server) handleTransitionEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	value := q.Get("value")
 	// moved is set by the two operations that relocate the transition, and is
-	// what the answer redirects to.
+	// where this page's selection has to follow it to.
 	var moved *machines.TransitionRef
 	// cleared is a delete: the transition that was selected is gone, and every
 	// sibling after it moved down one — so the selection cannot stay where it
@@ -186,18 +184,20 @@ func (s *Server) handleTransitionEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case cleared:
-		s.redirectToMachine(w, r, q.Get("machine"), "")
+		s.selectOnThisPage(r, "")
+		s.transitionEdited(w)
 	case moved != nil && *moved != ref:
 		// The chart's edge id is positional, so renaming an event or reordering
 		// moves the thing that is selected — and only the session knows where
 		// it went, because moving onto an event that already exists appends.
-		// Selection lives in the URL, so following it is a navigation.
+		// Selection is the page's own record, so following it is a patch.
 		//
 		// Only when it actually moved: renaming an event to the name it already
-		// has is a no-op, and answering it with a navigation would make a
-		// stray blur reload the page.
-		s.redirectToMachine(w, r, q.Get("machine"),
+		// has is a no-op, and moving the selection for it would be a change
+		// pushed to every open page for nothing.
+		s.selectOnThisPage(r,
 			chart.SelEdge+chart.EdgeID(moved.From, moved.Kind, moved.Event, moved.Index))
+		s.transitionEdited(w)
 	default:
 		s.transitionEdited(w)
 	}
@@ -252,20 +252,30 @@ func transitionField(q url.Values) string {
 	}
 }
 
-// redirectToMachine answers with the machine's page carrying a given selection,
-// over SSE, because a 204 cannot change the URL and the URL is where selection
-// lives. An empty sel selects nothing.
-func (s *Server) redirectToMachine(w http.ResponseWriter, r *http.Request, machine, sel string) {
+// handleSelect records what this page has selected. The chart and the
+// inspectors follow on the stream, like every other change.
+//
+// A route rather than a signal, because the inspector's *content* depends on
+// the selection and only the server can render that; a route rather than a link,
+// because selecting a node in an editor should not reload the page. See
+// pageStates.
+func (s *Server) handleSelect(w http.ResponseWriter, r *http.Request) {
+	s.setPageSel(pageIDOf(r), r.URL.Query().Get("sel"))
+	s.closeCanvasMenu()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// selectOnThisPage moves this page's selection, for an edit that moved the
+// thing that was selected.
+//
+// It used to be a redirect: selection lived in the URL, so following it meant
+// navigating, and deleting a transition or renaming an event reloaded the whole
+// editor. Now the selection is the page's own record and the chart arrives on
+// the stream, so the same edit is a patch.
+func (s *Server) selectOnThisPage(r *http.Request, sel string) {
 	s.setEditProblem("")
 	s.closeCanvasMenu()
-	q := url.Values{"machine": {machine}}
-	if sel != "" {
-		q.Set("sel", sel)
-	}
-	sse := datastar.NewSSE(w, r)
-	if err := sse.Redirect("/forge/agents?" + q.Encode()); err != nil {
-		slog.ErrorContext(r.Context(), "transition redirect", "err", err)
-	}
+	s.setPageSel(pageIDOf(r), sel)
 }
 
 // handleActionEdit adds, removes and fills in a state's entry and exit actions.

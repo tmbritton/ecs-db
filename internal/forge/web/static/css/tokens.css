@@ -61,3 +61,62 @@
   --rail-w: 62px;
   --menubar-h: 34px;
 }
+
+/* --- navigation ------------------------------------------------------------
+   
+   Selecting a component, an entity type, a machine or a map is still a real
+   page load, as is switching mode. Selecting inside the statechart is not —
+   see server/pagestate.go. Those are the last hard refreshes in Forge,
+   and at ~50ms each the browser's default is a flash: the whole window blanks
+   and repaints, which reads as something breaking rather than as a change of
+   view.
+   
+   This is deliberately only the *cross-document* half. The SSE patches are not
+   given transitions, and must not be: an edit reaches the screen in ~20ms now,
+   and wrapping that in an animation with a duration would put back the latency
+   the rest of this work removed. A transition is for a change of view, not for
+   a keystroke landing. */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-group(*) {
+  /* Shorter than the 250ms default. The design system's motion is terse — 2px
+     borders, hard offset shadows, no easing flourishes — and a quarter-second
+     cross-fade reads as slack against it. */
+  animation-duration: 140ms;
+}
+
+/* Only chrome whose *box* is the same on both pages is named. A named element is
+   matched across the navigation and morphed: its old snapshot is scaled to the
+   new element's box, which is seamless when the two boxes agree and a visible
+   stretch when they do not.
+   
+   Geometry, not contents — the rail's active button moves and the menu bar
+   carries a live engine readout, and both are fine because --rail-w and
+   --menubar-h fix their boxes. Naming by "looks the same" would be the wrong
+   rule to hand the next person.
+   
+   The save footer taught this: naming it scaled MAP's footer up into SCHEMA's,
+   so "Discard" and "Save" ballooned to twice their size in the middle of every
+   mode switch. It changes per mode, so it is not a shared element; it belongs
+   in the root snapshot, cross-fading with the content it sits under.
+   
+   Every name must be unique in the document. Two elements sharing one makes
+   the transition throw, and a thrown transition drops silently back to the
+   instant swap this exists to replace. */
+.menubar {
+  view-transition-name: menubar;
+}
+
+.rail {
+  view-transition-name: rail;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}

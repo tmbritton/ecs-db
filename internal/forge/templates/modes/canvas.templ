@@ -44,20 +44,34 @@ templ statechart(data Data) {
 					// it, which is exactly the defect the node layer had in
 					// Story 4, reintroduced with a different element.
 					//
-					// A link only when there is a selection to clear: an anchor
-					// with no href is not focusable and has no role, so an
-					// empty canvas offers nothing to everything that reads the
-					// page aloud while still taking the pointer.
-					<a
+					// Always a button, and always the same element.
+					//
+					// It was an anchor while selecting was a navigation, and a
+					// link that does not link is a link a keyboard user is lied
+					// to about. It was then a button only when there was a
+					// selection to clear — which changed the *tag* as the
+					// selection came and went, and the patch that follows a
+					// clear therefore replaces the node rather than updating
+					// it, dropping focus to <body> and restarting the tab order
+					// at the top of the document. Invisible while clearing was
+					// a full navigation; not any more.
+					//
+					// A button with nothing selected is not a button with
+					// nothing to do: double-clicking it adds a state, and
+					// right-clicking offers the same.
+					<button
+						type="button"
 						class="chart__ground"
 						data-testid="canvas-ground"
 						data-on:dblclick={ addStateAction(data) }
 						data-on:contextmenu={ menuAction(data, "canvas") }
 						if data.Chart.Selected != "" {
-							href={ URL(clearSelectionHref(data)) }
+							data-on:click={ clearSelectionAction() }
 							aria-label="Clear selection"
+						} else {
+							aria-label="Canvas"
 						}
-					></a>
+					></button>
 					@chartEdges(data)
 					<div class="chart__nodes">
 						for _, n := range data.Chart.Nodes {
@@ -68,12 +82,13 @@ templ statechart(data Data) {
 					// midpoint falls over a state — every self-transition — is
 					// still the thing you click.
 					for _, e := range data.Chart.Edges {
-						<a
+						<button
+							type="button"
 							class={ "chart-label", kv("chart-label--selected", e.Selected),
 								kv("chart-label--dangling", e.Dangling),
 								kv("chart-label--invalid", edgeInvalid(data, e.ID)) }
 							style={ labelStyle(e) }
-							href={ URL(selectEdgeHref(data, e.ID)) }
+							data-on:click={ selectEdgeAction(e.ID) }
 							data-testid={ "edge-" + e.ID }
 							data-on:contextmenu={ menuAction(data, "edge", "edge", e.ID, "from", e.From,
 								"kind", string(e.Kind), "event", e.Event, "index", edgeIndex(e)) }
@@ -89,7 +104,7 @@ templ statechart(data Data) {
 							}
 						><span class="chart-label__text">{ e.Label() }</span>if edgeInvalid(data, e.ID) {
 								<span class="chart-label__invalid" role="img" aria-label="has a problem">!</span>
-							}</a>
+							}</button>
 					}
 				</div>
 			</div>
@@ -165,10 +180,11 @@ templ chartNode(data Data, n ChartNode) {
 		data-selected={ boolAttr(n.Selected) }
 		data-invalid={ boolAttr(stateInvalid(data, n.Path)) }
 	>
-		<a
+		<button
+			type="button"
 			class="chart-node__head"
 			style={ headStyle(n) }
-			href={ URL(selectStateHref(data, n.Path)) }
+			data-on:click={ selectStateAction(n.Path) }
 			data-testid={ "select-state-" + n.Path }
 			title={ nodeTitle(data, n) }
 			data-on:contextmenu={ menuAction(data, "state", "state", n.Path) }
@@ -202,7 +218,7 @@ templ chartNode(data Data, n ChartNode) {
 					<span class="chart-node__entry mono" title={ entry }>{ entry }</span>
 				}
 			}
-		</a>
+		</button>
 		if n.Kind != "history" {
 			// The amber output port. Dragging from it to another state creates
 			// a transition; the server decides what event it carries, because

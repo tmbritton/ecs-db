@@ -623,7 +623,7 @@ This epic's stated engine touchpoint was "Epic 14's TMX writer path". **There is
 
 Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds by entity *type* from `schema.json` and no object property feeds it, so the prototype's per-spawn dropdown would write a value nothing reads. And saving a map does not hot-reload: the watcher watches behaviours directories, `animations.toml` and the sprites directory, so a map takes effect on the next `ecs-db run`. See the epic README.
 
-- [ ] **Push, not poll** — Mutations publish to an event bus and the open pages are told immediately, instead of finding out on the next tick of a two-second poll. In progress: the bus, the connect burst, the region split and MAP's view state are done; view transitions are not.
+- [x] **Push, not poll** — Mutations publish to an event bus and the open pages are told immediately, instead of finding out on the next tick of a two-second poll.
   - Measured before changing anything: the server answered in 2–9ms while an edit took ~1s on average to appear, because nothing pushed — every mutation route answered 204 and waited for a timer
   - Every navigation rendered the page twice: the browser parsed 79KB and the stream then morphed `<main>` into a byte-identical copy of itself (76.5KB). A page that has just rendered now receives nothing
   - The bus is copied from `pkg/eventbus` in `tmbritton/fancykaraoke-go` to stay source-compatible until it is extracted into a shared library. Its `Publish` deadlocks on the subscriber after a slow one, via the pre-Go-1.23 timer drain; it also had no `Unsubscribe`, which Forge needs because it subscribes once per page load
@@ -632,6 +632,10 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - A mode is a list of disjoint regions now, each with the id the stream patches. MAP's canvas is 70KB of a 75KB page, so a refusal banner used to re-morph three hundred cells to show one line of text; it costs 1,882 bytes
   - MAP's four view controls — zoom, the tile in hand, the active layer, which layers are drawn — are Datastar signals and cost no request at all. Not a preference: a page's SSE subscription is fixed at load, so anything the server renders from it is frozen there and the next unrelated event undoes whatever changed since
   - Found by review: the zoom transform sized its box from the already-zoomed one, so the canvas panel scrolled eight times too far at 8× on a map that looked perfect
+  - The statechart stopped causing page loads too: selecting a node or an edge, clearing a selection, and the two edits that answered with a redirect. Selection could not be a signal — it decides what the *inspector* renders — so the server keeps a per-page record, keyed by an id in the page's own signals
+  - Found by review: treating a stream close as a page ending bricked the tab. Datastar aborts the stream when the tab is hidden, so alt-tabbing away and back left every later click answering 204 and changing nothing, for the life of the tab, with nothing logged
+  - Found by review: a CSS reset landed after the statechart's own rules and, every selector being a single class, won on source order — edge labels lost their font, box and colour, so selecting one changed nothing visible while `data-selected` stayed correct and the suite stayed green
+  - `@view-transition` for the page loads that remain, and deliberately not for the SSE patches: an edit lands in ~20ms and animating it would put the latency back
 
 - [x] **TMX writer & round-trip fidelity** — A writer that preserves everything Forge does not model, byte-for-byte, and maintains `nextobjectid` so an id is never reused.
   - A copy-on-write tree, not an emitter: every element keeps its source bytes and is written verbatim unless an edit reached it, so what this package does not model survives without it knowing the thing exists

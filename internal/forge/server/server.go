@@ -139,6 +139,10 @@ type Server struct {
 	// wants to queue behind the rest of the server's state.
 	pages pageRenders
 
+	// selections is what each open page has selected. See pageStates for why this
+	// is the one piece of view state the server has to hold.
+	selections pageStates
+
 	// pollersRunning counts live engine pollers. Its own atomic rather than a
 	// field under s.mu, because the poller decrements it as it exits and the
 	// thing waiting for that holds no lock.
@@ -288,6 +292,15 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	// takeHeld has already been reset out from under them.
 	s.publish(EventChanged)
 	data := s.modeData(r)
+	// A page is issued an id here and keeps it for its life. Its stream carries
+	// the id, so the stream renders what *this* page has selected rather than
+	// what the URL said when it loaded.
+	data.PageID = s.newPage()
+	// The resolved selection, not the raw parameter: a ?sel= naming a state
+	// that has since been renamed resolves to nothing, and recording it would
+	// leave the page asking for a selection it does not have for as long as it
+	// stays open.
+	s.setPageSel(data.PageID, data.Chart.Selected)
 
 	// The same render the stream would do, so that the stream can recognise
 	// its own output and not send the page a copy of what it already has.
@@ -308,6 +321,13 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 // to render, and the stamp identifying what this page load already holds.
 func streamSubscription(r *http.Request, slug string, data modes.Data, stamp string) string {
 	q := streamQuery(r, slug, data)
+	if data.PageID != "" {
+		if q == "" {
+			q = "page=" + data.PageID
+		} else {
+			q += "&page=" + data.PageID
+		}
+	}
 	if stamp == "" {
 		return q
 	}
@@ -317,12 +337,12 @@ func streamSubscription(r *http.Request, slug string, data modes.Data, stamp str
 	return q + "&v=" + stamp
 }
 
-// streamQuery is the selection the page's SSE subscription has to carry, so
-// that the mode content it re-renders is the one on screen.
+// streamQuery is which view the page's SSE subscription has to re-render, so
+// that the mode content it sends back is the one on screen.
 //
 // One place names the selection parameters, because the shell must not know
 // which one a given mode uses — it carried ?component= alone until AGENTS
-// arrived selecting with ?machine=, and the stream then re-rendered every tick
+// arrived selecting with ?machine=, and the stream then re-rendered every pass
 // with nothing selected.
 //
 // The resolved values, not the raw query: Epic 12's rename-following means the
@@ -357,13 +377,10 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)
 	}
-	// The resolved selection, not the raw parameter, for the same reason as
-	// above: a ?sel= naming a state that has since been renamed resolves to
-	// nothing, and a stream that kept asking for it would re-render a canvas
-	// with a selection the page does not have.
-	if slug == "agents" && data.Chart.Selected != "" {
-		q.Set("sel", data.Chart.Selected)
-	}
+	// The statechart's selection is *not* here, and must not be. It is the
+	// page's, recorded against the page's id, which streamSubscription adds
+	// alongside this. A selection frozen into this URL is what made selecting a
+	// node a page load: the only way to change it was to build a new one.
 	return q.Encode()
 }
 
@@ -419,7 +436,14 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 			// From the definition, never from the inspection: the canvas has
 			// to draw a machine that does not validate, because that is the
 			// one someone opened the editor to fix.
-			data.Chart = chart.Build(data.Machine, r.URL.Query().Get("sel"))
+			// From the page's own record, falling back to the URL for the very
+			// first render — a pasted link carrying ?sel= still works, and it
+			// is recorded as this page's the moment it lands.
+			sel := s.pageSel(pageIDOf(r))
+			if sel == "" {
+				sel = r.URL.Query().Get("sel")
+			}
+			data.Chart = chart.Build(data.Machine, sel)
 			data.Actions = s.cfg.MachineSession.ActionCatalogue()
 			data.Guards = s.cfg.MachineSession.GuardCatalogue()
 			// From the definition already in hand, not through the session: a
@@ -605,6 +629,14 @@ func (s *Server) handleModeEvents(w http.ResponseWriter, r *http.Request) {
 	// demand.
 	changed := s.cfg.Bus.Subscribe(forgeEvents...)
 	defer s.cfg.Bus.Unsubscribe(changed)
+
+	// Marked live for as long as this connection lasts. Not deleted when it
+	// ends: Datastar aborts the stream when the tab is hidden and reconnects
+	// when it comes back, so a close is usually somebody glancing at their
+	// editor and not a page going away. See streamOpened.
+	page := r.URL.Query().Get("page")
+	s.streamOpened(page)
+	defer s.streamClosed(page)
 
 	s.mu.Lock()
 	s.streams++

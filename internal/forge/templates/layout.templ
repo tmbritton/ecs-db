@@ -10,6 +10,13 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title }</title>
+			// Classic and first, not a module like the rest. A module is
+			// deferred to end-of-parse, and `pagereveal` fires at the new
+			// document's first rendering opportunity — so on a slow parse the
+			// listener would be registered after the event it exists to catch,
+			// which is the likeliest explanation for the one uncaught
+			// AbortError the browser suite ever saw. See the file itself.
+			<script src="/static/js/viewtransition.js"></script>
 			<link rel="stylesheet" href="/static/css/fonts.css"/>
 			<link rel="stylesheet" href="/static/css/tokens.css"/>
 			<link rel="stylesheet" href="/static/css/forge.css"/>

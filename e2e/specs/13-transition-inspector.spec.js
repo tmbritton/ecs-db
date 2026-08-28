@@ -9,12 +9,13 @@
 // the transitions on its event is the machine's logic — XState takes the first
 // whose guard passes — and the chart's edge id is positional, so reordering
 // moves the thing that is selected. Following it takes a server-computed
-// redirect, and a selection that did not follow would make the button refuse to
-// repeat: the second click would undo the first.
+// answer — only the session knows where it went — and a selection that did not
+// follow would make the button refuse to repeat: the second click would undo
+// the first.
 
 const fs = require("fs");
 const path = require("path");
-const { test, expect, byTestId } = require("../fixtures");
+const { test, expect, byTestId, settled } = require("../fixtures");
 
 const PROJECT = path.resolve(__dirname, "../fixtures/project");
 const BEHAVIORS = path.join(PROJECT, "behaviors");
@@ -66,6 +67,11 @@ function transitions(machine, state, event, kind = "on") {
 async function selectEdge(page, id) {
   await page.goto("/forge/agents");
   await byTestId(page, `machine-${NESTED}`).click();
+  // Choosing a machine is a navigation, and the view transition it starts
+  // paints over the new page: real pointer input does not reach the DOM
+  // underneath while it animates, so the click below would find the label,
+  // aim at it correctly, and go nowhere.
+  await settled(page);
   await byTestId(page, `edge-${id}`).click();
   await expect(byTestId(page, "transition-inspector")).toBeVisible();
 }
@@ -187,8 +193,15 @@ test("an after transition shows a duration, and refuses one the engine cannot re
 
   await byTestId(page, "transition-event").fill("1s");
   await byTestId(page, "transition-event").blur();
-  // The key moved, so the selection had to move with it.
-  await page.waitForURL(/sel=edge%3Aidle%7Cafter%7C1s%7C0/, { timeout: 10_000 });
+  // The key moved, so the selection had to move with it — otherwise the
+  // inspector would be looking at an index that now holds something else.
+  // Asserted on what is selected rather than on the URL: this used to answer
+  // with a navigation, and a rename reloading the whole editor is exactly what
+  // the node editor stopped doing.
+  await expect(byTestId(page, "edge-idle|after|1s|0")).toHaveAttribute("data-selected", "true", {
+    timeout: 10_000,
+  });
+  await expect(byTestId(page, "canvas-selection")).toContainText("1s");
   await expect(byTestId(page, "transition-event")).toHaveValue("1s");
 
   const machine = await saved(baseURL);
@@ -209,8 +222,11 @@ async function forkSpotted(page) {
   await byTestId(page, "transition-event").fill("SPOTTED");
   await byTestId(page, "transition-event").blur();
   // Appended, so it is index 1 — and only the server knew that, which is why
-  // the answer is a redirect and not a 204.
-  await page.waitForURL(/sel=edge%3Aidle%7Con%7CSPOTTED%7C1/, { timeout: 10_000 });
+  // it moves the page's selection rather than leaving the inspector pointed at
+  // an index that now holds something else.
+  await expect(byTestId(page, "edge-idle|on|SPOTTED|1")).toHaveAttribute("data-selected", "true", {
+    timeout: 10_000,
+  });
 }
 
 test("two transitions on one event keep file order, and reordering changes the file", async ({
@@ -235,7 +251,9 @@ test("two transitions on one event keep file order, and reordering changes the f
   await byTestId(page, "move-up-1").click();
   // The selection follows the transition, or the button would not repeat: the
   // second click would move whatever took the old index back again.
-  await page.waitForURL(/sel=edge%3Aidle%7Con%7CSPOTTED%7C0/, { timeout: 10_000 });
+  await expect(byTestId(page, "edge-idle|on|SPOTTED|0")).toHaveAttribute("data-selected", "true", {
+    timeout: 10_000,
+  });
   await expect(labels()).toHaveText([
     "SPOTTED [inRange] → combat.attacking",
     "SPOTTED → combat",

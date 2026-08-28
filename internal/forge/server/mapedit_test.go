@@ -670,14 +670,15 @@ func TestMapCanvas_TwoRendersOfAnUnchangedMapAreIdentical(t *testing.T) {
 	}
 }
 
-// withoutStamp removes the one thing in a page that is *supposed* to differ
+// withoutStamp removes the two things in a page that are *supposed* to differ
 // between two loads: the single-use stamp its stream presents to prove it
-// already holds this render. Everything else being identical is the property
-// worth having — a map iterated in Go's randomised order would flicker the
-// canvas and defeat the stream's identical-patch suppression.
-var stampAttr = regexp.MustCompile(`v=[0-9a-f]{32}`)
+// already holds this render, and the id identifying the page itself. Everything
+// else being identical is the property worth having — a map iterated in Go's
+// randomised order would flicker the canvas and defeat the stream's
+// identical-patch suppression.
+var perLoad = regexp.MustCompile(`(v=|page=|&#34;page&#34;:&#34;)[0-9a-f]{32}`)
 
-func withoutStamp(page string) string { return stampAttr.ReplaceAllString(page, "v=STAMP") }
+func withoutStamp(page string) string { return perLoad.ReplaceAllString(page, "${1}ONCE") }
 
 func TestMapCanvas_AnUnresolvedGIDIsDrawnRatherThanSkipped(t *testing.T) {
 	srv, _, sess, configured := mapServer(t)

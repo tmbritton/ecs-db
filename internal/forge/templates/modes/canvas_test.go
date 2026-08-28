@@ -178,16 +178,24 @@ func TestCanvas_HistoryNodesAreDrawnAsHistory(t *testing.T) {
 	}
 }
 
-func TestCanvas_SelectionIsALink(t *testing.T) {
+// Selecting a node posts rather than navigating. It was a link, and selecting a
+// node in an editor should not reload the page — and it is not a signal either,
+// because the selection decides what the *inspector* renders, which only the
+// server can do. See server.pageStates.
+func TestCanvas_SelectionIsARequestAndNotANavigation(t *testing.T) {
 	html := renderCanvas(t, canvasMachine, "")
-	// The path is escaped into the URL, and the machine goes with it: a
-	// selection with no machine names a state in whichever file sorts first.
-	want := `href="/forge/agents?machine=%2Fp%2Fcore%2Fbehaviors%2Fwander.json&amp;sel=state%3Acombat.attacking"`
+
+	want := `data-on:click="@post(&#39;/forge/agents/select?sel=state%3Acombat.attacking&#39;)"`
 	if !strings.Contains(html, want) {
-		t.Errorf("no link selects the nested state; wanted\n%s", want)
+		t.Errorf("nothing selects the nested state; wanted\n%s", want)
 	}
 	if !strings.Contains(html, `sel=edge%3Aidle%7Con%7CSPOTTED%7C0`) {
-		t.Error("no link selects an edge")
+		t.Error("nothing selects an edge")
+	}
+	// And the machine is not in it: the server knows which machine this page is
+	// showing, so the selection only has to say what.
+	if strings.Contains(html, `/forge/agents/select?machine=`) {
+		t.Error("the selection carries a machine it does not need")
 	}
 }
 
@@ -232,26 +240,34 @@ func TestCanvas_ASelectionNamingNothingIsDropped(t *testing.T) {
 		t.Error("the readout does not say the selection went nowhere")
 	}
 	// The ground is still there — it is what double-click and right-click land
-	// on — but it is not a link, so it offers nothing to anything that reads
-	// the page aloud.
+	// on — and it is still a button, because the tag must not change with the
+	// selection: a patch that swapped the element would drop keyboard focus to
+	// <body> every time somebody cleared a selection.
+	//
+	// What changes is what it says it does. With nothing selected there is no
+	// click handler and the name is the surface rather than the action.
 	ground := section(t, html, `data-testid="canvas-ground"`, ">")
-	if strings.Contains(ground, "href=") || strings.Contains(ground, "aria-label") {
-		t.Errorf("a link that clears nothing is still a link: %s", ground)
+	if strings.Contains(ground, "href=") {
+		t.Errorf("the ground is a link again: %s", ground)
+	}
+	if strings.Contains(ground, "data-on:click") {
+		t.Errorf("the ground offers to clear a selection that is not there: %s", ground)
+	}
+	if !strings.Contains(ground, `aria-label="Canvas"`) {
+		t.Errorf("the ground is unnamed: %s", ground)
 	}
 }
 
 func TestCanvas_TheGroundClearsTheSelection(t *testing.T) {
 	html := renderCanvas(t, canvasMachine, "state:idle")
 
-	// The whole opening tag, not from the test id onwards: templ writes
-	// attributes in source order and href comes after it.
-	ground := section(t, html, `<a class="chart__ground"`, ">")
-	if !strings.Contains(ground, `href="/forge/agents?machine=%2Fp%2Fcore%2Fbehaviors%2Fwander.json"`) {
-		t.Errorf("the ground does not link back to the machine with no selection: %s", ground)
+	ground := section(t, html, `class="chart__ground"`, ">")
+	if !strings.Contains(ground, `data-on:click="@post(&#39;/forge/agents/select&#39;)"`) {
+		t.Errorf("the ground does not clear the selection: %s", ground)
 	}
-	// It is a link with no text, so it needs a name to be one at all.
+	// It is a control with no text, so it needs a name to be one at all.
 	if !strings.Contains(ground, `aria-label="Clear selection"`) {
-		t.Errorf("the ground is an unnamed link: %s", ground)
+		t.Errorf("the ground is an unnamed control: %s", ground)
 	}
 }
 
@@ -384,7 +400,7 @@ func nodeSection(t *testing.T, html, path string) string {
 	if start < 0 {
 		t.Fatalf("node %s is not in an element", path)
 	}
-	end := strings.Index(html[start:], "</a>")
+	end := strings.Index(html[start:], "</button>")
 	if end < 0 {
 		t.Fatalf("node %s has no header", path)
 	}
@@ -400,11 +416,11 @@ func edgeSection(t *testing.T, html, id string) string {
 	}
 	// Back to the start of the tag, so attributes written before the test id
 	// are in the section too — the mistake Story 3's override test made.
-	start := strings.LastIndex(html[:i], "<a")
+	start := strings.LastIndex(html[:i], "<button")
 	if start < 0 {
 		t.Fatalf("edge %s is not in an element", id)
 	}
-	end := strings.Index(html[start:], "</a>")
+	end := strings.Index(html[start:], "</button>")
 	if end < 0 {
 		t.Fatalf("edge %s has no closing tag", id)
 	}
@@ -609,7 +625,7 @@ func TestCanvas_TheGroundIsTheOnlyThingOverTheCanvas(t *testing.T) {
 	}
 	ground := section(t, html, `data-testid="canvas-ground"`, ">")
 	// The same element does all three jobs.
-	for _, want := range []string{"href=", "data-on:dblclick", "data-on:contextmenu"} {
+	for _, want := range []string{"data-on:click", "data-on:dblclick", "data-on:contextmenu"} {
 		if !strings.Contains(ground, want) {
 			t.Errorf("the ground is missing %s: %s", want, ground)
 		}

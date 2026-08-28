@@ -105,10 +105,11 @@ func (s *Server) renderRegions(m mode.Mode, data modes.Data) (templates.Regions,
 	// send, not rendered a second time from the same Data. Two renders that
 	// merely ought to agree is what the version stamp would then be asserting
 	// about, and the stamp is only worth having if it cannot be wrong.
-	signals := ""
-	if content.Signals != nil {
-		signals = content.Signals(data)
-	}
+	// The page's own id travels in its signals, so every request it makes says
+	// which page it is — Datastar sends signals with all of them. Merged here
+	// rather than asked of each mode, because the id is the shell's business
+	// and a mode should not have to remember to carry it.
+	signals := mergeSignals(`{"page":"`+data.PageID+`"}`, modeSignals(content, data))
 	modeContent, err := renderToString(
 		templates.ModeContentRegion(content.Page(rendered[first:first+count]), signals))
 	if err != nil {
@@ -130,4 +131,28 @@ func renderToString(c templates.Component) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// modeSignals is a mode's own declared view state, or "" when it has none.
+func modeSignals(content modes.Content, data modes.Data) string {
+	if content.Signals == nil {
+		return ""
+	}
+	return content.Signals(data)
+}
+
+// mergeSignals joins two JSON object literals into one.
+//
+// String concatenation, like the literals themselves: every value written into
+// them is a number, a bool, or an id this server generated from crypto/rand, so
+// there is nothing here that needs escaping. The moment a caller-supplied
+// string goes in, this should become encoding/json.
+func mergeSignals(a, b string) string {
+	switch {
+	case b == "" || b == "{}":
+		return a
+	case a == "" || a == "{}":
+		return b
+	}
+	return a[:len(a)-1] + "," + b[1:]
 }

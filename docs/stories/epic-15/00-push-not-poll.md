@@ -1,7 +1,7 @@
 # Story 0: Push, not poll
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🚧 In progress — the bus, the connect burst, the region split and MAP's view state are done; view transitions are not  
+**Status:** ✅ Complete  
 **Priority:** Highest — every later story lands on this architecture
 
 **Depends on:** Story 3
@@ -71,11 +71,48 @@ afterwards.
 - [x] MAP has no `<a href>` left except choosing which map to edit
 - [x] Zoom, selected tile, layer visibility and active layer survive a
       re-render, because the server no longer renders them
-- [ ] What navigation remains does not read as a hard refresh
-- [ ] A fine-grained edit is **not** animated — a view transition has a
+- [x] What navigation remains does not read as a hard refresh
+- [x] A fine-grained edit is **not** animated — a view transition has a
       duration, and spending it on a keystroke puts back the latency this story
       removes
 - [x] `go test ./...` passes
+
+## As Implemented
+
+Five phases, each measured before and after.
+
+**The numbers.** Edit-to-screen went from ~1000ms average to 22.8ms. A page that
+has just rendered receives 0 bytes on connect where it used to receive 76,509. A
+refused map edit sends 1,882 bytes where it used to re-send 75KB and re-morph
+three hundred cells. MAP's four view controls and the statechart's selection
+cost no page load at all, where each was ~92ms and a fresh SSE connection.
+
+**Two places the plan was wrong, both found by looking rather than reasoning.**
+It said to give `#mode-content`, `#map-canvas` and the save footer a
+`view-transition-name`; naming the footer scaled MAP's into SCHEMA's and
+ballooned "Discard" and "Save" to twice their size in the middle of every mode
+switch. A screenshot taken mid-transition caught it. And it justified moving
+MAP's view state to signals partly on payload, which the region split had
+already made false — the real reason is that a stream's subscription is fixed
+when the page loads, so anything the server renders from it is frozen there.
+
+**Two costs view transitions add**, neither of which existed before. Real pointer
+input does not reach the DOM while a transition animates, so for ~140ms after a
+navigation the page looks ready and is not — which broke the statechart drag and
+will meet Story 5's paint tools. And a skipped transition rejects promises
+nobody observes; `viewtransition.js` catches them.
+
+**One property deliberately given up.** The statechart selection is no longer in
+the URL, so it is not bookmarkable and does not survive a reload. It was a link
+because the inspector's contents depend on it and only the server can render
+those. Keeping the URL in sync was considered and rejected: a click could sync
+it, but a server-initiated move — renaming an event, deleting a transition —
+could not, and a URL that is sometimes right is worse than one that never claims
+to be.
+
+**Still per-server, and now hit far more often:** `editProblem` and
+`canvasMenu`. Every node click in one tab closes another tab's context menu and
+clears its error banner. `pageStates` is the shape that fixes it.
 
 ## Notes
 

@@ -131,6 +131,35 @@ a:hover {
   }
 }
 
+/* Controls that stopped being navigations: MAP's palette tile, layer eye, layer
+   name and zoom steps, and the statechart's ground, edge labels and node heads.
+   Every one of them was an anchor while clicking it loaded a page; none of them
+   goes anywhere now, and a link that does not link is a link a keyboard user is
+   lied to about.
+   
+   Here, with the base rules, and not beside the components it names. It began
+   life down among them, after `.chart-label` and `.chart-node__head` — and
+   since every selector involved is a single class, source order decided it and
+   the reset won. Edge labels silently lost their background, their border,
+   their mono font and their colour, so selecting one changed nothing you could
+   see; node heads lost `cursor: grab`. Nothing failed: the browser suite
+   asserts `data-selected` and the footer text, and both were correct. */
+.palette-tile,
+.layer-row__eye,
+.layer-row__name,
+.segmented__link,
+.chart__ground,
+.chart-label,
+.chart-node__head {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: inherit;
+}
+
 /* --- primitives ------------------------------------------------------------
    The shared vocabulary in internal/forge/templates/components. Appearance
    lives here; the Go props describe only *what* a thing is. Hover and focus
@@ -2499,23 +2528,6 @@ option:disabled {
   cursor: not-allowed;
 }
 
-/* Controls that became <button> when their state moved into a signal: the
-   palette tile, the layer eye, the layer name and the zoom steps. They were
-   anchors while every one of them was a navigation; none of them goes anywhere
-   now, and a link that does not link is a link a keyboard user is lied to
-   about. The reset is here so they still look like what they looked like. */
-.palette-tile,
-.layer-row__eye,
-.layer-row__name,
-.segmented__link {
-  appearance: none;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-align: inherit;
-}
 
 .segmented__link {
   padding: 3px 11px;

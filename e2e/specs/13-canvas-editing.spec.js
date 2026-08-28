@@ -8,7 +8,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { test, expect, byTestId } = require("../fixtures");
+const { test, expect, byTestId, settled } = require("../fixtures");
 
 const PROJECT = path.resolve(__dirname, "../fixtures/project");
 const BEHAVIORS = path.join(PROJECT, "behaviors");
@@ -51,6 +51,10 @@ async function openCanvas(page) {
   await page.goto("/forge/agents");
   await byTestId(page, `machine-${NESTED}`).click();
   await expect(byTestId(page, "statechart")).toBeVisible();
+  // Visible is not the same as interactive: the view transition from the
+  // previous page is still painting over this one, and real pointer input does
+  // not reach the DOM underneath it. Every test below drives the mouse.
+  await settled(page);
 }
 
 // saved reads what the session holds, by saving it and reading the file. The

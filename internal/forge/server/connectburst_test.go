@@ -114,20 +114,17 @@ func TestPageAndStreamRenderTheSameRegions(t *testing.T) {
 		req := mustRequest(t, srv.URL+m.at)
 		data := s.modeData(req)
 
-		regions, _, err := s.renderRegions(m.mode, data)
-		if err != nil {
-			t.Fatalf("%s: rendering regions: %v", m.at, err)
-		}
-		for name, region := range map[string]string{
-			"engine status": regions.EngineStatus,
-			"save reports":  regions.SaveReports,
-			"save footer":   regions.SaveFooter,
-			"mode content":  regions.ModeContent,
-			"save confirm":  regions.SaveConfirm,
-		} {
-			if !strings.Contains(body, region) {
+		// What the stream would send, region by region — not the assembled
+		// mode content, which is a page-assembly artifact the stream never
+		// sends and which carries the page's own id, different on every load.
+		for _, region := range s.regions(m.mode, func() modes.Data { return data }) {
+			html, err := region.render()
+			if err != nil {
+				t.Fatalf("%s: rendering %s: %v", m.at, region.name, err)
+			}
+			if !strings.Contains(body, html) {
 				t.Errorf("%s: the page does not contain the %s region the stream would send:\n%.300s",
-					m.at, name, region)
+					m.at, region.name, html)
 			}
 		}
 	}

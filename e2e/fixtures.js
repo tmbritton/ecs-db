@@ -74,6 +74,25 @@ const test = base.test.extend({
   },
 });
 
+// settled waits for any view transition to finish.
+//
+// A cross-document view transition paints snapshots over the page while it
+// animates, and for that window real pointer input does not reach the live DOM
+// — while elementFromPoint, which is a DOM query rather than a hit test,
+// happily reports the element underneath. So a test that navigates and then
+// drives the mouse can find a node, aim at it correctly, and have the whole
+// gesture go nowhere.
+//
+// Assertions about DOM state are unaffected, which is why only the specs that
+// drive real input need this.
+async function settled(page) {
+  await page.waitForFunction(
+    () => !document.getAnimations().some((a) => String(a.effect?.pseudoElement || "").includes("view-transition")),
+    null,
+    { timeout: 5_000 },
+  );
+}
+
 // Datastar appends the page's signal state to an action's URL, so a stream
 // request arrives as "/forge/map/events?datastar=%7B%7D" rather than a bare
 // path. Matching on a bare suffix finds nothing — which reads exactly like a
@@ -124,6 +143,7 @@ const MODES = [
 ];
 
 module.exports = {
+  settled,
   test,
   expect: base.expect,
   byTestId,

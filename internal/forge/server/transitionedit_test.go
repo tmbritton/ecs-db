@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
@@ -47,19 +46,6 @@ func transitionsOn(t *testing.T, s *Server, machine, state, event string) []agen
 	return def.States[state].On[event]
 }
 
-// postFor is post, handing back the body as well — the two relocating ops answer
-// with an SSE redirect rather than with a bare 204.
-func postFor(t *testing.T, srv *httptest.Server, path string) (int, string) {
-	t.Helper()
-	resp, err := srv.Client().Post(srv.URL+path, "application/json", strings.NewReader("{}"))
-	if err != nil {
-		t.Fatalf("POST %s: %v", path, err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(body)
-}
-
 const goRef = "&from=idle&kind=on&event=GO&index=0"
 
 // problemOf and fieldOf split the pair lastEditProblem hands back, so a test
@@ -88,19 +74,20 @@ func TestTransitionEdit_ConnectsTwoStates(t *testing.T) {
 func TestTransitionEdit_DeletingOneLetsGoOfTheSelection(t *testing.T) {
 	s, srv, machine, q := transitionFixture(t)
 
-	code, body := postFor(t, srv, "/forge/agents/transition?op=delete"+goRef+q)
-	if code != 200 {
+	page := s.newPage()
+	s.setPageSel(page, "edge:idle|on|GO|0")
+
+	if code := post(t, srv, "/forge/agents/transition?op=delete"+goRef+q+"&page="+page); code != 204 {
 		t.Fatalf("delete: %d (%s)", code, problemOf(s))
 	}
 	got := transitionsOn(t, s, machine, "idle", "GO")
 	if len(got) != 1 || got[0].Target != "resting" {
 		t.Errorf("GO = %+v, want only the unguarded one", got)
 	}
-	if strings.Contains(body, "sel=") {
-		t.Errorf("the answer keeps a selection naming a transition that is gone: %s", body)
-	}
-	if !strings.Contains(body, "machine=") {
-		t.Errorf("the answer does not go back to the machine: %s", body)
+	// It used to answer with a navigation, because selection lived in the URL.
+	// The page's own record moves instead, and the chart follows on the stream.
+	if got := s.pageSel(page); got != "" {
+		t.Errorf("the page still has %q selected, naming a transition that is gone", got)
 	}
 }
 
@@ -117,21 +104,23 @@ func TestTransitionEdit_ANoOpRenameDoesNotNavigate(t *testing.T) {
 // ── the event ─────────────────────────────────────────────────────────────────
 
 // Renaming an event moves the transition, so the id the selection is keyed on
-// changes. The answer is a redirect carrying where it went, because only the
-// server knows: moving onto an event that already exists appends.
-func TestTransitionEdit_RenamingTheEventRedirectsToWhereItWent(t *testing.T) {
+// changes. The server moves this page's selection after it, because only the
+// server knows where it went: moving onto an event that already exists appends.
+func TestTransitionEdit_RenamingTheEventFollowsWhereItWent(t *testing.T) {
 	s, srv, machine, q := transitionFixture(t)
 
-	code, body := postFor(t, srv, "/forge/agents/transition?op=event&value=PROD"+goRef+q)
-	if code != 200 {
+	page := s.newPage()
+	s.setPageSel(page, "edge:idle|on|GO|0")
+
+	if code := post(t, srv, "/forge/agents/transition?op=event&value=PROD"+goRef+q+"&page="+page); code != 204 {
 		t.Fatalf("event: %d (%s)", code, problemOf(s))
 	}
 	if len(transitionsOn(t, s, machine, "idle", "PROD")) != 1 {
 		t.Error("the transition did not move to PROD")
 	}
 	// The new selection, not the old one: PROD did not exist, so it is index 0.
-	if !strings.Contains(body, "sel=edge%3Aidle%7Con%7CPROD%7C0") {
-		t.Errorf("the answer does not send the selection after it: %s", body)
+	if got := s.pageSel(page); got != "edge:idle|on|PROD|0" {
+		t.Errorf("the page has %q selected, not where the transition went", got)
 	}
 }
 
@@ -233,11 +222,13 @@ func TestTransitionEdit_AddsRemovesAndFillsInAnAction(t *testing.T) {
 
 // ── the order, which is the logic ─────────────────────────────────────────────
 
-func TestTransitionEdit_MovingOneRedirectsAfterIt(t *testing.T) {
+func TestTransitionEdit_MovingOneFollowsAfterIt(t *testing.T) {
 	s, srv, machine, q := transitionFixture(t)
 
-	code, body := postFor(t, srv, "/forge/agents/transition?op=move&by=1"+goRef+q)
-	if code != 200 {
+	page := s.newPage()
+	s.setPageSel(page, "edge:idle|on|GO|0")
+
+	if code := post(t, srv, "/forge/agents/transition?op=move&by=1"+goRef+q+"&page="+page); code != 204 {
 		t.Fatalf("move: %d (%s)", code, problemOf(s))
 	}
 	list := transitionsOn(t, s, machine, "idle", "GO")
@@ -246,8 +237,8 @@ func TestTransitionEdit_MovingOneRedirectsAfterIt(t *testing.T) {
 	}
 	// Without this the button would not repeat: the selection would name
 	// whatever took the old index, and clicking again would undo the move.
-	if !strings.Contains(body, "sel=edge%3Aidle%7Con%7CGO%7C1") {
-		t.Errorf("the answer does not send the selection after it: %s", body)
+	if got := s.pageSel(page); got != "edge:idle|on|GO|1" {
+		t.Errorf("the page has %q selected, not where the transition went", got)
 	}
 }
 
