@@ -66,6 +66,27 @@ test("selecting a component is a transition too", async ({ page }) => {
   expect(await vt.crossDoc(), "selecting a component did not run a view transition").toBe(1);
 });
 
+test("only the browser's skipped-transition rejection is treated as cancellation", async ({ page }) => {
+  await page.goto("/forge/map");
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.evaluate(() => {
+    setTimeout(() => { Promise.reject(new DOMException("Transition was skipped", "AbortError")); }, 0);
+  });
+  // Let the browser deliver the unhandled-rejection event before asserting.
+  await page.waitForTimeout(100);
+  expect(errors, "a skipped view transition escaped as a page error").toEqual([]);
+
+  // A different rejection must still reach the page's error channel. The
+  // fixture permits only this deliberate probe, not unrelated failures.
+  await page.expectPageErrors(/uncaught exception: Error: other failure/, async () => {
+    await page.evaluate(() => {
+      setTimeout(() => { Promise.reject(new Error("other failure")); }, 0);
+    });
+    await expect.poll(() => errors.some((e) => e.includes("other failure"))).toBe(true);
+  });
+});
+
 // The other half, and the more important one. An edit reaches the screen in
 // ~20ms; wrapping that in an animation with a duration would put back the
 // latency the rest of this work removed. A transition is for a change of view,
@@ -170,4 +191,3 @@ test("with reduced motion, a navigation animates nothing", async ({ page }) => {
   );
   expect(running, `the transition animated under reduced motion: ${running}`).toEqual([]);
 });
-

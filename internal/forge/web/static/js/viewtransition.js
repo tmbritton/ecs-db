@@ -10,7 +10,10 @@
 // The new-page pagereveal handler stopped the first occurrence, but the
 // browser suite reproduced the rejection in the old page while two AGENTS
 // navigations happened close together. The old page sees pageswap instead;
-// both documents have to acknowledge their own promises.
+// both documents have to acknowledge their own promises. Chromium can also
+// surface the skipped-transition AbortError as an unhandled rejection before
+// either event's promise handler sees it. Only that exact expected cancellation
+// is dismissed; other rejections must still reach the console and browser suite.
 //
 // Loaded as a classic script at the top of <head>, unlike every other script
 // here. A module is deferred to end-of-parse and `pagereveal` fires at the new
@@ -30,3 +33,9 @@ function acknowledgeTransition(event) {
 
 addEventListener("pageswap", acknowledgeTransition);
 addEventListener("pagereveal", acknowledgeTransition);
+
+addEventListener("unhandledrejection", (event) => {
+  if (event.reason?.name === "AbortError" && event.reason?.message === "Transition was skipped") {
+    event.preventDefault();
+  }
+});
