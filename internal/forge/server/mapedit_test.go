@@ -886,10 +886,9 @@ func TestMapCanvas_ZoomIsAControlTheBrowserOwns(t *testing.T) {
 	}
 }
 
-// A map whose tilesets do not resolve still renders — with the reason on the
-// panel above — and there is nothing to zoom. A control marking none of its six
-// steps is worse than no control.
-func TestMapCanvas_AMapThatWillNotResolveHasNoZoomControl(t *testing.T) {
+// A map with an unreadable tileset is still editable: valid layers and spawns
+// remain visible, and unresolved cells are marked at their authored location.
+func TestMapCanvas_AnUnresolvedTilesetStillDrawsTheAuthoredCells(t *testing.T) {
 	srv, _, sess, configured := mapServer(t)
 	if err := os.Remove(filepath.Join(filepath.Dir(configured), "fixture.tsx")); err != nil {
 		t.Fatal(err)
@@ -902,16 +901,17 @@ func TestMapCanvas_AMapThatWillNotResolveHasNoZoomControl(t *testing.T) {
 	if !strings.Contains(body, `data-testid="map-editor"`) {
 		t.Fatalf("the mode stopped rendering:\n%s", body)
 	}
-	if strings.Contains(body, `data-testid="zoom-control"`) {
-		t.Errorf("a map with nothing drawn offers a zoom control:\n%s", body)
+	if !strings.Contains(body, `data-testid="zoom-control"`) ||
+		!strings.Contains(body, `data-testid="map-cell-unresolved"`) {
+		t.Error("a broken tileset hid an otherwise editable map")
 	}
 	// Not a row of zeros: "0×0 cells" reads as a map that is 0x0, which is a
 	// different and untrue thing from a map that could not be drawn.
 	if strings.Contains(body, "0×0 cells") || strings.Contains(body, "0× · 0px") {
 		t.Errorf("the status line reports a map of no size:\n%s", body)
 	}
-	if !strings.Contains(body, `data-testid="map-not-drawn"`) {
-		t.Errorf("the status line does not say the map is not drawn:\n%s", body)
+	if !strings.Contains(body, `data-testid="map-tileset-problem-0"`) {
+		t.Error("the unresolved reference has no problem on the map")
 	}
 	// And the reason is on the panel, which is what makes this a broken map
 	// rather than an empty one.

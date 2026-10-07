@@ -1,7 +1,7 @@
 # Story 9: Inline validation
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete
 **Priority:** Medium — closes the epic
 
 **Depends on:** Stories 6 and 7
@@ -24,47 +24,67 @@ as sentences meant for a person. Call those, do not restate them.
 
 ## Acceptance Criteria
 
-- [ ] A map with no `mapId` is warned about, in the engine's own terms: its
+- [x] A map with no `mapId` is warned about, in the engine's own terms: its
       spawns are filed under its path, and renaming or moving the file will
       spawn them again and leave the originals unreachable
-- [ ] **Two maps in one project sharing a `mapId` is an error**, naming both
+- [x] **Two maps in one project sharing a `mapId` is an error**, naming both
       files — the check the engine cannot make
-- [ ] A duplicate object id within a map is an error naming both objects
-- [ ] A spawn whose class is not an entity type is an error
-- [ ] A spawn missing a component its type requires is an error, and at
+- [x] A duplicate object id within a map is an error naming both objects
+- [x] A spawn whose class is not an entity type is an error
+- [x] A spawn missing a component its type requires is an error, and at
       `validationLevel: "warning"` a warning, matching what the engine will do
-- [ ] A property naming no component, or naming `Position`, is reported with the
+- [x] A property naming no component, or naming `Position`, is reported with the
       engine's message — including the "write it as `Component.name`" hint
-- [ ] A gid no tileset holds is reported by cell, distinguishing the three
+- [x] A gid no tileset holds is reported by cell, distinguishing the three
       cases `tileOf` distinguishes: no tilesets at all, below every first gid,
       and past the end of its own tileset
-- [ ] A tileset the map names that will not resolve is reported with the file
+- [x] A tileset the map names that will not resolve is reported with the file
       and the reason
-- [ ] A layer whose size disagrees with the map's is reported — `checkShape`
+- [x] A layer whose size disagrees with the map's is reported — `checkShape`
       refuses it, and a map that imports as fewer cells than it has deletes the
       difference
-- [ ] Every problem is shown against the thing that caused it — a cell, a spawn,
+- [x] Every problem is shown against the thing that caused it — a cell, a spawn,
       a layer, the map — not only in a list
-- [ ] All problems at once, not the first: a map with three mistakes is fixed in
+- [x] All problems at once, not the first: a map with three mistakes is fixed in
       one pass or in three, and three is worse
-- [ ] Saving a map that will not load is possible and is warned about, because
+- [x] Saving a map that will not load is possible and is warned about, because
       the editor is where a broken map gets fixed
-- [ ] `go test ./...` passes
+- [x] `go test ./...` passes
 
 ## Playwright steps
 
 `e2e/specs/15-map-validation.spec.js`.
 
-- [ ] A map with no `mapId` shows the warning, and adding one clears it
-- [ ] A project with two maps sharing an id names both files
-- [ ] A spawn whose class is not an entity type is flagged on the spawn itself
-- [ ] Deleting a required component from a spawn flags it and names the
-      component
-- [ ] A map with an unresolvable gid flags the cell
-- [ ] Fixing a problem clears it from the list without a reload
-- [ ] Several problems are listed together, not one at a time
+- [x] A map with no `mapId` shows the warning, and adding one clears it
+- [x] A project with two maps sharing an id names both files
+- [x] A spawn whose class is not an entity type is flagged on the spawn itself
+- [x] A hand-authored spawn missing a required component is flagged and names
+      that component. Required components cannot be detached in Forge; repairing
+      the spawn clears the mark and the list without a page reload
+- [x] A map with an unresolvable gid flags the cell
+- [x] Fixing a problem clears it from the list without a reload
+- [x] Several problems are listed together, not one at a time
 
 ## Notes
+
+- `tiled.Parse` itself refuses a malformed layer shape before a document can
+  open. That parser refusal already appears under the filename and offending
+  layer name in the MAP project-problems panel. An in-memory map that gets as
+  far as the engine's `checkShape` is also covered by an owner-keyed layer
+  issue; there is no editable layer row for a file the parser cannot open.
+- Preview resolves tilesets independently, retaining valid cells and spawns
+  when another tileset is missing. The saved TMX is still allowed to be broken:
+  `Save` changes the file, not a running game's map.
+- Tile findings follow the engine's topmost non-empty layer rule. Duplicate-ID
+  spawn markers cannot be selected or dragged; an ID-only deep link reports
+  the ambiguity even if one claimant is untyped, and the TMX mutators refuse
+  to move/delete either claimant. Invalid XML characters in a new mapId are
+  refused before a working file is changed.
+- Verified: `make test`, both lint tag sets, both builds, and `make e2e` (295
+  passing browser checks). Four working maps with 50×50 cells validated in
+  ~6.1 ms per benchmark iteration. Statement coverage: tilemap 91.6%, tiled
+  94.3%, Forge maps 88.8%, mapvalidation 95.0%, server 86.8%, mode templates
+  70.3%.
 
 - **The messages are the engine's.** `tilemap` and `world` already write
   refusals as sentences aimed at an author. Reworded copies drift, and the day

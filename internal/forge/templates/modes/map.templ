@@ -1,6 +1,7 @@
 package modes
 
 import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+import "github.com/tmbritton/ecs-db/internal/tiled"
 
 
 templ mapListBody(data Data) {
@@ -188,6 +189,7 @@ templ mapToolbar(data Data) {
 // draw order so the stacking is the engine's without the template knowing what
 // stacking is.
 templ mapCanvas(data Data) {
+	{{ ids := spawnIDCounts(data.ObjectGroups) }}
 	<div class="map-viewport" data-testid="map-viewport">
 		// Two boxes, because a transform does not change the box it is on: the
 		// outer one takes up the scaled space so the viewport scrolls right,
@@ -241,46 +243,77 @@ templ mapCanvas(data Data) {
 						for _, c := range cellsOfLayer(data.Canvas, l.Index) {
 							if c.Unresolved() {
 								<div
-									class="map-cell map-cell--unresolved"
+									class={ "map-cell map-cell--unresolved", kv("map-cell--invalid", mapCellProblem(data.MapValidation, l.Index, c.X, c.Y)) }
 									style={ cellStyle(c) }
 									data-testid="map-cell-unresolved"
 									data-cell={ cellID(c) }
-									title={ c.Problem }
+									data-invalid={ boolAttr(mapCellProblem(data.MapValidation, l.Index, c.X, c.Y)) }
+									title={ mapCellTitle(data.MapValidation, l.Index, c.X, c.Y, c.Problem) }
 								>?</div>
 							} else {
 								<div
-									class="map-cell"
+									class={ "map-cell", kv("map-cell--invalid", mapCellProblem(data.MapValidation, l.Index, c.X, c.Y)) }
 									style={ cellStyle(c) }
 									data-testid="map-cell"
 									data-cell={ cellID(c) }
-								></div>
+									data-invalid={ boolAttr(mapCellProblem(data.MapValidation, l.Index, c.X, c.Y)) }
+									if mapCellProblem(data.MapValidation, l.Index, c.X, c.Y) {
+										title={ mapProblemTitle(data.MapValidation, "cell", l.Index, c.X, c.Y, 0, 0) }
+									}
+								>if mapCellProblem(data.MapValidation, l.Index, c.X, c.Y) {
+										<span class="map-validation-mark" role="img" aria-label="invalid tile">!</span>
+									}</div>
 							}
 						}
 					</div>
 				}
 			</div>
 			<div class="map-spawns" data-testid="spawn-canvas">
-				for _, group := range data.ObjectGroups {
-					for _, obj := range group.Objects {
+				for gi, group := range data.ObjectGroups {
+					for oi, obj := range group.Objects {
 						if obj.Type != "" {
+							if ids[obj.ID] > 1 {
+								@ambiguousSpawnMarker(data, ids, gi, oi, obj)
+							} else {
 							<a
 								href={ URL(data.MapView.WithSpawn(obj.ID).Href()) }
-								class="map-spawn"
+								class={ "map-spawn", kv("map-spawn--invalid", mapSpawnInvalid(data.MapValidation, gi, oi)), kv("map-spawn--warning", mapSpawnWarning(data.MapValidation, gi, oi)) }
 								style={ spawnStyle(obj, data.Canvas.TileH) }
-								data-testid={ "spawn-" + itoa(obj.ID) }
+								data-testid={ spawnMarkerID(ids, gi, oi, obj.ID) }
+								data-invalid={ boolAttr(mapSpawnInvalid(data.MapValidation, gi, oi)) }
+								data-warning={ boolAttr(mapSpawnWarning(data.MapValidation, gi, oi)) }
 								data-cell={ spawnCellLabel(obj, data.Canvas.TileW, data.Canvas.TileH) }
 								aria-label={ obj.Type + " spawn " + itoa(obj.ID) }
-								title={ obj.Type + " · object " + itoa(obj.ID) }
+								title={ obj.Type + " · object " + itoa(obj.ID) + "\n" + mapProblemTitle(data.MapValidation, "spawn", 0, 0, 0, gi, oi) }
 								draggable="true"
 								data-on:dragstart={ "evt.dataTransfer.setData('text/plain', 'move:" + itoa(obj.ID) + "')" }
 								data-on:contextmenu={ mapMenuAction(data.SelectedMap, "spawn", "id", itoa(obj.ID)) }
-							>{ obj.Type }</a>
+							>{ obj.Type }if mapSpawnInvalid(data.MapValidation, gi, oi) {
+									<span class="map-validation-mark" role="img" aria-label="spawn has a problem">!</span>
+								} else if mapSpawnWarning(data.MapValidation, gi, oi) {
+									<span class="map-validation-mark" role="img" aria-label="spawn has a warning">!</span>
+							}</a>
+							}
 						}
 					}
 				}
 			</div>
 		</div>
 	</div>
+}
+
+// Duplicate IDs cannot address a single object. They are marked on the map,
+// but neither a link, a drag nor a menu can edit one without risking the other.
+templ ambiguousSpawnMarker(data Data, ids map[int]int, group, index int, obj tiled.Object) {
+	<div
+		class="map-spawn map-spawn--invalid map-spawn--ambiguous"
+		style={ spawnStyle(obj, data.Canvas.TileH) }
+		data-testid={ spawnMarkerID(ids, group, index, obj.ID) }
+		data-cell={ spawnCellLabel(obj, data.Canvas.TileW, data.Canvas.TileH) }
+		data-invalid="true"
+		aria-label={ obj.Type + " spawn " + itoa(obj.ID) + " has a duplicate object id; repair in Tiled before editing" }
+		title={ mapProblemTitle(data.MapValidation, "spawn", 0, 0, 0, group, index) }
+	>{ obj.Type }<span class="map-validation-mark" role="img" aria-label="duplicate object id">!</span></div>
 }
 
 // A canvas with a zero scale is a map whose tilesets did not resolve: it was
@@ -317,6 +350,7 @@ templ mapLayers(data Data) {
 			data-testid={ "layer-" + l.Name }
 			data-attr:data-hidden={ flag(hideSignal(l)) }
 			data-attr:data-active={ flag(selectedLayerExpr(l)) }
+			data-invalid={ boolAttr(mapLayerProblem(data.MapValidation, l.Index)) }
 			data-on:contextmenu={ mapMenuAction(data.SelectedMap, "layer", "layer", itoa(l.Index)) }
 		>
 			<button
@@ -346,6 +380,9 @@ templ mapLayers(data Data) {
 			}
 			if l.Empty {
 				<span class="badge-problem mono" data-testid={ "layer-empty-" + l.Name }>empty</span>
+			}
+			if mapLayerProblem(data.MapValidation, l.Index) {
+				<span class="map-validation-mark" role="img" aria-label={ "layer " + l.Name + " has a problem" } title={ mapProblemTitle(data.MapValidation, "layer", l.Index, 0, 0, 0, 0) }>!</span>
 			}
 		</div>
 	}
@@ -552,6 +589,12 @@ templ spawnInspector(data Data) {
 			}
 			@contextSeedsPanel(data, et)
 		</div>
+	} else if data.AmbiguousSpawn > 0 {
+		<div class="map-spawn-inspector" role="alert" data-testid="spawn-ambiguous">
+			Object id { itoa(data.AmbiguousSpawn) } belongs to more than one spawn.
+			Repair the IDs in Tiled before editing either object.
+			<a href={ URL(data.MapView.WithSpawn(0).Href()) } data-testid="spawn-clear-selection">Clear selection</a>
+		</div>
 	} else if data.MissingSpawn > 0 {
 		<div class="map-spawn-inspector" data-testid="spawn-missing">
 			Object { itoa(data.MissingSpawn) } is no longer in this map.
@@ -573,5 +616,39 @@ templ mapProblems(data Data) {
 				}
 			</ul>
 		</div>
+	}
+}
+
+// Map identity and the full validation report stay in the small head region.
+// Each issue is also marked on its owner in the list or canvas below.
+templ mapValidationPanel(data Data) {
+	if data.SelectedMap != "" {
+		<div class="map-identity" data-testid="map-identity">
+			<label class="schema__row">
+				<span class="schema__label">mapId · spawn identity</span>
+				<input
+					type="text"
+					class="schema__input mono"
+					value={ data.MapID }
+					data-testid="map-id"
+					aria-label="mapId"
+					data-on:change={ mapIDAction(data.SelectedMap) }
+				/>
+			</label>
+		</div>
+		if len(data.MapValidation.Issues) > 0 {
+			<section class="map-validation" data-testid="map-validation" aria-label="Map validation">
+				<div class="section-heading mono" data-testid="map-validation-count">
+					{ itoa(len(data.MapValidation.Issues)) } map findings
+				</div>
+				for _, issue := range data.MapValidation.Issues {
+					if issue.Warning {
+						<p class="schema__note" role="status" data-testid={ validationID(issue, data.MapID) }>{ issue.Message }</p>
+					} else {
+						<p class="schema__problem" role="alert" data-testid={ validationID(issue, data.MapID) }>{ issue.Message }</p>
+					}
+				}
+			</section>
+		}
 	}
 }

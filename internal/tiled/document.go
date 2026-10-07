@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // Document is a map open for editing: the file's own bytes, and the edits made
@@ -132,6 +134,89 @@ func (d *Document) Map() (*Map, error) {
 // leave Map answering from before the change, which is the failure mode this
 // whole type exists to avoid one level up.
 func (d *Document) invalidate() { d.valid = false }
+
+// SetMapID changes the map-level identity property without rewriting any
+// unrelated TMX. An absent <properties> block is created, and an existing
+// value keeps its attribute-vs-element spelling and any adjacent comments.
+func (d *Document) SetMapID(id string) error {
+	if !utf8.ValidString(id) {
+		return fmt.Errorf("tiled: mapId must be valid UTF-8 to be written as XML")
+	}
+	for _, r := range id {
+		if r != '\t' && r != '\n' && r != '\r' &&
+			(r < ' ' || r >= 0xD800 && r <= 0xDFFF || r == 0xFFFE || r == 0xFFFF) {
+			return fmt.Errorf("tiled: mapId contains U+%04X, which XML cannot hold", r)
+		}
+	}
+	root := d.tree.root
+	block := root.firstChild("properties")
+	if block != nil {
+		var found *xelem
+		for _, prop := range block.children("property") {
+			if prop.attr("name") != PropMapID {
+				continue
+			}
+			if found != nil {
+				return fmt.Errorf("tiled: map has duplicate %q properties", PropMapID)
+			}
+			found = prop
+		}
+		if found != nil {
+			hasValue := false
+			for _, attr := range found.attrs {
+				if attr.name == "value" {
+					hasValue = true
+				}
+			}
+			for _, kid := range found.kids {
+				if kid.el != nil {
+					return fmt.Errorf("tiled: mapId has nested content this edit cannot preserve")
+				}
+				if !hasValue && strings.HasPrefix(strings.TrimSpace(string(kid.raw)), "<") {
+					return fmt.Errorf("tiled: mapId has markup inside a text value this edit cannot preserve")
+				}
+			}
+			found.removeAttr("type")
+			found.removeAttr("propertytype")
+			if hasValue {
+				found.setAttr("value", id)
+			} else {
+				found.setText(id)
+			}
+			d.invalidate()
+			return nil
+		}
+	} else {
+		block = newElem("properties")
+		// Tiled writes map properties before layers and tilesets. Insert them
+		// there instead of appending after the object groups, where another
+		// editor may not treat them as map metadata at all.
+		at := -1
+		for i, kid := range root.kids {
+			if kid.el == nil {
+				continue
+			}
+			switch kid.el.name {
+			case "tileset", "layer", "group", "imagelayer", "objectgroup":
+				at = i
+			}
+			if at >= 0 {
+				break
+			}
+		}
+		if at < 0 {
+			root.appendChild(block, layerIndentStep(root))
+		} else {
+			block.parent = root
+			indent := "\n" + root.childIndent(layerIndentStep(root))
+			root.kids = append(root.kids[:at], append([]xnode{{el: block}, {raw: []byte(indent)}}, root.kids[at:]...)...)
+			root.markDirty()
+		}
+	}
+	block.appendChild(newElem("property", xattr{"name", PropMapID}, xattr{"value", id}), layerIndentStep(block))
+	d.invalidate()
+	return nil
+}
 
 // tileLayers and objectGroups are the elements behind Map's Layers and
 // ObjectGroups, in the same order.
@@ -344,18 +429,13 @@ func (d *Document) AddObject(group int, obj Object) (int, error) {
 //
 // Its id does not come back — see allocateObjectID.
 func (d *Document) RemoveObject(id int) error {
-	want := strconv.Itoa(id)
-	for _, g := range d.objectGroups() {
-		for _, o := range g.children("object") {
-			if o.attr("id") != want {
-				continue
-			}
-			g.removeChild(o)
-			d.invalidate()
-			return nil
-		}
+	o, err := d.objectElement(id)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("tiled: %s holds no object %d", d.name, id)
+	o.parent.removeChild(o)
+	d.invalidate()
+	return nil
 }
 
 // MoveObject changes only an existing object's coordinates. Its id, attributes,
@@ -366,31 +446,27 @@ func (d *Document) MoveObject(id int, x, y float64) error {
 	if err != nil {
 		return err
 	}
-	for _, g := range d.objectGroups() {
-		for _, o := range g.children("object") {
-			if o.attr("id") != strconv.Itoa(id) {
-				continue
-			}
-			maxX := float64(m.Width * m.TileWidth)
-			maxY := float64(m.Height * m.TileHeight)
-			// A tile object is located by its bottom edge, which may sit
-			// exactly on the map's bottom border; a point object cannot.
-			tile := o.attr("gid") != "" && o.attr("gid") != "0"
-			if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) ||
-				x < 0 || x >= maxX || (tile && (y <= 0 || y > maxY)) ||
-				(!tile && (y < 0 || y >= maxY)) {
-				return fmt.Errorf("tiled: object %d at (%v,%v) is outside the %dx%d map", id, x, y, m.Width, m.Height)
-			}
-			if o.attr("x") == formatCoord(x) && o.attr("y") == formatCoord(y) {
-				return nil
-			}
-			o.setAttr("x", formatCoord(x))
-			o.setAttr("y", formatCoord(y))
-			d.invalidate()
-			return nil
-		}
+	o, err := d.objectElement(id)
+	if err != nil {
+		return err
 	}
-	return fmt.Errorf("tiled: %s holds no object %d", d.name, id)
+	maxX := float64(m.Width * m.TileWidth)
+	maxY := float64(m.Height * m.TileHeight)
+	// A tile object is located by its bottom edge, which may sit exactly on
+	// the map's bottom border; a point object cannot.
+	tile := o.attr("gid") != "" && o.attr("gid") != "0"
+	if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) ||
+		x < 0 || x >= maxX || (tile && (y <= 0 || y > maxY)) ||
+		(!tile && (y < 0 || y >= maxY)) {
+		return fmt.Errorf("tiled: object %d at (%v,%v) is outside the %dx%d map", id, x, y, m.Width, m.Height)
+	}
+	if o.attr("x") == formatCoord(x) && o.attr("y") == formatCoord(y) {
+		return nil
+	}
+	o.setAttr("x", formatCoord(x))
+	o.setAttr("y", formatCoord(y))
+	d.invalidate()
+	return nil
 }
 
 // addProperties puts a <properties> block inside an element, or nothing at all

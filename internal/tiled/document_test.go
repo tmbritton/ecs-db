@@ -100,6 +100,99 @@ func TestDocument_MapReadsWhatTheDocumentHolds(t *testing.T) {
 	}
 }
 
+func TestDocument_SetMapIDPreservesUnrelatedTMX(t *testing.T) {
+	for _, tc := range []struct {
+		name, src, value string
+	}{
+		{"replace existing", richTMX, "moved"},
+		{"escape identity", richTMX, `a & "b"`},
+		{"add to existing block", strings.Replace(richTMX, `   <property name="mapId" value="rich"/>`, `   <property name="other" value="keep"/>`, 1), "created"},
+		{"add block", strings.Replace(richTMX, " <properties>\n  <property name=\"mapId\" value=\"rich\"/>\n </properties>\n", "", 1), "new"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "add block" && strings.Contains(tc.src, `name="mapId"`) {
+				t.Fatal("add-block fixture still has its original property")
+			}
+			d, err := tiled.ParseDocument([]byte(tc.src), "level.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.SetMapID(tc.value); err != nil {
+				t.Fatal(err)
+			}
+			m, err := d.Map()
+			if err != nil || m.Properties.Get("mapId") != tc.value {
+				t.Fatalf("mapId did not read back: %+v, %v", m, err)
+			}
+			bytes := string(d.Bytes())
+			for _, unchanged := range []string{`<imagelayer id="7"`, `<polygon points="0,0 8,0 8,8"/>`, `nextobjectid="42"`} {
+				if !strings.Contains(bytes, unchanged) {
+					t.Errorf("mapId edit discarded %s", unchanged)
+				}
+			}
+			if tc.name == "replace existing" {
+				want := strings.Replace(tc.src, `name="mapId" value="rich"`, `name="mapId" value="moved"`, 1)
+				if bytes != want {
+					t.Errorf("property replacement changed unrelated XML:\n%s", bytes)
+				}
+			}
+			if tc.name == "escape identity" && !strings.Contains(bytes, `value="a &amp; &quot;b&quot;"`) {
+				t.Errorf("mapId was not XML-escaped exactly once: %s", bytes)
+			}
+			if tc.name == "add block" && strings.Index(bytes, `<property name="mapId"`) > strings.Index(bytes, `<tileset firstgid`) {
+				t.Error("new map properties belong ahead of the tilesets, as Tiled writes them")
+			}
+			if err := d.SetMapID(tc.value); err != nil || string(d.Bytes()) != bytes {
+				t.Errorf("setting the same mapId should be byte-idempotent: %v", err)
+			}
+		})
+	}
+}
+
+func TestDocument_SetMapIDRefusesAmbiguousOrUnsafeProperties(t *testing.T) {
+	for _, tc := range []struct{ name, prop string }{
+		{"duplicate", `<property name="mapId" value="rich"/><property name="mapId" value="other"/>`},
+		{"nested", `<property name="mapId" type="class"><properties><property name="id" value="x"/></properties></property>`},
+		{"text with comment", `<property name="mapId">rich<!-- keep this note --></property>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := strings.Replace(richTMX, `<property name="mapId" value="rich"/>`, tc.prop, 1)
+			d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.SetMapID("new"); err == nil {
+				t.Fatal("unsafe edit accepted")
+			}
+			if string(d.Bytes()) != src {
+				t.Error("refused edit changed authored XML")
+			}
+		})
+	}
+}
+
+func TestDocument_SetMapIDRefusesCharactersXMLCannotRepresent(t *testing.T) {
+	for _, tc := range []struct{ name, id string }{
+		{"NUL", "new\x00id"},
+		{"control", "new\x01id"},
+		{"invalid UTF-8", string([]byte{0xff})},
+		{"noncharacter", "new\ufffeid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.SetMapID(tc.id); err == nil {
+				t.Fatal("unsafe identity accepted")
+			}
+			if string(d.Bytes()) != richTMX {
+				t.Error("invalid identity mutated the XML")
+			}
+		})
+	}
+}
+
 func TestParseDocument_RefusesWhatItCannotEdit(t *testing.T) {
 	for _, tc := range []struct{ name, src, want string }{
 		{"a .tmj", `{"width":2}`, ".tmx"},
@@ -883,6 +976,30 @@ func TestDocument_DuplicateObjectRefusesBeforeAllocatingAnID(t *testing.T) {
 			}
 			if string(d.Bytes()) != richTMX || d.NextObjectID() != 42 {
 				t.Error("a refused duplicate changed the source or advanced the counter")
+			}
+		})
+	}
+}
+
+func TestDocument_DuplicateObjectIDsCannotMoveOrDeleteAnArbitraryClaimant(t *testing.T) {
+	src := strings.Replace(richTMX, `<object id="8" name="note"`, `<object id="7" name="note"`, 1)
+	for _, tc := range []struct {
+		name string
+		edit func(*tiled.Document) error
+	}{
+		{"move", func(d *tiled.Document) error { return d.MoveObject(7, 0, 0) }},
+		{"delete", func(d *tiled.Document) error { return d.RemoveObject(7) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.edit(d); err == nil || !strings.Contains(err.Error(), "duplicate object id") {
+				t.Errorf("ambiguous %s should refuse by identity: %v", tc.name, err)
+			}
+			if string(d.Bytes()) != src {
+				t.Errorf("refused %s changed the TMX", tc.name)
 			}
 		})
 	}

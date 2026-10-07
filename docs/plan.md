@@ -693,7 +693,10 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - The layer eye is view-only, the canvas picks the topmost visible tile into the stamp, and a spawn duplicate clones its whole XML subtree with a fresh id. Empty cells and entity types have no empty menus
   - Verified with `make test`, both lint tag sets, both builds and 287 passing browser checks; statement coverage: tiled 94.2%, Forge server 86.8%, mode templates 70.7%, map canvas 94.3%
 
-- [ ] **Inline validation** — Every reason the engine would refuse this map, including the one it cannot make itself: two maps in a project sharing a `mapId`.
+- [x] **Inline validation** — Engine-backed cell, layer, spawn and tileset findings appear together against their authors; a project-wide duplicate `mapId` names both maps.
+  - Missing map identity warns in the engine's words; mapId edits preserve TMX and clear the warning without navigation. Partial previews keep valid cells and spawns visible even when other tilesets fail
+  - Strict/warning entity contracts and property spellings use the engine's validator, duplicate object IDs mark both claimants, and a broken map can still be saved. Malformed layer shapes are named by the parser in project problems before a canvas can open
+  - Verified with `make test`, both lint tag sets, both builds and 295 passing browser checks; 4×50×50 validation ~6.1 ms/iteration; statement coverage: tilemap 91.6%, tiled 94.3%, Forge maps 88.8%, mapvalidation 95.0%, server 86.8%, mode templates 70.3%
 
 ---
 

@@ -175,6 +175,49 @@ func TestResolved_ReadsTheTilesetsFromDisk(t *testing.T) {
 	}
 }
 
+func TestPreview_ReportsEachBrokenTilesetAndKeepsTheOtherOneDrawable(t *testing.T) {
+	src := strings.Replace(mapWith("level1", "20,20,\n20,20"),
+		`<tileset firstgid="1" source="fixture.tsx"/>`,
+		`<tileset firstgid="1" source="missing-a.tsx"/>
+ <tileset firstgid="10" source="missing-b.tsx"/>
+ <tileset firstgid="20" source="fixture.tsx"/>`, 1)
+	dir := project(t, map[string]string{
+		"fixture.tsx": twoTileTSX,
+		"fixture.png": "asset",
+		"level1.tmx":  src,
+	})
+	path := filepath.Join(dir, "level1.tmx")
+	s := maps.Open(maps.Config{MapPath: path})
+	if _, err := s.Resolved(path); err == nil || !strings.Contains(err.Error(), "missing-a.tsx") {
+		t.Fatalf("strict resolver no longer refuses the first unreadable tileset: %v", err)
+	}
+	m, problems, err := s.Preview(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(problems) != 2 || problems[0].Index != 0 || problems[1].Index != 1 ||
+		!strings.Contains(problems[0].Err.Error(), "missing-a.tsx") ||
+		!strings.Contains(problems[1].Err.Error(), "missing-b.tsx") {
+		t.Fatalf("preview lost a distinct loader error: %+v", problems)
+	}
+	if m.Tilesets[0].Tileset != nil || m.Tilesets[1].Tileset != nil ||
+		m.Tilesets[2].Tileset == nil || m.Layers[0].TileAt(0, 0).GID != 20 {
+		t.Fatalf("valid tileset or authored layer lost: %+v", m)
+	}
+	if err := s.Read(path, func(doc *tiled.Document) error {
+		original, err := doc.Map()
+		if err == nil && original.Tilesets[2].Tileset != nil {
+			t.Error("preview resolved into the working document's memoized map")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Preview("/etc/passwd"); err == nil {
+		t.Error("preview escaped the editing session")
+	}
+}
+
 // Resolution is done fresh each time and never kept, so a tileset edited on
 // disk — by Epic 16's TILES mode, or by Tiled in another window — is read
 // again rather than served from a tree nothing can invalidate.

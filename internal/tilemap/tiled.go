@@ -26,9 +26,8 @@ func readTiled(path string, data []byte) (loaded, error) {
 	//
 	// An absent orientation is orthogonal. Tiled always writes the attribute;
 	// a file that does not is not thereby claiming to be a hex map.
-	if m.Orientation != "" && m.Orientation != "orthogonal" {
-		return loaded{}, fmt.Errorf("tilemap: %s is %s, and this engine's grid is square cells",
-			m.Name, m.Orientation)
+	if err := checkOrientation(m); err != nil {
+		return loaded{}, err
 	}
 	if err := m.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
 		return loaded{}, err
@@ -38,6 +37,13 @@ func readTiled(path string, data []byte) (loaded, error) {
 		return loaded{}, err
 	}
 	return loaded{Tiles: want, Width: m.Width, Height: m.Height, Source: m}, nil
+}
+
+func checkOrientation(m *tiled.Map) error {
+	if m.Orientation != "" && m.Orientation != "orthogonal" {
+		return fmt.Errorf("tilemap: %s is %s, and this engine's grid is square cells", m.Name, m.Orientation)
+	}
+	return nil
 }
 
 // tilesOfTiled is the cell of every position the map describes a tile at.

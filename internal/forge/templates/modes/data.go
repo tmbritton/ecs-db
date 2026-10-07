@@ -7,6 +7,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/machinevalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
+	"github.com/tmbritton/ecs-db/internal/forge/mapvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
@@ -55,13 +56,21 @@ type Data struct {
 	// Canvas is the selected map laid out: every cell placed, the layer rows,
 	// the palette and one line per reason a cell could not be drawn.
 	Canvas mapcanvas.Canvas
+	// The working map's identity and all current engine/project validation
+	// findings, attributed to the thing that caused each of them.
+	MapID         string
+	MapValidation mapvalidation.Report
 	// Objects are parsed from the same working map as Canvas, with their group
 	// and stable id. A selection is URL-addressed and never owns another copy.
 	ObjectGroups  []tiled.ObjectGroup
 	SelectedSpawn *tiled.Object
 	MissingSpawn  int
-	SpawnErrors   []string
-	SpawnWarnings []string
+	// A duplicated ID is not a selection: ID-addressed edit routes cannot
+	// distinguish its claimants. Keep their marks visible, but no inspector
+	// action may be wired to one arbitrarily.
+	AmbiguousSpawn int
+	SpawnErrors    []string
+	SpawnWarnings  []string
 	// MapMenu is the one MAP context menu currently open on this server, if its
 	// target belongs to the map this page is showing.
 	MapMenu MapMenu

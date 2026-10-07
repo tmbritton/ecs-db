@@ -397,6 +397,45 @@ func (s *Session) Resolved(path string) (*tiled.Map, error) {
 	return s.resolve(path, f.Current)
 }
 
+// TilesetProblem names one reference the working map could not resolve.
+// Several can be broken independently; stopping at the first hides the rest.
+type TilesetProblem struct {
+	Index  int
+	Source string
+	Err    error
+}
+
+// Preview returns a detached working map with every resolvable tileset filled
+// in and every unresolved reference reported. Unlike Resolved it can draw the
+// valid part of a broken map, which is when an editor is most useful. Like
+// Resolved, it parses afresh: resolving into Document.Map's cached value would
+// mutate the session behind Read's supposedly read-only callback.
+func (s *Session) Preview(path string) (*tiled.Map, []TilesetProblem, error) {
+	var preview *tiled.Map
+	var problems []TilesetProblem
+	err := s.Read(path, func(doc *tiled.Document) error {
+		var err error
+		preview, err = tiled.Parse(doc.Bytes(), filepath.Base(path))
+		if err != nil {
+			return err
+		}
+		for i, ref := range preview.Tilesets {
+			one := *preview
+			one.Tilesets = []tiled.TilesetRef{ref}
+			if err := one.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
+				problems = append(problems, TilesetProblem{Index: i, Source: ref.Source, Err: err})
+				continue
+			}
+			preview.Tilesets[i] = one.Tilesets[0]
+		}
+		// The assets of valid tilesets are still served if another reference
+		// failed. recordImages is called under Read's session lock.
+		s.recordImages(preview)
+		return nil
+	})
+	return preview, problems, err
+}
+
 func (s *Session) resolve(path string, doc *tiled.Document) (*tiled.Map, error) {
 	// From the bytes rather than from doc.Map(), so what comes back belongs to
 	// the caller and resolving it cannot reach the memoised value.

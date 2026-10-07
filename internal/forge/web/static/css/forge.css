@@ -2798,6 +2798,53 @@ option:disabled {
   font: 10px var(--font-mono);
 }
 
+.map-spawn--invalid {
+  border-color: var(--red);
+}
+
+.map-spawn--warning {
+  border-color: var(--amber);
+}
+
+.map-spawn--ambiguous {
+  cursor: not-allowed;
+}
+
+.map-cell--invalid {
+  outline: 2px solid var(--red);
+  z-index: 1;
+}
+
+.map-validation-mark {
+  display: inline-block;
+  color: var(--red);
+  background: var(--canvas);
+  font: 12px var(--font-mono);
+  line-height: 1;
+  padding: 1px 3px;
+}
+
+.map-spawn--warning .map-validation-mark {
+  color: var(--amber);
+}
+
+.map-identity {
+  max-width: 290px;
+  margin: 6px 0;
+}
+
+.map-validation {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 6px 0;
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+}
+
+.map-validation p {
+  margin: 3px 0;
+}
+
 .map-spawn-inspector {
   display: flex;
   align-items: center;

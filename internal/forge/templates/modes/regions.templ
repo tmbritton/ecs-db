@@ -185,6 +185,7 @@ templ MapHeadRegion(data Data) {
 					<h2 class="schema__title" data-testid="map-title">{ fileName(data.SelectedMap) }</h2>
 					<p class="schema__path mono" data-testid="map-path">{ data.SelectedMap }</p>
 				</header>
+				@mapValidationPanel(data)
 				@mapToolbar(data)
 				@mapContextMenu(data)
 			}
@@ -203,7 +204,7 @@ templ MapCanvasRegion(data Data) {
 templ MapInspectorRegion(data Data) {
 	<div
 		id="map-inspector"
-		class={ "map-inspector", kv("map-inspector--open", data.SelectedSpawn != nil || data.MissingSpawn > 0) }
+		class={ "map-inspector", kv("map-inspector--open", data.SelectedSpawn != nil || data.MissingSpawn > 0 || data.AmbiguousSpawn > 0) }
 	>
 		@spawnInspector(data)
 	</div>

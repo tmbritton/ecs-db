@@ -8,7 +8,9 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
+	"github.com/tmbritton/ecs-db/internal/forge/mapvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
@@ -26,6 +28,29 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/spawn/duplicate", s.sameOriginOnly(s.handleSpawnDuplicate))
 	mux.HandleFunc("POST /forge/map/layer", s.sameOriginOnly(s.handleMapLayer))
 	mux.HandleFunc("POST /forge/map/menu", s.sameOriginOnly(s.handleMapMenu))
+	mux.HandleFunc("POST /forge/map/identity", s.sameOriginOnly(s.handleMapIdentity))
+}
+
+func (s *Server) handleMapIdentity(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.mapSession(w)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	if !q.Has("id") {
+		s.refuseMapEdit(w, r, fmt.Errorf("the mapId edit named no value"))
+		return
+	}
+	path, err := s.mapShown(sess, q.Get("map"))
+	if err == nil {
+		err = sess.Edit(path, func(d *tiled.Document) error { return d.SetMapID(q.Get("id")) })
+	}
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+	s.setEditProblem("")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -213,20 +238,40 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 	if slug != "map" || data.SelectedMap == "" {
 		return
 	}
-	m, err := s.cfg.MapSession.Resolved(data.SelectedMap)
+	m, refProblems, err := s.cfg.MapSession.Preview(data.SelectedMap)
 	if err != nil {
 		// Already a Problem on the panel above, from the session's own check.
 		// A canvas that refused to render would take the map list with it.
 		return
 	}
+	data.MapID = m.Properties.Get(tiled.PropMapID)
+	var identities []mapvalidation.Identity
+	for _, known := range data.Maps {
+		var id string
+		if err := s.cfg.MapSession.Read(known.Path, func(d *tiled.Document) error {
+			working, err := d.Map()
+			if err == nil {
+				id = working.Properties.Get(tiled.PropMapID)
+			}
+			return err
+		}); err == nil {
+			identities = append(identities, mapvalidation.Identity{Path: known.Path, ID: id})
+		}
+	}
+	data.MapValidation = mapvalidation.Build(&data.Schema, data.SelectedMap, m, identities, refProblems)
 	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{AssetURL: assetURL})
 	data.ObjectGroups = m.ObjectGroups
 	if id, err := strconv.Atoi(r.URL.Query().Get("spawn")); err == nil && id > 0 {
 		data.MissingSpawn = id
 		data.MapView = modes.MapView{Path: data.SelectedMap, Spawn: id}
+		count := 0
 		for _, group := range m.ObjectGroups {
 			for _, obj := range group.Objects {
-				if obj.ID == id && obj.Type != "" {
+				if obj.ID == id {
+					count++
+					if obj.Type == "" {
+						continue
+					}
 					selected := obj
 					data.SelectedSpawn = &selected
 					data.MissingSpawn = 0
@@ -238,6 +283,12 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 					}
 				}
 			}
+		}
+		if count > 1 {
+			data.SelectedSpawn = nil
+			data.MissingSpawn = 0
+			data.AmbiguousSpawn = id
+			data.SpawnErrors, data.SpawnWarnings = nil, nil
 		}
 	}
 }

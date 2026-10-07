@@ -102,10 +102,7 @@ func SyncSpawns(
 	key := m.Properties.Get(tiled.PropMapID)
 	if key == "" {
 		key = mapPath
-		res.Warnings = append(res.Warnings, fmt.Sprintf(
-			"%s declares no %q property, so its spawns are filed under its path; "+
-				"renaming or moving the file will spawn them again and leave the originals "+
-				"where nothing can reach them", mapPath, tiled.PropMapID))
+		res.Warnings = append(res.Warnings, MapIdentityWarning(mapPath, m))
 	} else if err := adoptSpawns(ctx, svc, db, mapPath, key); err != nil {
 		return res, err
 	}
@@ -258,6 +255,18 @@ func SyncSpawns(
 		res.Deleted += len(gone)
 	}
 	return res, nil
+}
+
+// MapIdentityWarning is the engine's explanation of path-keyed spawns when a
+// map has no mapId. Forge uses this very sentence while the map is edited,
+// before SyncSpawns would see it on the next game load.
+func MapIdentityWarning(path string, m *tiled.Map) string {
+	if m == nil || m.Properties.Get(tiled.PropMapID) != "" {
+		return ""
+	}
+	return fmt.Sprintf("%s declares no %q property, so its spawns are filed under its path; "+
+		"renaming or moving the file will spawn them again and leave the originals "+
+		"where nothing can reach them", path, tiled.PropMapID)
 }
 
 // checkSpawn runs the entity-type contract against what the object describes,
