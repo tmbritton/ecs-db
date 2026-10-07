@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // The XML wire structs. They exist only to be unmarshalled into and then
@@ -86,8 +87,10 @@ type xmlProperty struct {
 	// One fallback covers both of the latter: innerxml is the element's content
 	// whether that content is text or markup. A separate chardata field was
 	// here first and could not tell the two apart.
-	Value string `xml:"value,attr"`
-	Raw   []byte `xml:",innerxml"`
+	// A pointer distinguishes an omitted attribute from value="". The latter
+	// remains an empty value even if the element also contains an XML comment.
+	Value *string `xml:"value,attr"`
+	Raw   []byte  `xml:",innerxml"`
 }
 
 // xmlTileset captures the whole <tileset> element rather than its contents.
@@ -329,9 +332,24 @@ func (p xmlProperties) convert() Properties {
 		// <properties> block for a class-typed one. Keeping the block is what
 		// makes "a type this package does not model survives as a string" true
 		// of the one type where it was not.
-		value := prop.Value
-		if value == "" {
+		value := ""
+		if prop.Value != nil {
+			value = *prop.Value
+		} else {
 			value = string(prop.Raw)
+			// ,innerxml keeps the source's escaped bytes, whereas an
+			// attribute is already decoded by encoding/xml. A text-valued
+			// property has one meaning in either spelling. Preserve markup
+			// for class/unknown nested values: that is authored structure,
+			// not character data to flatten into a different string.
+			if !strings.Contains(value, "<") {
+				var text struct {
+					Value string `xml:",chardata"`
+				}
+				if err := xml.Unmarshal([]byte("<value>"+value+"</value>"), &text); err == nil {
+					value = text.Value
+				}
+			}
 		}
 		kind := prop.Type
 		if kind == "" {

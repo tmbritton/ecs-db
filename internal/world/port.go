@@ -75,6 +75,11 @@ type Tx interface {
 	// a duplicate object id, a killed process — left an entity that no spawn
 	// row pointed at, which the next load duplicated and never mentioned.
 	RecordSpawn(ctx context.Context, mapPath string, objectID int, entityID int64) error
+	// SetSpawnComponents records the component set the map authored for this
+	// object. A later import can detach a component removed from the file
+	// without touching one attached only at runtime. It commits in the same
+	// transaction as the entity's create or update.
+	SetSpawnComponents(ctx context.Context, mapPath string, objectID int, names []string) error
 	// ForgetSpawn removes the record of a map's object having been spawned, for
 	// an object the map no longer has. The entity goes with it — separately,
 	// because a row may outlive nothing at all when the entity is already gone.

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tmbritton/ecs-db/internal/forge/spawn"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
 	"github.com/tmbritton/ecs-db/internal/tiled"
@@ -55,47 +54,159 @@ func spawnFixture(t *testing.T) (*world.EntityService, *sql.DB) {
 	return svc, store.DB()
 }
 
-func TestSyncSpawns_ForgePlacedObjectLoadsAsAnEntity(t *testing.T) {
-	ds := spawnSchema()
-	store, err := storage.NewSQLiteStore(t.TempDir()+"/test.sqlite", ds, "")
-	if err != nil {
+func TestValidateSpawn_ReusesImporterValuesAndEntityContract(t *testing.T) {
+	s := spawnSchema()
+	for _, tc := range []struct {
+		name        string
+		obj         tiled.Object
+		warning     bool
+		wantProblem string
+	}{
+		{"valid", goblinAt(1, 16, 16), false, ""},
+		{"invalid integer", func() tiled.Object {
+			o := goblinAt(1, 16, 16)
+			o.Properties["Health.hp"] = tiled.Property{Type: "int", Value: "much"}
+			return o
+		}(), false, "Health.hp"},
+		{"missing required", tiled.Object{ID: 1, Type: "Goblin", X: 16, Y: 16}, false, "Health"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			verdict, err := ValidateSpawn(&s, spawnMap(tc.obj), tc.obj)
+			switch tc.name {
+			case "valid":
+				if err != nil || !verdict.Valid() {
+					t.Fatalf("valid spawn: %+v, %v", verdict, err)
+				}
+			case "invalid integer":
+				if err == nil || !strings.Contains(err.Error(), tc.wantProblem) {
+					t.Fatalf("importer should reject property: %+v, %v", verdict, err)
+				}
+			default:
+				if verdict.Valid() || !strings.Contains(strings.Join(verdict.Errors, ","), tc.wantProblem) {
+					t.Fatalf("engine contract: %+v, %v", verdict, err)
+				}
+			}
+		})
+	}
+	s.EntityTypes["Goblin"] = schema.EntityType{
+		RequiredComponents: []string{"Position", "Health", "Sprite"},
+		ValidationLevel:    schema.ValidationWarning,
+	}
+	obj := tiled.Object{ID: 1, Type: "Goblin", X: 16, Y: 16}
+	verdict, err := ValidateSpawn(&s, spawnMap(obj), obj)
+	if err != nil || len(verdict.Errors) > 0 || len(verdict.Warnings) != 2 {
+		t.Errorf("warning mode should warn, not refuse: %+v, %v", verdict, err)
+	}
+}
+
+func TestSyncSpawns_DetachesRemovedAuthoredComponentButKeepsRuntimeOne(t *testing.T) {
+	svc, db := spawnFixture(t)
+	authored := goblinAt(1, 16, 16)
+	authored.Properties["Speed.value"] = tiled.Property{Type: "float", Value: "2.5"}
+	runtimeOnly := goblinAt(2, 32, 16)
+	res := mustSpawn(t, svc, db, spawnMap(authored, runtimeOnly))
+	if res.Created != 2 || len(res.Refused) > 0 {
+		t.Fatalf("initial import: %+v", res)
+	}
+	var authoredID, runtimeID int64
+	for _, entry := range []struct {
+		id   int
+		into *int64
+	}{{1, &authoredID}, {2, &runtimeID}} {
+		if err := db.QueryRow(`SELECT entity_id FROM spawns WHERE map = ? AND object_id = ?`,
+			"mods/map/level.tmx", entry.id).Scan(entry.into); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.AttachComponent(context.Background(), runtimeID, "Speed", world.ComponentValues{"value": 4.0}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	if err := storage.EnsureInterpreterTables(store.DB()); err != nil {
+	delete(authored.Properties, "Speed.value")
+	res = mustSpawn(t, svc, db, spawnMap(authored, runtimeOnly))
+	if res.Updated != 1 || len(res.Refused) > 0 {
+		t.Errorf("detaching authored Speed: %+v", res)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM comp_speed WHERE entity_id = ?`, authoredID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	svc := world.NewEntityService(store)
-	svc.SetSchema(ds)
-	doc, err := tiled.NewDocument("level.tmx", tiled.NewMapSpec{
-		MapID: "level", Width: 4, Height: 3, TileWidth: 16, TileHeight: 16,
-	})
-	if err != nil {
+	if n != 0 {
+		t.Error("removed authored Speed still exists in the running entity")
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM comp_speed WHERE entity_id = ?`, runtimeID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	objectID, err := spawn.Place(doc, &ds, 0, "Goblin", 2, 1)
-	if err != nil {
+	if n != 1 {
+		t.Error("unmentioned runtime-attached Speed was removed")
+	}
+	res = mustSpawn(t, svc, db, spawnMap(authored, runtimeOnly))
+	if res.Unchanged != 2 {
+		t.Errorf("unchanged re-import wrote again: %+v", res)
+	}
+}
+
+func TestSyncSpawns_OldSpawnRowBaselinesWithoutDeletingUnknownRuntimeComponents(t *testing.T) {
+	svc, db := spawnFixture(t)
+	obj := goblinAt(1, 16, 16)
+	res := mustSpawn(t, svc, db, spawnMap(obj))
+	if res.Created != 1 {
+		t.Fatal(res)
+	}
+	var id int64
+	if err := db.QueryRow(`SELECT entity_id FROM spawns WHERE map = ? AND object_id = 1`, "mods/map/level.tmx").Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	m, err := doc.Map()
-	if err != nil {
+	if err := svc.AttachComponent(context.Background(), id, "Speed", world.ComponentValues{"value": 4.0}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := SyncSpawns(context.Background(), svc, store.DB(), "level.tmx", m)
-	if err != nil {
+	if _, err := db.Exec(`UPDATE spawns SET components = NULL WHERE object_id = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if result.Created != 1 {
-		t.Errorf("object %d created %d entities; problems: %+v", objectID, result.Created, result)
+	res = mustSpawn(t, svc, db, spawnMap(obj))
+	if len(res.Refused) > 0 {
+		t.Fatal(res)
 	}
-	var x, y, hp int
-	if err := store.DB().QueryRow(`SELECT p.x, p.y, h.hp FROM spawns s
-		JOIN comp_position p ON p.entity_id = s.entity_id
-		JOIN comp_health h ON h.entity_id = s.entity_id WHERE s.object_id = ?`, objectID).Scan(&x, &y, &hp); err != nil {
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM comp_speed WHERE entity_id = ?`, id).Scan(&n); err != nil || n != 1 {
+		t.Errorf("old row lost runtime Speed while baselining: count=%d err=%v", n, err)
+	}
+	var names string
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE object_id = 1`).Scan(&names); err != nil {
 		t.Fatal(err)
 	}
-	if x != 2 || y != 1 || hp != 0 {
-		t.Errorf("engine spawned object %d at %d,%d with hp %d", objectID, x, y, hp)
+	if names != `["Health","Position","Sprite"]` {
+		t.Errorf("authored baseline = %s", names)
+	}
+}
+
+func TestSyncSpawns_MapIDAdoptionKeepsTheAuthoredComponentSnapshot(t *testing.T) {
+	svc, db := spawnFixture(t)
+	obj := goblinAt(1, 16, 16)
+	obj.Properties["Speed.value"] = tiled.Property{Type: "float", Value: "2.5"}
+	if res := mustSpawn(t, svc, db, spawnMap(obj)); res.Created != 1 {
+		t.Fatal(res)
+	}
+	m := spawnMap(obj)
+	m.Properties = tiled.Properties{tiled.PropMapID: {Value: "level"}}
+	if res, err := SyncSpawns(context.Background(), svc, db, "mods/map/level.tmx", m); err != nil || len(res.Refused) > 0 {
+		t.Fatalf("adopting: %+v, %v", res, err)
+	}
+	var names string
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE map = 'level' AND object_id = 1`).Scan(&names); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(names, `"Speed"`) {
+		t.Fatalf("adoption lost the previously authored Speed: %s", names)
+	}
+	delete(obj.Properties, "Speed.value")
+	m.ObjectGroups[0].Objects = []tiled.Object{obj}
+	res, err := SyncSpawns(context.Background(), svc, db, "mods/map/level.tmx", m)
+	if err != nil || len(res.Refused) > 0 {
+		t.Fatalf("reimport under mapId: %+v, %v", res, err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM comp_speed`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("removing Speed after mapId adoption left %d rows: %v", n, err)
 	}
 }
 

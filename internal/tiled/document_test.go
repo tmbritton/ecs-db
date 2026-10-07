@@ -459,6 +459,221 @@ func TestDocument_MoveObjectRefusesInvalidRequestsWithoutChangingBytes(t *testin
 	}
 }
 
+func TestDocument_SetObjectPropertyPreservesUnrelatedXML(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="int" value="9"/>`, 1)
+	if got := string(doc.Bytes()); got != want {
+		t.Errorf("one property edit touched something else:\n%s", got)
+	}
+	if err := doc.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(doc.Bytes()); got != want {
+		t.Error("setting the same value was not byte-idempotent")
+	}
+	if err := doc.SetObjectProperty(7, "Sprite.animation", tiled.Property{Value: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Sprite.animation"); got != "idle" {
+		t.Errorf("new property read back as %q", got)
+	}
+	for _, fragment := range []string{
+		`<polygon points="0,0 8,0 8,8"/>`,
+		`<imagelayer id="7"`, `<object id="8"`, `nextobjectid="42"`,
+	} {
+		if !strings.Contains(string(doc.Bytes()), fragment) {
+			t.Errorf("adding a property discarded %s", fragment)
+		}
+	}
+	if err := doc.SetObjectProperty(7, "Health.hp", tiled.Property{Value: "a name"}); err != nil {
+		t.Fatal(err)
+	}
+	m, err = doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties["Health.hp"]; got.Type != "string" || got.Value != "a name" {
+		t.Errorf("changing a property from int to string kept its old type: %+v", got)
+	}
+}
+
+func TestDocument_RemoveObjectComponentLeavesOtherPropertiesAndShape(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.SetObjectProperty(7, "Sprite.animation", tiled.Property{Value: "idle"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.RemoveObjectComponent(7, "Health"); err != nil {
+		t.Fatal(err)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := m.ObjectGroups[0].Objects[0].Properties
+	if p.Has("Health.hp") || p.Get("Sprite.animation") != "idle" {
+		t.Errorf("removing Health left %+v", p)
+	}
+	if !strings.Contains(string(doc.Bytes()), `<polygon points="0,0 8,0 8,8"/>`) {
+		t.Error("removing a component discarded the object shape")
+	}
+	after := string(doc.Bytes())
+	if err := doc.RemoveObjectComponent(7, "Health"); err != nil {
+		t.Fatal(err)
+	}
+	if string(doc.Bytes()) != after {
+		t.Error("removing an absent component should be a no-op")
+	}
+}
+
+func TestDocument_PropertyEditsRefuseAmbiguousOrUnknownTargets(t *testing.T) {
+	duplicate := strings.Replace(richTMX, `<object id="8" name="note"`, `<object id="7" name="note"`, 1)
+	for _, tc := range []struct {
+		name string
+		src  string
+		edit func(*tiled.Document) error
+	}{
+		{"duplicate set", duplicate, func(d *tiled.Document) error {
+			return d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "1"})
+		}},
+		{"duplicate remove", duplicate, func(d *tiled.Document) error {
+			return d.RemoveObjectComponent(7, "Health")
+		}},
+		{"missing object", richTMX, func(d *tiled.Document) error {
+			return d.SetObjectProperty(99, "Health.hp", tiled.Property{Type: "int", Value: "1"})
+		}},
+		{"invalid property", richTMX, func(d *tiled.Document) error {
+			return d.SetObjectProperty(7, ".hp", tiled.Property{Type: "int", Value: "1"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(tc.src), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.edit(d); err == nil {
+				t.Fatal("invalid property edit accepted")
+			}
+			if string(d.Bytes()) != tc.src {
+				t.Error("refused edit changed the document")
+			}
+		})
+	}
+}
+
+func TestDocument_SetObjectPropertyRefusesNestedValueItCannotPreserve(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="class"><properties><property name="bonus" type="int" value="5"/></properties></property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err == nil {
+		t.Fatal("overwrote an authored nested property without a refusal")
+	}
+	if string(d.Bytes()) != src {
+		t.Error("the refused edit lost a nested property")
+	}
+}
+
+func TestDocument_SetObjectPropertyPreservesUnmodelledCommentBesideAttribute(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="int" value="5"><!-- human note --></property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, `value="5"><!-- human note -->`, `value="9"><!-- human note -->`, 1)
+	if got := string(d.Bytes()); got != want {
+		t.Errorf("a property value edit lost unmodelled content:\n%s", got)
+	}
+}
+
+func TestDocument_SetObjectPropertyKeepsElementContentSpelling(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="int">5</property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, `<property name="Health.hp" type="int">5</property>`,
+		`<property name="Health.hp" type="int">9</property>`, 1)
+	if got := string(d.Bytes()); got != want {
+		t.Errorf("element-content property changed format:\n%s", got)
+	}
+	m, err := d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Health.hp"); got != "9" {
+		t.Errorf("new value reads back as %q", got)
+	}
+}
+
+func TestDocument_SetObjectTextPropertyEscapesOnceAndReadsTheMeaning(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp">A &amp; B</property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Health.hp"); got != "A & B" {
+		t.Errorf("XML content read as %q, want A & B", got)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Value: "C & D"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(d.Bytes()), `>C &amp; D</property>`) {
+		t.Errorf("edited text was not escaped once: %s", d.Bytes())
+	}
+	m, err = d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Health.hp"); got != "C & D" {
+		t.Errorf("edited text read back as %q, want C & D", got)
+	}
+}
+
+func TestDocument_EmptyAttributeValueDoesNotBecomeItsComment(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Sprite.sheet" value=""><!-- artist note --></property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Sprite.sheet"); got != "" {
+		t.Errorf("empty authored value read as %q", got)
+	}
+}
+
 func TestNewDocument_WritesAMapTheEngineCanLoad(t *testing.T) {
 	doc, err := tiled.NewDocument("level2.tmx", tiled.NewMapSpec{
 		MapID: "level2", Width: 4, Height: 3, TileWidth: 32, TileHeight: 32,

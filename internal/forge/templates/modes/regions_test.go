@@ -228,8 +228,8 @@ func TestRegions_IDsAreUniqueInTheAssembledPage(t *testing.T) {
 	}
 }
 
-// MAP's regions appear top to bottom in the order the column reads: the rail
-// beside it, then the toolbar, then the canvas, then the status line.
+// MAP's regions appear in reading order: rail, toolbar, canvas and inspector
+// side by side, then the status line below both.
 //
 // Named explicitly rather than checked against Registry's own order, which
 // sounds like the same thing and is not: MapPage indexes its regions
@@ -240,7 +240,7 @@ func TestRegions_IDsAreUniqueInTheAssembledPage(t *testing.T) {
 // in place, so a wrong order would persist for the life of the page.
 func TestMapRegions_ReadTopToBottom(t *testing.T) {
 	content := Registry["map"]
-	want := []string{"mode-list", "map-head", "map-canvas-region", "map-foot"}
+	want := []string{"mode-list", "map-head", "map-canvas-region", "map-inspector", "map-foot"}
 
 	rendered := make([]string, len(content.Regions))
 	for i, region := range content.Regions {

@@ -361,3 +361,99 @@ func TestEnsureInterpreterTables_DoesNotRebuildASpawnsTableThatIsAlreadyRight(t 
 			before, after)
 	}
 }
+
+func TestEnsureInterpreterTables_RecordsAuthoredComponentsOnAnExistingDatabase(t *testing.T) {
+	db := openMemoryDB(t)
+	for _, stmt := range []string{
+		`CREATE TABLE entities (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, created_tick INTEGER NOT NULL)`,
+		`INSERT INTO entities VALUES (1, 'Goblin', 0)`,
+		`CREATE TABLE spawns (map TEXT NOT NULL, object_id INTEGER NOT NULL,
+			entity_id INTEGER REFERENCES entities(id) ON DELETE CASCADE,
+			PRIMARY KEY (map, object_id))`,
+		`INSERT INTO spawns VALUES ('level', 7, 1)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := EnsureInterpreterTables(db); err != nil {
+		t.Fatal(err)
+	}
+	var authored sql.NullString
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE map = 'level' AND object_id = 7`).Scan(&authored); err != nil {
+		t.Fatalf("old row or new column missing: %v", err)
+	}
+	if authored.Valid {
+		t.Errorf("an old row has no known authored set, got %q", authored.String)
+	}
+	if _, err := db.Exec(`UPDATE spawns SET components = '["Position","Health"]' WHERE object_id = 7`); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureInterpreterTables(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE object_id = 7`).Scan(&authored); err != nil || authored.String != `["Position","Health"]` {
+		t.Errorf("reopen lost the authored set: %+v, %v", authored, err)
+	}
+}
+
+func TestTx_SetSpawnComponentsPersistsDeterministicAuthoredSet(t *testing.T) {
+	db := openMemoryDB(t)
+	if _, err := db.Exec(`CREATE TABLE entities (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, created_tick INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureInterpreterTables(db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO entities VALUES (1, 'Goblin', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO spawns (map, object_id, entity_id) VALUES ('level', 7, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &sqliteTx{tx: tx}
+	if err := writer.SetSpawnComponents(t.Context(), "level", 7, []string{"Sprite", "Position", "Health"}); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE map='level' AND object_id=7`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Health","Position","Sprite"]` {
+		t.Errorf("authored set = %s, want sorted JSON", got)
+	}
+}
+
+func TestEnsureInterpreterTables_RepairsOldKeyWithoutLosingComponentSnapshot(t *testing.T) {
+	db := openMemoryDB(t)
+	for _, stmt := range []string{
+		`CREATE TABLE entities (id INTEGER PRIMARY KEY, entity_type TEXT NOT NULL, created_tick INTEGER NOT NULL)`,
+		`INSERT INTO entities VALUES (1, 'Goblin', 0)`,
+		`CREATE TABLE spawns (map TEXT NOT NULL, object_id INTEGER NOT NULL,
+			entity_id INTEGER REFERENCES entities(id) ON DELETE SET NULL,
+			components TEXT, PRIMARY KEY (map, object_id))`,
+		`INSERT INTO spawns VALUES ('level', 7, 1, '["Health","Position"]')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := EnsureInterpreterTables(db); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow(`SELECT components FROM spawns WHERE object_id = 7`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != `["Health","Position"]` {
+		t.Errorf("the constraint repair lost the authored set: %q", got)
+	}
+}

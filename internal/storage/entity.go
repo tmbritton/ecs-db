@@ -436,6 +436,33 @@ func (t *sqliteTx) RecordSpawn(ctx context.Context, mapPath string, objectID int
 	return nil
 }
 
+// SetSpawnComponents snapshots only the components this map object authored,
+// not every component currently attached to the entity. Its sorted JSON is
+// how a later re-import can distinguish an author removing an optional
+// component from an unrelated component attached at runtime.
+func (t *sqliteTx) SetSpawnComponents(ctx context.Context, mapPath string, objectID int, names []string) error {
+	ordered := append([]string(nil), names...)
+	sort.Strings(ordered)
+	if ordered == nil {
+		ordered = []string{}
+	}
+	raw, err := json.Marshal(ordered)
+	if err != nil {
+		return fmt.Errorf("encoding spawn %d components: %w", objectID, err)
+	}
+	res, err := t.tx.ExecContext(ctx,
+		`UPDATE spawns SET components = ? WHERE map = ? AND object_id = ?`, string(raw), mapPath, objectID)
+	if err != nil {
+		return fmt.Errorf("recording spawn %d components: %w", objectID, err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("checking spawn %d components update: %w", objectID, err)
+	} else if n == 0 {
+		return fmt.Errorf("spawn %d of %q has no row to record components on", objectID, mapPath)
+	}
+	return nil
+}
+
 // ForgetSpawn removes the record of an object having been spawned.
 func (t *sqliteTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
 	if _, err := t.tx.ExecContext(ctx,

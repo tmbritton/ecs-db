@@ -71,6 +71,7 @@ var Registry = map[string]Content{
 			// both called "map-canvas" is a name that has to be disambiguated
 			// every time it is read.
 			{"map-canvas-region", MapCanvasRegion},
+			{"map-inspector", MapInspectorRegion},
 			{"map-foot", MapFootRegion},
 		},
 		Page:    MapPage,

@@ -682,7 +682,11 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Selection is in the URL and the page's stream subscription, so a patch does not clear the inspector. Saving the map takes effect on the next `ecs-db run`, as the mode says
   - Verified: the saved TMX's object is imported by the engine's spawn path into a fresh database at the cell shown in Forge; `make e2e` passes 265 browser checks
 
-- [ ] **Spawn inspector** — Components with required locks and `ƒ ctx` badges, property editing as `Component.property`. Behaviour is read-only and comes from the entity type; `Position` comes from where the object sits.
+- [x] **Spawn inspector** — Components with required locks and `ƒ ctx` badges, property editing as `Component.property`. Behaviour is read-only and comes from the entity type; `Position` comes from where the object sits.
+  - The inspector lives in its own patch region beside the map, not underneath it. The engine's property parser and `world.ValidateEntityCreation` judge a candidate before its XML is touched; strict refusals leave it unchanged and warning-level edits are shown and allowed
+  - Entity-ref components ask for a target id, missing required components can be repaired together, and map property spellings preserve XML fidelity. Context seeds attach only missing components: existing map values win at startup
+  - Verified through a saved TMX imported by the engine's spawn path; `make e2e` exercises the field change, optional attach/detach, context badge and warning/refusal paths
+  - Re-import now remembers the components each object authored. Removing an optional component in Forge removes its existing entity's row on the next load without deleting a component attached only at runtime; old databases take a non-destructive baseline before this rule applies
 
 - [ ] **Context menus** — Layers, tiles and spawns, on Epic 13's server-state menu pattern.
 

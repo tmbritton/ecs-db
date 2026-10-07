@@ -9,6 +9,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
 func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
@@ -20,6 +21,8 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/spawn/place", s.sameOriginOnly(s.handleSpawnPlace))
 	mux.HandleFunc("POST /forge/map/spawn/move", s.sameOriginOnly(s.handleSpawnMove))
 	mux.HandleFunc("POST /forge/map/spawn/delete", s.sameOriginOnly(s.handleSpawnDelete))
+	mux.HandleFunc("POST /forge/map/spawn/component", s.sameOriginOnly(s.handleSpawnComponent))
+	mux.HandleFunc("POST /forge/map/spawn/property", s.sameOriginOnly(s.handleSpawnProperty))
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -221,6 +224,12 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 					selected := obj
 					data.SelectedSpawn = &selected
 					data.MissingSpawn = 0
+					verdict, validationErr := tilemap.ValidateSpawn(&data.Schema, m, selected)
+					data.SpawnErrors = verdict.Errors
+					data.SpawnWarnings = verdict.Warnings
+					if validationErr != nil {
+						data.SpawnErrors = append(data.SpawnErrors, validationErr.Error())
+					}
 				}
 			}
 		}

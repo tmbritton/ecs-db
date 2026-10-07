@@ -4,7 +4,6 @@ package spawn
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/tiled"
@@ -82,26 +81,13 @@ func Place(d *tiled.Document, s *schema.DatabaseSchema, group int, kind string, 
 		if !exists {
 			return 0, fmt.Errorf("required component %q is not declared", name)
 		}
-		if comp.Type == schema.ComponentTypeObject {
-			names := make([]string, 0, len(comp.Properties))
-			for key := range comp.Properties {
-				names = append(names, key)
-			}
-			sort.Strings(names)
-			for _, key := range names {
-				p, err := initialValue(comp.Properties[key].Type)
-				if err != nil {
-					return 0, fmt.Errorf("%s.%s: %w", name, key, err)
-				}
-				props[name+"."+key] = p
-			}
-			continue
-		}
-		p, err := initialValue(comp.Type)
+		initial, err := initialProperties(name, comp)
 		if err != nil {
-			return 0, fmt.Errorf("%s: %w", name, err)
+			return 0, err
 		}
-		props[name+".value"] = p
+		for key, value := range initial {
+			props[key] = value
+		}
 	}
 	return d.AddObject(group, tiled.Object{
 		Type: kind, X: float64(x * m.TileWidth), Y: float64(y * m.TileHeight), Properties: props,

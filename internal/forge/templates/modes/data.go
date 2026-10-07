@@ -60,6 +60,8 @@ type Data struct {
 	ObjectGroups  []tiled.ObjectGroup
 	SelectedSpawn *tiled.Object
 	MissingSpawn  int
+	SpawnErrors   []string
+	SpawnWarnings []string
 	// MapView is the URL's view state — which map, which layers Forge is
 	// hiding, which tile is selected — and is what every link in the mode is
 	// built from, so none of them can drop part of it.

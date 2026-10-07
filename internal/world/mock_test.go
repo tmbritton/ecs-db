@@ -53,6 +53,10 @@ func (m *mockTx) RecordSpawn(ctx context.Context, mapPath string, objectID int, 
 	return nil
 }
 
+func (m *mockTx) SetSpawnComponents(ctx context.Context, mapPath string, objectID int, names []string) error {
+	return nil
+}
+
 func (m *mockTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
 	return nil
 }

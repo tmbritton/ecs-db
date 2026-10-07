@@ -25,6 +25,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -127,13 +128,19 @@ func runWithMap(schemaPath, out, mapPath string) error {
 			}
 			var kind string
 			var x, y int
-			if err := store.DB().QueryRow(`SELECT e.entity_type, p.x, p.y FROM spawns s
+			var hp sql.NullInt64
+			if err := store.DB().QueryRow(`SELECT e.entity_type, p.x, p.y, h.hp FROM spawns s
 				JOIN entities e ON e.id = s.entity_id
 				JOIN comp_position p ON p.entity_id = e.id
-				WHERE s.map = ? AND s.object_id = ?`, key, obj.ID).Scan(&kind, &x, &y); err != nil {
+				LEFT JOIN comp_health h ON h.entity_id = e.id
+				WHERE s.map = ? AND s.object_id = ?`, key, obj.ID).Scan(&kind, &x, &y, &hp); err != nil {
 				return fmt.Errorf("looking up saved object %d in the engine: %w", obj.ID, err)
 			}
-			fmt.Printf("imported spawn object %d: %s at %d,%d\n", obj.ID, kind, x, y)
+			fmt.Printf("imported spawn object %d: %s at %d,%d", obj.ID, kind, x, y)
+			if hp.Valid {
+				fmt.Printf(" with hp %d", hp.Int64)
+			}
+			fmt.Println()
 		}
 	}
 	return nil

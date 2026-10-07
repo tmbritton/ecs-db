@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/spawn"
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -76,4 +77,79 @@ func (s *Server) handleSpawnDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.editSpawn(w, r, func(d *tiled.Document) error { return spawn.Delete(d, id) })
+}
+
+func (s *Server) spawnSchema() (schema.DatabaseSchema, error) {
+	if s.cfg.Session == nil {
+		return schema.DatabaseSchema{}, fmt.Errorf("there is no schema to validate this spawn against")
+	}
+	var current schema.DatabaseSchema
+	s.cfg.Session.Read(func(d schema.DatabaseSchema) { current = d })
+	return current, nil
+}
+
+func (s *Server) handleSpawnComponent(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	id, err := intParam(q, "id")
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+	current, err := s.spawnSchema()
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+	if q.Get("repair") == "required" {
+		if q.Get("add") != "" || q.Get("detach") != "" {
+			s.refuseMapEdit(w, r, fmt.Errorf("repair cannot add or detach another component in the same request"))
+			return
+		}
+		s.editSpawn(w, r, func(d *tiled.Document) error {
+			_, err := spawn.RepairRequired(d, &current, id)
+			return err
+		})
+		return
+	}
+	add, detach := q.Get("add"), q.Get("detach")
+	if (add == "") == (detach == "") {
+		s.refuseMapEdit(w, r, fmt.Errorf("choose one component to add or detach"))
+		return
+	}
+	s.editSpawn(w, r, func(d *tiled.Document) error {
+		if add != "" {
+			targets := map[string]string{"target_entity_id": q.Get("target")}
+			for key, values := range q {
+				if field, ok := strings.CutPrefix(key, "target."); ok && len(values) > 0 {
+					targets[field] = values[0]
+				}
+			}
+			_, err := spawn.AddComponentWithTargets(d, &current, id, add, targets)
+			return err
+		}
+		_, err := spawn.DetachComponent(d, &current, id, detach)
+		return err
+	})
+}
+
+func (s *Server) handleSpawnProperty(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	id, err := intParam(q, "id")
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+	if !q.Has("value") {
+		s.refuseMapEdit(w, r, fmt.Errorf("no value was provided for this field"))
+		return
+	}
+	current, err := s.spawnSchema()
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+	s.editSpawn(w, r, func(d *tiled.Document) error {
+		_, err := spawn.SetProperty(d, &current, id, q.Get("component"), q.Get("field"), q.Get("value"))
+		return err
+	})
 }

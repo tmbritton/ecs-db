@@ -176,6 +176,7 @@ func SyncSpawns(
 			for _, w := range warnings {
 				res.Warnings = append(res.Warnings, describeWarning(obj, m, w))
 			}
+			authored := authoredNames(components)
 
 			existing, live := done[obj.ID]
 			// A class change is a different entity, not a changed one: the type
@@ -194,15 +195,16 @@ func SyncSpawns(
 			}
 
 			if live {
+				removed := removedAuthored(existing, authored, svc.Schema(), obj.Type)
 				changed, err := needsUpdate(ctx, db, svc.Schema(), existing.EntityID, components)
 				if err != nil {
 					return res, err
 				}
-				if !changed {
+				if !changed && existing.Known && len(removed) == 0 {
 					res.Unchanged++
 					continue
 				}
-				if err := updateSpawn(ctx, svc, existing.EntityID, components); err != nil {
+				if err := updateSpawn(ctx, svc, db, existing.EntityID, key, obj.ID, components, removed, authored); err != nil {
 					res.Refused = append(res.Refused, describeRefusal(obj, m, err))
 					continue
 				}
@@ -210,7 +212,7 @@ func SyncSpawns(
 				continue
 			}
 
-			if err := createSpawn(ctx, svc, key, obj, components); err != nil {
+			if err := createSpawn(ctx, svc, key, obj, components, authored); err != nil {
 				res.Refused = append(res.Refused, describeRefusal(obj, m, err))
 				continue
 			}
@@ -288,10 +290,33 @@ func checkSpawn(svc *world.EntityService, entityType string, components []world.
 func updateSpawn(
 	ctx context.Context,
 	svc *world.EntityService,
+	db *sql.DB,
 	entityID int64,
+	mapKey string,
+	objectID int,
 	components []world.EntityComponent,
+	removed, authored []string,
 ) error {
+	// A runtime action may already have detached a formerly authored
+	// component. Read before the transaction on the same pool needsUpdate uses;
+	// absent rows need no second delete. The engine is the sole table writer.
+	var present []string
+	for _, name := range removed {
+		var exists int
+		query := fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %q WHERE entity_id = ?)`, "comp_"+strings.ToLower(name))
+		if err := db.QueryRowContext(ctx, query, entityID).Scan(&exists); err != nil {
+			return fmt.Errorf("checking formerly authored %s: %w", name, err)
+		}
+		if exists != 0 {
+			present = append(present, name)
+		}
+	}
 	return svc.InTx(ctx, func(tx world.Tx) error {
+		for _, name := range present {
+			if err := tx.DetachComponent(ctx, entityID, name); err != nil {
+				return err
+			}
+		}
 		for _, comp := range components {
 			err := tx.SetComponentValues(ctx, entityID, comp.Name, comp.Values)
 			if errors.Is(err, world.ErrNoSuchComponent) {
@@ -303,8 +328,44 @@ func updateSpawn(
 				return err
 			}
 		}
-		return nil
+		return tx.SetSpawnComponents(ctx, mapKey, objectID, authored)
 	})
+}
+
+func authoredNames(components []world.EntityComponent) []string {
+	names := make([]string, 0, len(components))
+	for _, component := range components {
+		names = append(names, component.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Only components once authored by this very object are eligible for removal.
+// Runtime-attached data was never in the snapshot, and a legacy row with no
+// snapshot has no evidence that any component was authored at all.
+func removedAuthored(previous spawned, current []string, s *schema.DatabaseSchema, entityType string) []string {
+	if !previous.Known {
+		return nil
+	}
+	wanted := make(map[string]bool, len(current))
+	et := s.EntityTypes[entityType]
+	for _, name := range current {
+		wanted[name] = true
+	}
+	var removed []string
+	for _, name := range previous.Authored {
+		if wanted[name] {
+			continue
+		}
+		_, canonical := schema.ComponentByName(s, name)
+		if canonical == "" || et.IsComponentRequired(canonical) {
+			continue // the table vanished, or the contract now locks it
+		}
+		removed = append(removed, canonical)
+	}
+	sort.Strings(removed)
+	return removed
 }
 
 // needsUpdate reports whether the database already says what the object says.
@@ -453,13 +514,17 @@ func createSpawn(
 	mapPath string,
 	obj tiled.Object,
 	components []world.EntityComponent,
+	authored []string,
 ) error {
 	return svc.InTx(ctx, func(tx world.Tx) error {
 		e, err := svc.CreateEntityInTx(ctx, tx, obj.Type, components)
 		if err != nil {
 			return err
 		}
-		return tx.RecordSpawn(ctx, mapPath, obj.ID, e.ID)
+		if err := tx.RecordSpawn(ctx, mapPath, obj.ID, e.ID); err != nil {
+			return err
+		}
+		return tx.SetSpawnComponents(ctx, mapPath, obj.ID, authored)
 	})
 }
 
@@ -518,6 +583,11 @@ func adoptSpawns(ctx context.Context, svc *world.EntityService, db *sql.DB, mapP
 			if err := tx.RecordSpawn(ctx, key, objectID, old[objectID].EntityID); err != nil {
 				return err
 			}
+			if old[objectID].Known {
+				if err := tx.SetSpawnComponents(ctx, key, objectID, old[objectID].Authored); err != nil {
+					return err
+				}
+			}
 			if err := tx.ForgetSpawn(ctx, mapPath, objectID); err != nil {
 				return err
 			}
@@ -530,6 +600,8 @@ func adoptSpawns(ctx context.Context, svc *world.EntityService, db *sql.DB, mapP
 type spawned struct {
 	EntityID   int64
 	EntityType string
+	Authored   []string
+	Known      bool
 }
 
 // spawnedObjects is the entity each of this map's objects has already made,
@@ -548,7 +620,7 @@ func spawnedObjects(ctx context.Context, db *sql.DB, mapPath string) (map[int]sp
 	// component rows. The same reasoning DeleteEntity gives for deleting
 	// component rows explicitly rather than trusting the cascade.
 	rows, err := db.QueryContext(ctx,
-		`SELECT spawns.object_id, entities.id, entities.entity_type
+		`SELECT spawns.object_id, entities.id, entities.entity_type, spawns.components
 		   FROM spawns JOIN entities ON entities.id = spawns.entity_id
 		  WHERE spawns.map = ?`, mapPath)
 	if err != nil {
@@ -559,8 +631,15 @@ func spawnedObjects(ctx context.Context, db *sql.DB, mapPath string) (map[int]sp
 	for rows.Next() {
 		var objectID int
 		var e spawned
-		if err := rows.Scan(&objectID, &e.EntityID, &e.EntityType); err != nil {
+		var authored sql.NullString
+		if err := rows.Scan(&objectID, &e.EntityID, &e.EntityType, &authored); err != nil {
 			return nil, fmt.Errorf("tilemap: scanning a spawn row: %w", err)
+		}
+		if authored.Valid {
+			if err := json.Unmarshal([]byte(authored.String), &e.Authored); err != nil {
+				return nil, fmt.Errorf("tilemap: spawn %d has invalid authored component snapshot: %w", objectID, err)
+			}
+			e.Known = true
 		}
 		done[objectID] = e
 	}
@@ -568,6 +647,24 @@ func spawnedObjects(ctx context.Context, db *sql.DB, mapPath string) (map[int]sp
 		return nil, fmt.Errorf("tilemap: reading spawns for %q: %w", mapPath, err)
 	}
 	return done, nil
+}
+
+// ValidateSpawn checks an authored object's property spellings and values
+// through the same parser SyncSpawns uses, then applies the same entity-type
+// contract check it performs before either creating or updating an entity.
+// Forge calls this against a candidate edit before writing it to the map.
+// Parser errors are always fatal; a warning-level type may yield warnings
+// from the contract without making the result invalid.
+func ValidateSpawn(s *schema.DatabaseSchema, m *tiled.Map, obj tiled.Object) (world.ValidationResult, error) {
+	components, err := spawnComponents(s, m, obj)
+	if err != nil {
+		return world.ValidationResult{}, err
+	}
+	names := make([]string, len(components))
+	for i, component := range components {
+		names[i] = component.Name
+	}
+	return world.ValidateEntityCreation(s, obj.Type, names), nil
 }
 
 // spawnComponents turns an object into the components an entity is made of.

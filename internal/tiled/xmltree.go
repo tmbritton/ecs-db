@@ -323,6 +323,18 @@ func (e *xelem) setAttr(name, value string) {
 	e.markDirty()
 }
 
+// removeAttr removes an optional attribute when an edit changes its meaning
+// back to the format's default (for example an explicit int to a string).
+func (e *xelem) removeAttr(name string) {
+	for i, a := range e.attrs {
+		if a.name == name {
+			e.attrs = append(e.attrs[:i], e.attrs[i+1:]...)
+			e.markDirty()
+			return
+		}
+	}
+}
+
 func (e *xelem) firstChild(name string) *xelem {
 	for _, k := range e.kids {
 		if k.el != nil && k.el.name == name {

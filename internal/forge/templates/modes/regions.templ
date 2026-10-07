@@ -135,13 +135,16 @@ templ AgentsMainRegion(data Data) {
 // mapPage is MAP's own assembly, because its right-hand side is three regions
 // rather than one, sharing a column. The wrappers between them are static, so
 // they live here rather than inside any region.
-templ mapPage(list, head, canvas, foot string) {
+templ mapPage(list, head, canvas, inspector, foot string) {
 	<div class="schema" data-testid="map-mode">
 		@templ.Raw(list)
 		<div class="schema__main">
 			<div class="map-editor" data-testid="map-editor">
 				@templ.Raw(head)
-				@templ.Raw(canvas)
+				<div class="map-workspace">
+					@templ.Raw(canvas)
+					@templ.Raw(inspector)
+				</div>
 				@templ.Raw(foot)
 			</div>
 		</div>
@@ -196,11 +199,19 @@ templ MapCanvasRegion(data Data) {
 	</div>
 }
 
+templ MapInspectorRegion(data Data) {
+	<div
+		id="map-inspector"
+		class={ "map-inspector", kv("map-inspector--open", data.SelectedSpawn != nil || data.MissingSpawn > 0) }
+	>
+		@spawnInspector(data)
+	</div>
+}
+
 templ MapFootRegion(data Data) {
 	<div id="map-foot" class="map-foot">
 		if data.HasMaps && len(data.Maps) > 0 {
 			@mapStatus(data)
-			@spawnInspector(data)
 			<p class="schema__foot">
 				A saved map takes effect on the next <span class="mono">ecs-db run</span>.
 				The engine watches behaviour files and sprite assets; it does not watch maps.

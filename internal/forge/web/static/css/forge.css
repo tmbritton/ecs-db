@@ -2488,6 +2488,51 @@ option:disabled {
   display: contents;
 }
 
+.map-workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  gap: 10px;
+}
+
+.map-inspector {
+  display: none;
+}
+
+.map-inspector--open {
+  display: block;
+  flex: 0 0 280px;
+  min-width: 0;
+  overflow-y: auto;
+  border: 2px solid var(--border);
+  background: var(--panel);
+  padding: 10px;
+}
+
+.spawn-inspector__components {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.spawn-inspector__component {
+  border: 2px solid var(--border);
+  padding: 6px;
+}
+
+.spawn-inspector__field {
+  margin-top: 5px;
+}
+
+.map-spawn-inspector .schema__row {
+  min-width: 0;
+}
+
+.map-spawn-inspector .schema__input {
+  min-width: 0;
+}
+
 .map-toolbar {
   display: flex;
   align-items: center;

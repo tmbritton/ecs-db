@@ -1,5 +1,7 @@
 package modes
 
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
+
 
 templ mapListBody(data Data) {
 	<div class="section-heading"><span>Maps ◂ game.toml</span></div>
@@ -422,6 +424,7 @@ templ spawnPalette(data Data) {
 
 templ spawnInspector(data Data) {
 	if data.SelectedSpawn != nil {
+		{{ et := data.Schema.EntityTypes[data.SelectedSpawn.Type] }}
 		<div class="map-spawn-inspector" data-testid="spawn-selected">
 			<span class="mono">{ data.SelectedSpawn.Type } · object { itoa(data.SelectedSpawn.ID) }</span>
 			<button
@@ -431,6 +434,98 @@ templ spawnInspector(data Data) {
 				data-on:click={ spawnDeleteAction(data.SelectedMap, data.SelectedSpawn.ID) }
 			>Delete</button>
 			<p>Deleting this spawn removes its entity on the next ecs-db run.</p>
+			<div class="spawn-inspector__behavior" data-testid="spawn-behavior">
+				Behaviour from schema.json · entityTypes.{ data.SelectedSpawn.Type }:
+				if et.Behavior == "" {
+					<span class="mono">none</span>
+				} else {
+					<span class="mono">{ et.Behavior }</span>
+				}
+				<a href={ URL(entityTypeHref(data.SelectedSpawn.Type)) }>Change in ENTS</a>
+			</div>
+			for _, message := range data.SpawnErrors {
+				<p class="schema__problem" role="alert">{ message }</p>
+			}
+			for _, message := range data.SpawnWarnings {
+				<p class="schema__note" role="status" data-testid="spawn-contract-warning">Warning: { message }</p>
+			}
+			for _, message := range spawnContextProblems(data) {
+				<p class="schema__problem" role="alert" data-testid="spawn-context-warning">{ message }</p>
+			}
+			<div class="spawn-inspector__components" data-testid="spawn-components">
+				for _, c := range spawnComponentViews(data) {
+					<div class="spawn-inspector__component" data-testid={ "spawn-component-" + c.Name }>
+						if c.Required {
+							@components.Chip(components.ChipProps{Name: c.Name, Kind: components.ChipRequired, ContextSeeded: c.Seeded})
+						} else {
+							@components.Chip(components.ChipProps{Name: c.Name, Kind: components.ChipOptional, ContextSeeded: c.Seeded, RemoveAction: spawnDetachAction(data, c.Name)})
+						}
+						if c.Name == "Position" {
+							<span class="mono" data-testid="spawn-position">{ c.Position }</span>
+							<p>Position comes from where the object sits. Move the object to change it.</p>
+						} else if !c.Present {
+							<p class="schema__problem">Missing required component in this map object.</p>
+						} else {
+							for _, field := range c.Fields {
+								<div class="spawn-inspector__field">
+									if field.Sheet {
+										<span class="mono">Sprite.sheet · { field.Value }</span>
+										<p>animations.toml overrides Sprite.sheet at start-up.</p>
+									} else {
+										<label class="schema__row">
+											<span class="schema__label">{ c.Name }.{ field.Name }</span>
+											<input
+												type="text"
+												class="schema__input mono"
+												value={ field.Value }
+												aria-label={ c.Name + "." + field.Name }
+												data-testid={ "spawn-field-" + c.Name + "." + field.Name }
+												data-on:change={ spawnFieldAction(data, c.Name, field.Name) }
+											/>
+										</label>
+										if field.ContextSeeded {
+											<span class="badge-ctx" data-testid={ "spawn-ctx-" + c.Name + "." + field.Name } title="the bound machine seeds missing components only; this component is already present, so the map value wins at startup">ƒ ctx</span>
+										}
+									}
+								</div>
+							}
+						}
+					</div>
+				}
+			</div>
+			if len(spawnMissingRequired(data)) > 0 {
+				<button type="button" class="btn--dashed" data-testid="spawn-repair-required" data-on:click={ spawnRepairAction(data) }>
+					Repair required components
+				</button>
+			}
+			if len(spawnAddable(data)) > 0 {
+				<div class="section-heading">+ ADD COMPONENT</div>
+				if len(spawnAddableRegular(data)) > 0 {
+					<label class="schema__row">
+						<span class="schema__label">Component</span>
+						<select data-testid="spawn-add-component" data-on:change={ spawnAddAction(data) }>
+							<option value="">choose…</option>
+							for _, name := range spawnAddableRegular(data) {
+								<option value={ name }>{ name }</option>
+							}
+						</select>
+					</label>
+				}
+				for _, name := range spawnAddableReferences(data) {
+					<div class="schema__row">
+						<span class="schema__label">{ name } target entity id</span>
+						for _, field := range spawnReferenceFields(data.Schema.Components[name]) {
+							<label class="schema__row">
+								<span class="schema__label">{ field }</span>
+								<input type="number" min="1" class="schema__input mono" data-ref-field={ field } data-testid={ spawnReferenceTestID(name, data.Schema.Components[name], field) } aria-label={ name + "." + field + " target entity id" }/>
+							</label>
+						}
+						<button type="button" data-testid={ "spawn-attach-" + name } data-on:click={ spawnReferenceAction(data, name) }>Attach { name }</button>
+					</div>
+				<p class="schema__note">A target must name an entity that exists when the engine imports this map.</p>
+			}
+			}
+			@contextSeedsPanel(data, et)
 		</div>
 	} else if data.MissingSpawn > 0 {
 		<div class="map-spawn-inspector" data-testid="spawn-missing">

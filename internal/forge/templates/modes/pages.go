@@ -27,10 +27,10 @@ func TwoPanePage(testid string) func([]string) templ.Component {
 	}
 }
 
-// MapPage assembles MAP's four regions: the rail, and the three that share the
-// column beside it.
+// MapPage assembles MAP's five regions: the rail, head, canvas, inspector,
+// and foot. The canvas and inspector share a row but remain separate patches.
 func MapPage(rendered []string) templ.Component {
-	return mapPage(at(rendered, 0), at(rendered, 1), at(rendered, 2), at(rendered, 3))
+	return mapPage(at(rendered, 0), at(rendered, 1), at(rendered, 2), at(rendered, 3), at(rendered, 4))
 }
 
 // at is a region that may not have been rendered — which happens only if

@@ -58,6 +58,7 @@ func EnsureInterpreterTables(db *sql.DB) error {
 			map       TEXT NOT NULL,
 			object_id INTEGER NOT NULL,
 			entity_id INTEGER REFERENCES entities(id) ON DELETE CASCADE,
+			components TEXT,
 			PRIMARY KEY (map, object_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS event_queue (
@@ -76,6 +77,20 @@ func EnsureInterpreterTables(db *sql.DB) error {
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("EnsureInterpreterTables: %w", err)
+		}
+	}
+	// Existing databases recorded only which entity an object made, not which
+	// of that entity's components the map authored. NULL is deliberately
+	// unknown: on the first open, baseline what the map says without deleting
+	// a runtime-attached component we cannot distinguish from an old authoring
+	// choice. Later edits can be diffed against that recorded baseline.
+	var hasComponents int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('spawns') WHERE name = 'components'`).Scan(&hasComponents); err != nil {
+		return fmt.Errorf("reading spawns columns: %w", err)
+	}
+	if hasComponents == 0 {
+		if _, err := db.Exec(`ALTER TABLE spawns ADD COLUMN components TEXT`); err != nil {
+			return fmt.Errorf("adding authored components to spawns: %w", err)
 		}
 	}
 	return nil
@@ -111,6 +126,10 @@ func migrateSpawns(db *sql.DB) error {
 	if onDelete == "CASCADE" {
 		return nil
 	}
+	var hasComponents int
+	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('spawns') WHERE name = 'components'`).Scan(&hasComponents); err != nil {
+		return fmt.Errorf("reading spawns columns before rebuild: %w", err)
+	}
 
 	// Foreign keys off for the rebuild, on the connection that runs it: the
 	// pragma is per-connection and the pool would otherwise hand the
@@ -131,15 +150,22 @@ func migrateSpawns(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("beginning the spawns rebuild: %w", err)
 	}
-	for _, stmt := range []string{
-		`CREATE TABLE spawns_new (
+	create := `CREATE TABLE spawns_new (
 			map       TEXT NOT NULL,
 			object_id INTEGER NOT NULL,
-			entity_id INTEGER REFERENCES entities(id) ON DELETE CASCADE,
-			PRIMARY KEY (map, object_id)
-		)`,
-		`INSERT INTO spawns_new (map, object_id, entity_id)
-			SELECT map, object_id, entity_id FROM spawns WHERE entity_id IS NOT NULL`,
+			entity_id INTEGER REFERENCES entities(id) ON DELETE CASCADE,`
+	copy := `INSERT INTO spawns_new (map, object_id, entity_id`
+	selectColumns := `SELECT map, object_id, entity_id`
+	if hasComponents > 0 {
+		create += ` components TEXT,`
+		copy += `, components`
+		selectColumns += `, components`
+	}
+	create += ` PRIMARY KEY (map, object_id))`
+	copy += `) ` + selectColumns + ` FROM spawns WHERE entity_id IS NOT NULL`
+	for _, stmt := range []string{
+		create,
+		copy,
 		`DROP TABLE spawns`,
 		`ALTER TABLE spawns_new RENAME TO spawns`,
 	} {
