@@ -1,6 +1,7 @@
 package tiled
 
 import (
+	"encoding/xml"
 	"fmt"
 	"math"
 	"strconv"
@@ -87,7 +88,30 @@ func (d *Document) SetObjectProperty(id int, name string, value Property) error 
 	if err != nil {
 		return err
 	}
-	block := obj.firstChild("properties")
+	if err := setElementProperty(obj, fmt.Sprintf("object %d", id), name, value); err != nil {
+		return err
+	}
+	d.invalidate()
+	return nil
+}
+
+// setElementProperty is shared by TMX object and TSX tile edits. Both formats
+// use the same Tiled <properties> vocabulary; keeping the byte-fidelity and
+// nested-value refusals in one place prevents the two writers drifting.
+func setElementProperty(owner *xelem, label, name string, value Property) error {
+	for _, text := range []string{name, value.Type, value.PropertyType, value.Value} {
+		if err := validateXMLValue(label+" property", text); err != nil {
+			return err
+		}
+	}
+	blocks := owner.children("properties")
+	if len(blocks) > 1 {
+		return fmt.Errorf("tiled: %s has %d <properties> blocks; this edit cannot choose one", label, len(blocks))
+	}
+	var block *xelem
+	if len(blocks) == 1 {
+		block = blocks[0]
+	}
 	if block != nil {
 		var found *xelem
 		for _, prop := range block.children("property") {
@@ -95,7 +119,7 @@ func (d *Document) SetObjectProperty(id int, name string, value Property) error 
 				continue
 			}
 			if found != nil {
-				return fmt.Errorf("tiled: object %d has duplicate property %q", id, name)
+				return fmt.Errorf("tiled: %s has duplicate property %q", label, name)
 			}
 			found = prop
 		}
@@ -133,18 +157,45 @@ func (d *Document) SetObjectProperty(id int, name string, value Property) error 
 				// Children such as comments are unrelated to the attribute
 				// value, so keep them exactly as they arrived.
 				found.setAttr("value", value.Value)
-			} else {
+			} else if !sameTextPropertyValue(found, value.Value) {
 				// Tiled also accepts the element-content spelling. Retain it
 				// instead of inventing a value attribute and leaving the old
 				// text in the file as a second, conflicting value.
 				found.setText(value.Value)
 			}
-			d.invalidate()
 			return nil
 		}
 	} else {
 		block = newElem("properties")
-		obj.appendChild(block, layerIndentStep(obj))
+		// A tile's properties precede its image, collision objects and
+		// animation in a TSX. Keep that order when adding the first block;
+		// an object keeps the existing append behavior.
+		inserted := false
+		if owner.name == "tile" {
+			for i, child := range owner.kids {
+				if child.el == nil {
+					continue
+				}
+				switch child.el.name {
+				case "image", "objectgroup", "animation":
+					at := i
+					for at > 0 && owner.kids[at-1].el == nil {
+						at--
+					}
+					block.parent = owner
+					indent := "\n" + owner.childIndent(layerIndentStep(owner))
+					owner.kids = append(owner.kids[:at], append([]xnode{{raw: []byte(indent)}, {el: block}}, owner.kids[at:]...)...)
+					owner.markDirty()
+					inserted = true
+				}
+				if inserted {
+					break
+				}
+			}
+		}
+		if !inserted {
+			owner.appendChild(block, layerIndentStep(owner))
+		}
 	}
 	attrs := []xattr{{"name", name}}
 	if value.Type != "" && value.Type != "string" {
@@ -155,8 +206,24 @@ func (d *Document) SetObjectProperty(id int, name string, value Property) error 
 	}
 	attrs = append(attrs, xattr{"value", value.Value})
 	block.appendChild(newElem("property", attrs...), layerIndentStep(block))
-	d.invalidate()
 	return nil
+}
+
+// sameTextPropertyValue compares the *meaning* of element content. Rewriting
+// `a&#38;b` as `a&amp;b` for the very same value makes a no-op an unrelated XML
+// diff in both TMX and TSX, even though either spelling parses to `a&b`.
+func sameTextPropertyValue(prop *xelem, want string) bool {
+	var body strings.Builder
+	for _, child := range prop.kids {
+		body.Write(child.raw)
+	}
+	var decoded struct {
+		Value string `xml:",chardata"`
+	}
+	if err := xml.Unmarshal([]byte("<value>"+body.String()+"</value>"), &decoded); err != nil {
+		return false
+	}
+	return decoded.Value == want
 }
 
 // RemoveObjectComponent removes only the named component's custom properties.

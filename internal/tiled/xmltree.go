@@ -59,8 +59,13 @@ type xelem struct {
 	kids      []xnode
 	selfClose bool
 	src       []byte
-	dirty     bool
-	parent    *xelem
+	// Keep the authored tag spelling even when a descendant changes: a dirty
+	// parent should not turn single quotes or character references in its own
+	// attributes into canonical double-quoted text.
+	openSrc, closeSrc []byte
+	attrsDirty        bool
+	dirty             bool
+	parent            *xelem
 }
 
 type xattr struct {
@@ -113,7 +118,7 @@ func parseTree(data []byte) (*xtree, error) {
 			if err := checkNoNamespace(t); err != nil {
 				return nil, err
 			}
-			el := &xelem{name: t.Name.Local}
+			el := &xelem{name: t.Name.Local, openSrc: data[start:end]}
 			for _, a := range t.Attr {
 				el.attrs = append(el.attrs, xattr{name: a.Name.Local, value: a.Value})
 			}
@@ -137,6 +142,7 @@ func parseTree(data []byte) (*xtree, error) {
 			// zero-length range is that, and it is the only signal there is.
 			el.selfClose = start == end
 			el.src = data[openAt[len(openAt)-1]:end]
+			el.closeSrc = data[start:end]
 			stack = stack[:len(stack)-1]
 			openAt = openAt[:len(openAt)-1]
 		default:
@@ -215,30 +221,47 @@ func (e *xelem) render(buf *bytes.Buffer) {
 		buf.Write(e.src)
 		return
 	}
-	buf.WriteByte('<')
-	buf.WriteString(e.name)
-	for _, a := range e.attrs {
-		buf.WriteByte(' ')
-		buf.WriteString(a.name)
-		buf.WriteString(`="`)
-		writeAttrValue(buf, a.value)
-		buf.WriteByte('"')
+	if !e.attrsDirty && len(e.openSrc) > 0 {
+		if len(e.kids) > 0 && bytes.HasSuffix(e.openSrc, []byte("/>")) {
+			// Expanding <tile id='1'/> must not respell the id's quotes.
+			buf.Write(e.openSrc[:len(e.openSrc)-2])
+			buf.WriteByte('>')
+		} else {
+			buf.Write(e.openSrc)
+		}
+	} else {
+		buf.WriteByte('<')
+		buf.WriteString(e.name)
+		for _, a := range e.attrs {
+			buf.WriteByte(' ')
+			buf.WriteString(a.name)
+			buf.WriteString(`="`)
+			writeAttrValue(buf, a.value)
+			buf.WriteByte('"')
+		}
+		if e.selfClose && len(e.kids) == 0 {
+			buf.WriteString("/>")
+			return
+		}
+		buf.WriteByte('>')
 	}
 	// Self-closing only if it was, and only while it still holds nothing. The
 	// children check is what decides — it is what makes putting something into
 	// an element that arrived as <data/> write it out long-hand, without every
 	// mutator having to remember to clear the flag.
 	if e.selfClose && len(e.kids) == 0 {
-		buf.WriteString("/>")
 		return
 	}
-	buf.WriteByte('>')
 	for _, k := range e.kids {
 		k.render(buf)
 	}
-	buf.WriteString("</")
-	buf.WriteString(e.name)
-	buf.WriteByte('>')
+	if len(e.closeSrc) > 0 {
+		buf.Write(e.closeSrc)
+	} else {
+		buf.WriteString("</")
+		buf.WriteString(e.name)
+		buf.WriteByte('>')
+	}
 }
 
 // writeAttrValue escapes exactly what an attribute in double quotes cannot
@@ -249,6 +272,10 @@ func (e *xelem) render(buf *bytes.Buffer) {
 // Tiled writes, which keeps a rewritten attribute looking like the ones beside
 // it.
 func writeAttrValue(buf *bytes.Buffer, s string) {
+	writeAttrValueQuoted(buf, s, '"')
+}
+
+func writeAttrValueQuoted(buf *bytes.Buffer, s string, quote byte) {
 	for _, r := range s {
 		switch r {
 		case '&':
@@ -258,7 +285,17 @@ func writeAttrValue(buf *bytes.Buffer, s string) {
 		case '>':
 			buf.WriteString("&gt;")
 		case '"':
-			buf.WriteString("&quot;")
+			if quote == '"' {
+				buf.WriteString("&quot;")
+			} else {
+				buf.WriteRune(r)
+			}
+		case '\'':
+			if quote == '\'' {
+				buf.WriteString("&apos;")
+			} else {
+				buf.WriteRune(r)
+			}
 		case '\n':
 			buf.WriteString("&#10;")
 		case '\r':
@@ -315,11 +352,30 @@ func (e *xelem) setAttr(name, value string) {
 				return
 			}
 			e.attrs[i].value = value
+			if start, end, _, _, quote, ok := attributeRange(e.openSrc, name); ok && !e.attrsDirty {
+				var escaped bytes.Buffer
+				writeAttrValueQuoted(&escaped, value, quote)
+				e.openSrc = replaceBytes(e.openSrc, start, end, escaped.Bytes())
+			} else {
+				e.attrsDirty = true
+			}
 			e.markDirty()
 			return
 		}
 	}
 	e.attrs = append(e.attrs, xattr{name: name, value: value})
+	if len(e.openSrc) > 0 && !e.attrsDirty {
+		at := len(e.openSrc) - 1
+		if bytes.HasSuffix(e.openSrc, []byte("/>")) {
+			at--
+		}
+		var escaped bytes.Buffer
+		writeAttrValue(&escaped, value)
+		addition := []byte(" " + name + `="` + escaped.String() + `"`)
+		e.openSrc = replaceBytes(e.openSrc, at, at, addition)
+	} else {
+		e.attrsDirty = true
+	}
 	e.markDirty()
 }
 
@@ -329,10 +385,80 @@ func (e *xelem) removeAttr(name string) {
 	for i, a := range e.attrs {
 		if a.name == name {
 			e.attrs = append(e.attrs[:i], e.attrs[i+1:]...)
+			if _, _, start, end, _, ok := attributeRange(e.openSrc, name); ok && !e.attrsDirty {
+				e.openSrc = replaceBytes(e.openSrc, start, end, nil)
+			} else {
+				e.attrsDirty = true
+			}
 			e.markDirty()
 			return
 		}
 	}
+}
+
+// attributeRange finds one raw attribute's value and its whole token inside a
+// source opening tag. XML attributes may use either quote and arbitrary space
+// around '=', so finding the decoded name in the raw bytes is not enough.
+// When it cannot be found the caller falls back to the normal re-encoder.
+func attributeRange(tag []byte, want string) (valueStart, valueEnd, tokenStart, tokenEnd int, quote byte, ok bool) {
+	if len(tag) < 3 || tag[0] != '<' {
+		return
+	}
+	p := 1
+	for p < len(tag) && !isXMLSpace(tag[p]) && tag[p] != '>' && tag[p] != '/' {
+		p++
+	}
+	for p < len(tag) {
+		token := p
+		for p < len(tag) && isXMLSpace(tag[p]) {
+			p++
+		}
+		if p == len(tag) || tag[p] == '>' || tag[p] == '/' {
+			break
+		}
+		nameAt := p
+		for p < len(tag) && !isXMLSpace(tag[p]) && tag[p] != '=' {
+			p++
+		}
+		name := string(tag[nameAt:p])
+		for p < len(tag) && isXMLSpace(tag[p]) {
+			p++
+		}
+		if p == len(tag) || tag[p] != '=' {
+			break
+		}
+		p++
+		for p < len(tag) && isXMLSpace(tag[p]) {
+			p++
+		}
+		if p == len(tag) || tag[p] != '"' && tag[p] != '\'' {
+			break
+		}
+		q := tag[p]
+		p++
+		start := p
+		for p < len(tag) && tag[p] != q {
+			p++
+		}
+		if p == len(tag) {
+			break
+		}
+		end := p
+		p++
+		if name == want {
+			return start, end, token, p, q, true
+		}
+	}
+	return
+}
+
+func isXMLSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\n' || b == '\r' }
+
+func replaceBytes(src []byte, start, end int, insert []byte) []byte {
+	out := make([]byte, 0, len(src)-(end-start)+len(insert))
+	out = append(out, src[:start]...)
+	out = append(out, insert...)
+	return append(out, src[end:]...)
 }
 
 func (e *xelem) firstChild(name string) *xelem {

@@ -139,17 +139,18 @@ func (d *Document) invalidate() { d.valid = false }
 // unrelated TMX. An absent <properties> block is created, and an existing
 // value keeps its attribute-vs-element spelling and any adjacent comments.
 func (d *Document) SetMapID(id string) error {
-	if !utf8.ValidString(id) {
-		return fmt.Errorf("tiled: mapId must be valid UTF-8 to be written as XML")
-	}
-	for _, r := range id {
-		if r != '\t' && r != '\n' && r != '\r' &&
-			(r < ' ' || r >= 0xD800 && r <= 0xDFFF || r == 0xFFFE || r == 0xFFFF) {
-			return fmt.Errorf("tiled: mapId contains U+%04X, which XML cannot hold", r)
-		}
+	if err := validateXMLValue("mapId", id); err != nil {
+		return err
 	}
 	root := d.tree.root
-	block := root.firstChild("properties")
+	blocks := root.children("properties")
+	if len(blocks) > 1 {
+		return fmt.Errorf("tiled: map has %d <properties> blocks; mapId cannot be edited unambiguously", len(blocks))
+	}
+	var block *xelem
+	if len(blocks) == 1 {
+		block = blocks[0]
+	}
 	if block != nil {
 		var found *xelem
 		for _, prop := range block.children("property") {
@@ -215,6 +216,23 @@ func (d *Document) SetMapID(id string) error {
 	}
 	block.appendChild(newElem("property", xattr{"name", PropMapID}, xattr{"value", id}), layerIndentStep(block))
 	d.invalidate()
+	return nil
+}
+
+// validateXMLValue guards mutations before they touch the source tree. The
+// attribute writer escapes markup, but escaping cannot represent a NUL or an
+// invalid UTF-8 sequence in XML, and a save would otherwise write a file the
+// same package can no longer parse.
+func validateXMLValue(subject, value string) error {
+	if !utf8.ValidString(value) {
+		return fmt.Errorf("tiled: %s must be valid UTF-8 to be written as XML", subject)
+	}
+	for _, r := range value {
+		if r != '\t' && r != '\n' && r != '\r' &&
+			(r < ' ' || r >= 0xD800 && r <= 0xDFFF || r == 0xFFFE || r == 0xFFFF) {
+			return fmt.Errorf("tiled: %s contains U+%04X, which XML cannot hold", subject, r)
+		}
+	}
 	return nil
 }
 

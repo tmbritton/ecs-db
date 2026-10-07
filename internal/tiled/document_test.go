@@ -149,9 +149,25 @@ func TestDocument_SetMapIDPreservesUnrelatedTMX(t *testing.T) {
 	}
 }
 
+func TestDocument_SetMapIDKeepsNoncanonicalRootAttributeBytes(t *testing.T) {
+	src := strings.Replace(richTMX, `version="1.10" tiledversion="1.11.0"`, `version='1.10' tiledversion='1.11.0'`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetMapID("new"); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(src, `name="mapId" value="rich"`, `name="mapId" value="new"`, 1)
+	if got := string(d.Bytes()); got != want {
+		t.Errorf("map property edit respelled the untouched root tag:\n%s", got)
+	}
+}
+
 func TestDocument_SetMapIDRefusesAmbiguousOrUnsafeProperties(t *testing.T) {
 	for _, tc := range []struct{ name, prop string }{
 		{"duplicate", `<property name="mapId" value="rich"/><property name="mapId" value="other"/>`},
+		{"duplicate blocks", `<property name="mapId" value="rich"/></properties><properties><property name="mapId" value="other"/>`},
 		{"nested", `<property name="mapId" type="class"><properties><property name="id" value="x"/></properties></property>`},
 		{"text with comment", `<property name="mapId">rich<!-- keep this note --></property>`},
 	} {
@@ -651,6 +667,9 @@ func TestDocument_PropertyEditsRefuseAmbiguousOrUnknownTargets(t *testing.T) {
 		{"invalid property", richTMX, func(d *tiled.Document) error {
 			return d.SetObjectProperty(7, ".hp", tiled.Property{Type: "int", Value: "1"})
 		}},
+		{"invalid XML value", richTMX, func(d *tiled.Document) error {
+			return d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "1\x00"})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, err := tiled.ParseDocument([]byte(tc.src), "rich.tmx")
@@ -664,6 +683,22 @@ func TestDocument_PropertyEditsRefuseAmbiguousOrUnknownTargets(t *testing.T) {
 				t.Error("refused edit changed the document")
 			}
 		})
+	}
+}
+
+func TestDocument_DuplicateObjectPropertyBlocksCannotSelectAnArbitraryOne(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="int" value="5"/></properties><properties><property name="Health.hp" type="int" value="7"/>`, 1)
+	if src == richTMX {
+		t.Fatal("fixture did not acquire a second property block")
+	}
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "9"}); err == nil ||
+		string(d.Bytes()) != src {
+		t.Errorf("ambiguous object property edit changed the TMX: %v", err)
 	}
 }
 
@@ -748,6 +783,18 @@ func TestDocument_SetObjectTextPropertyEscapesOnceAndReadsTheMeaning(t *testing.
 	}
 	if got := m.ObjectGroups[0].Objects[0].Properties.Get("Health.hp"); got != "C & D" {
 		t.Errorf("edited text read back as %q, want C & D", got)
+	}
+}
+
+func TestDocument_SameObjectTextPropertyValueKeepsItsEntitySpelling(t *testing.T) {
+	src := strings.Replace(richTMX, `<property name="Health.hp" type="int" value="5"/>`,
+		`<property name="Health.hp" type="int">5&#53;</property>`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetObjectProperty(7, "Health.hp", tiled.Property{Type: "int", Value: "55"}); err != nil || string(d.Bytes()) != src {
+		t.Errorf("semantically unchanged object value rewrote XML entity: %v", err)
 	}
 }
 
