@@ -675,7 +675,12 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Found by the cleanup's own self-check: a test that painted and ended without waiting raced its own stroke, because the dirty flag it was cleaning up after arrives on the stream. It passed twice before failing
   - Two of the prototype's controls are deliberately absent: Select (M) has no tool behind it and no server operation a selection could mean, and Snap has nothing to snap until spawn objects arrive with pixel coordinates in the next story
 
-- [ ] **Spawn placement** — Drag from the entity-type palette; move and delete. An object id is a spawn's identity, so allocation is a correctness concern, not a formality.
+- [x] **Spawn placement** — Drag from the entity-type palette; move and delete. An object id is a spawn's identity, so allocation is a correctness concern, not a formality.
+  - An object group is selected explicitly. Native drag-and-drop carries an opaque type or object id; the existing pointer module translates the drop to a cell, and the server writes the TMX document, not a browser-side model
+  - Moves edit only the coordinates of the existing object and preserve its id, its properties and unknown XML; deleting does not recycle the id. A tile object's bottom-left origin stays consistent with the engine importer
+  - Required non-Position components are seeded with the generated SQL columns' zero values, so a newly placed Goblin passes the engine's import rather than becoming a visible but refused spawn. A required entity reference has no valid automatic target and is shown as unspawnable
+  - Selection is in the URL and the page's stream subscription, so a patch does not clear the inspector. Saving the map takes effect on the next `ecs-db run`, as the mode says
+  - Verified: the saved TMX's object is imported by the engine's spawn path into a fresh database at the cell shown in Forge; `make e2e` passes 265 browser checks
 
 - [ ] **Spawn inspector** — Components with required locks and `ƒ ctx` badges, property editing as `Component.property`. Behaviour is read-only and comes from the entity type; `Position` comes from where the object sits.
 

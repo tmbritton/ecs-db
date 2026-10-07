@@ -1,7 +1,7 @@
 # Story 6: Spawn placement
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete
 **Priority:** High — the half of the map that is not tiles
 
 **Depends on:** Stories 3 and 5
@@ -30,42 +30,42 @@ its bottom-left corner while everything else is positioned by its top-left.
 
 ## Acceptance Criteria
 
-- [ ] The palette lists the schema's entity types, and dragging one onto the
+- [x] The palette lists the schema's entity types, and dragging one onto the
       canvas creates an object with that class at that cell
-- [ ] The new object's id comes from `nextobjectid`, which is then incremented;
+- [x] The new object's id comes from `nextobjectid`, which is then incremented;
       no id is ever reused within a map
-- [ ] Position comes from where the object sits, and the object is written so
+- [x] Position comes from where the object sits, and the object is written so
       that the engine's `spawnCell` puts it back in the cell it was dropped on —
       including the tile-object origin rule, if a spawn is ever a tile object
-- [ ] A type that does not declare `Position` is not offered as a spawn, with
+- [x] A type that does not declare `Position` is not offered as a spawn, with
       the reason shown — the engine refuses it, and offering it would be Forge
       building a map the engine will not load
-- [ ] `Tile` is not offered: it is the entity type the tile importer owns, and a
+- [x] `Tile` is not offered: it is the entity type the tile importer owns, and a
       hand-placed one is a tile the map does not know it has
-- [ ] Dragging a placed spawn moves it, and the move keeps its id, because the
+- [x] Dragging a placed spawn moves it, and the move keeps its id, because the
       entity it names must survive the edit
-- [ ] Deleting a spawn removes the object, and the mode says plainly that this
+- [x] Deleting a spawn removes the object, and the mode says plainly that this
       deletes the entity on the next load — Epic 14 Story 8's rule, and it is a
       surprise worth spending a sentence on
-- [ ] A spawn is drawn on the canvas as the prototype draws it, and clicking one
+- [x] A spawn is drawn on the canvas as the prototype draws it, and clicking one
       selects it into the inspector via the URL
-- [ ] Which object group a new spawn lands in is decided and visible, not
+- [x] Which object group a new spawn lands in is decided and visible, not
       implicit — a map may have several, and a spawn in the wrong one is
       invisible in the layer panel
-- [ ] `go test ./...` passes
+- [x] `go test ./...` passes
 
 ## Playwright steps
 
 `e2e/specs/15-spawn-placement.spec.js`.
 
-- [ ] Dragging `Goblin` from the palette onto a cell places a spawn there
-- [ ] The placed spawn survives save and reload, in the same cell
-- [ ] Placing two spawns gives them different ids, and deleting one and placing
+- [x] Dragging `Goblin` from the palette onto a cell places a spawn there
+- [x] The placed spawn survives save and reload, in the same cell
+- [x] Placing two spawns gives them different ids, and deleting one and placing
       another does not reuse the deleted id
-- [ ] Dragging a placed spawn moves it and its id is unchanged
-- [ ] A type with no `Position` is shown as unspawnable with its reason
-- [ ] Clicking a spawn selects it, changes the URL, and survives a reload
-- [ ] Saving a map with a new goblin and running the engine against it spawns
+- [x] Dragging a placed spawn moves it and its id is unchanged
+- [x] A type with no `Position` is shown as unspawnable with its reason
+- [x] Clicking a spawn selects it, changes the URL, and survives a reload
+- [x] Saving a map with a new goblin and running the engine against it spawns
       that goblin — the criterion `docs/plan.md` states for this epic
 
 ## Notes

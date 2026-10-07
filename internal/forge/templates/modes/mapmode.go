@@ -273,7 +273,8 @@ func Steps() []int { return mapcanvas.Steps() }
 // being edited, it belongs in a URL somebody can paste, and changing it is a
 // page load rather than a repaint.
 type MapView struct {
-	Path string
+	Path  string
+	Spawn int
 }
 
 // Href is the page for this view.
@@ -281,13 +282,20 @@ func (v MapView) Href() string {
 	if v.Path == "" {
 		return "/forge/map"
 	}
-	return "/forge/map?" + url.Values{"map": {v.Path}}.Encode()
+	query := url.Values{"map": {v.Path}}
+	if v.Spawn > 0 {
+		query.Set("spawn", strconv.Itoa(v.Spawn))
+	}
+	return "/forge/map?" + query.Encode()
 }
 
 // WithMap is this view pointed at another map. Nothing carries over, because
 // nothing else is left to carry: what used to survive this call — a layer
 // index, a tile id — meant different things in a different map anyway.
 func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
+
+// WithSpawn selects one object without changing the map it belongs to.
+func (v MapView) WithSpawn(id int) MapView { return MapView{Path: v.Path, Spawn: id} }
 
 // hideSeed declares one layer's visibility signal, seeded from the file, and
 // only if the page does not already have it.

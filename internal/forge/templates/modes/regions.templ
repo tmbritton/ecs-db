@@ -200,6 +200,7 @@ templ MapFootRegion(data Data) {
 	<div id="map-foot" class="map-foot">
 		if data.HasMaps && len(data.Maps) > 0 {
 			@mapStatus(data)
+			@spawnInspector(data)
 			<p class="schema__foot">
 				A saved map takes effect on the next <span class="mono">ecs-db run</span>.
 				The engine watches behaviour files and sprite assets; it does not watch maps.

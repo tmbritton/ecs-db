@@ -2,6 +2,7 @@ package tiled
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 )
@@ -350,6 +351,41 @@ func (d *Document) RemoveObject(id int) error {
 				continue
 			}
 			g.removeChild(o)
+			d.invalidate()
+			return nil
+		}
+	}
+	return fmt.Errorf("tiled: %s holds no object %d", d.name, id)
+}
+
+// MoveObject changes only an existing object's coordinates. Its id, attributes,
+// shape, properties and children stay where they were in the file: replacing it
+// with a new object would retarget the entity the engine keys by its id.
+func (d *Document) MoveObject(id int, x, y float64) error {
+	m, err := d.Map()
+	if err != nil {
+		return err
+	}
+	for _, g := range d.objectGroups() {
+		for _, o := range g.children("object") {
+			if o.attr("id") != strconv.Itoa(id) {
+				continue
+			}
+			maxX := float64(m.Width * m.TileWidth)
+			maxY := float64(m.Height * m.TileHeight)
+			// A tile object is located by its bottom edge, which may sit
+			// exactly on the map's bottom border; a point object cannot.
+			tile := o.attr("gid") != "" && o.attr("gid") != "0"
+			if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) ||
+				x < 0 || x >= maxX || (tile && (y <= 0 || y > maxY)) ||
+				(!tile && (y < 0 || y >= maxY)) {
+				return fmt.Errorf("tiled: object %d at (%v,%v) is outside the %dx%d map", id, x, y, m.Width, m.Height)
+			}
+			if o.attr("x") == formatCoord(x) && o.attr("y") == formatCoord(y) {
+				return nil
+			}
+			o.setAttr("x", formatCoord(x))
+			o.setAttr("y", formatCoord(y))
 			d.invalidate()
 			return nil
 		}

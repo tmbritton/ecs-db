@@ -224,6 +224,9 @@ function begin(event) {
   if (drag) return;
   const canvas = canvasOf(event);
   if (!canvas) return;
+  // A spawn marker is a link and an HTML draggable. Painting on pointerdown
+  // would prevent its drag and turn selecting an object into a tile stroke.
+  if (event.target.closest(".map-spawn")) return;
   const cell = cellUnder(canvas, event);
   if (!cell) return;
 
@@ -337,3 +340,25 @@ function end(event) {
 
 document.addEventListener("pointerdown", begin);
 document.addEventListener("pointermove", hover);
+
+// Native drag-and-drop carries an opaque type name or object id from the
+// server-rendered element. This module converts only the drop's pixels to a
+// cell; the Datastar binding chooses the route and the server owns the map.
+document.addEventListener("dragover", (event) => {
+  if (canvasOf(event)) event.preventDefault();
+});
+document.addEventListener("drop", (event) => {
+  const canvas = canvasOf(event);
+  if (!canvas) return;
+  const cell = cellUnder(canvas, event);
+  if (!cell) return;
+  const payload = event.dataTransfer?.getData("text/plain") || "";
+  const colon = payload.indexOf(":");
+  if (colon < 0) return;
+  const kind = payload.slice(0, colon);
+  if (kind !== "type" && kind !== "move") return;
+  event.preventDefault();
+  canvas.dispatchEvent(new CustomEvent("spawndrop", {
+    detail: { kind, value: payload.slice(colon + 1), ...cell }, bubbles: true,
+  }));
+});

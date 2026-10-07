@@ -37,6 +37,7 @@ templ mapListBody(data Data) {
 	if data.SelectedMap != "" {
 		@mapLayers(data)
 		@mapPalette(data)
+		@spawnPalette(data)
 	}
 }
 
@@ -203,6 +204,7 @@ templ mapCanvas(data Data) {
 			data-attr:data-cell-w={ "$zoom * " + itoa(data.Canvas.TileW) }
 			data-attr:data-cell-h={ "$zoom * " + itoa(data.Canvas.TileH) }
 			data-on:paintstroke={ strokeAction(data) }
+			data-on:spawndrop={ spawnDropAction(data.SelectedMap) }
 		>
 			// The grid is outside the scaled box on purpose: inside it, an 8×
 			// zoom would draw 8px lines. Its own spacing scales by calc so the
@@ -250,6 +252,25 @@ templ mapCanvas(data Data) {
 							}
 						}
 					</div>
+				}
+			</div>
+			<div class="map-spawns" data-testid="spawn-canvas">
+				for _, group := range data.ObjectGroups {
+					for _, obj := range group.Objects {
+						if obj.Type != "" {
+							<a
+								href={ URL(data.MapView.WithSpawn(obj.ID).Href()) }
+								class="map-spawn"
+								style={ spawnStyle(obj, data.Canvas.TileH) }
+								data-testid={ "spawn-" + itoa(obj.ID) }
+								data-cell={ spawnCellLabel(obj, data.Canvas.TileW, data.Canvas.TileH) }
+								aria-label={ obj.Type + " spawn " + itoa(obj.ID) }
+								title={ obj.Type + " · object " + itoa(obj.ID) }
+								draggable="true"
+								data-on:dragstart={ "evt.dataTransfer.setData('text/plain', 'move:" + itoa(obj.ID) + "')" }
+							>{ obj.Type }</a>
+						}
+					}
 				}
 			</div>
 		</div>
@@ -357,6 +378,64 @@ templ mapPalette(data Data) {
 					></button>
 				}
 			</div>
+		</div>
+	}
+}
+
+templ spawnPalette(data Data) {
+	<div class="section-heading" data-testid="spawn-palette-heading">Entity types ◂ schema.json</div>
+	if len(data.ObjectGroups) == 0 {
+		<p class="schema__hint">This map has no object group for spawns.</p>
+	} else {
+		<div class="segmented" role="group" aria-label="Object group">
+			for i, group := range data.ObjectGroups {
+				<button
+					type="button"
+					class="segmented__link"
+					data-on:click={ "$group = " + itoa(i) }
+					data-class={ "{'segmented__on': $group === " + itoa(i) + "}" }
+					data-attr:data-current={ flag(eq("$group", uint32(i))) }
+					data-attr:aria-pressed={ flag(eq("$group", uint32(i))) }
+					data-testid={ "object-group-" + group.Name }
+				>{ group.Name }</button>
+			}
+		</div>
+	}
+	for _, name := range entityTypeNames(data.Schema) {
+		if name == "Tile" {
+			// Tile objects belong to the map importer, not the spawn palette.
+		} else if spawnReason(data.Schema, name) == "" && len(data.ObjectGroups) > 0 {
+			<div
+				class="spawn-palette__type"
+				data-testid={ "spawn-type-" + name }
+				aria-label={ "drag " + name + " spawn to the map" }
+				draggable="true"
+					data-on:dragstart={ spawnDragType(name) }
+			>{ name }</div>
+		} else {
+			<div class="spawn-palette__type spawn-palette__type--disabled" data-testid={ "spawn-type-" + name }>
+				{ name } · { spawnReason(data.Schema, name) }
+			</div>
+		}
+	}
+}
+
+templ spawnInspector(data Data) {
+	if data.SelectedSpawn != nil {
+		<div class="map-spawn-inspector" data-testid="spawn-selected">
+			<span class="mono">{ data.SelectedSpawn.Type } · object { itoa(data.SelectedSpawn.ID) }</span>
+			<button
+				type="button"
+				data-testid="spawn-delete"
+				aria-label={ "delete " + data.SelectedSpawn.Type + " spawn" }
+				data-on:click={ spawnDeleteAction(data.SelectedMap, data.SelectedSpawn.ID) }
+			>Delete</button>
+			<p>Deleting this spawn removes its entity on the next ecs-db run.</p>
+		</div>
+	} else if data.MissingSpawn > 0 {
+		<div class="map-spawn-inspector" data-testid="spawn-missing">
+			Object { itoa(data.MissingSpawn) } is no longer in this map.
+			<a href={ URL(data.MapView.WithSpawn(0).Href()) } data-testid="spawn-clear-selection">Clear selection</a>
 		</div>
 	}
 }

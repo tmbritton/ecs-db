@@ -1,6 +1,7 @@
 package tiled_test
 
 import (
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -397,6 +398,64 @@ func TestDocument_RemovingAnObjectLeavesTheRestOfTheGroupAlone(t *testing.T) {
 `, "", 1)
 	if got := string(doc.Bytes()); got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestDocument_MoveObjectPreservesIdentityAndUnknownContent(t *testing.T) {
+	doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeID := doc.NextObjectID()
+	if err := doc.MoveObject(7, 16, 32); err != nil {
+		t.Fatal(err)
+	}
+	got := string(doc.Bytes())
+	if !strings.Contains(got, `<object id="7" name="g" type="Goblin" x="16" y="32">`) {
+		t.Errorf("object coordinates changed incorrectly: %s", got)
+	}
+	if !strings.Contains(got, `<polygon points="0,0 8,0 8,8"/>`) ||
+		!strings.Contains(got, `<property name="Health.hp" type="int" value="5"/>`) {
+		t.Errorf("moving lost the object's unknown content: %s", got)
+	}
+	if doc.NextObjectID() != beforeID {
+		t.Errorf("moving an object changed the next id: %d, want %d", doc.NextObjectID(), beforeID)
+	}
+	m, err := doc.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o := m.ObjectGroups[0].Objects[0]; o.ID != 7 || o.X != 16 || o.Y != 32 {
+		t.Errorf("parsed object after move: %+v", o)
+	}
+}
+
+func TestDocument_MoveObjectRefusesInvalidRequestsWithoutChangingBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   int
+		x, y float64
+	}{
+		{"missing object", 999, 16, 16},
+		{"negative x", 7, -1, 16},
+		{"past right edge", 7, 1000, 16},
+		{"past bottom edge", 7, 16, 1000},
+		{"NaN", 7, math.NaN(), 16},
+		{"infinity", 7, 16, math.Inf(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := string(doc.Bytes())
+			if err := doc.MoveObject(tc.id, tc.x, tc.y); err == nil {
+				t.Fatal("invalid move accepted")
+			}
+			if got := string(doc.Bytes()); got != before {
+				t.Errorf("refused move changed bytes:\n%s", got)
+			}
+		})
 	}
 }
 

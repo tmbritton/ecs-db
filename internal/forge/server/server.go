@@ -373,6 +373,12 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	// makes them survive a re-render instead of being clobbered by one.
 	if slug == "map" && data.SelectedMap != "" {
 		q.Set("map", data.SelectedMap)
+		// A spawn is selected by a link, which opens a new page. Its id
+		// belongs in that page's fixed subscription so later patches keep
+		// its inspector aimed at the same object.
+		if data.MapView.Spawn > 0 {
+			q.Set("spawn", strconv.Itoa(data.MapView.Spawn))
+		}
 	}
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)

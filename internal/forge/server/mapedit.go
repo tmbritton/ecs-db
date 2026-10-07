@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
@@ -16,6 +17,9 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/discard", s.sameOriginOnly(s.handleMapDiscard))
 	mux.HandleFunc("POST /forge/map/reload", s.sameOriginOnly(s.handleMapReload))
 	mux.HandleFunc("POST /forge/map/paint", s.sameOriginOnly(s.handlePaint))
+	mux.HandleFunc("POST /forge/map/spawn/place", s.sameOriginOnly(s.handleSpawnPlace))
+	mux.HandleFunc("POST /forge/map/spawn/move", s.sameOriginOnly(s.handleSpawnMove))
+	mux.HandleFunc("POST /forge/map/spawn/delete", s.sameOriginOnly(s.handleSpawnDelete))
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -207,6 +211,20 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 		return
 	}
 	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{AssetURL: assetURL})
+	data.ObjectGroups = m.ObjectGroups
+	if id, err := strconv.Atoi(r.URL.Query().Get("spawn")); err == nil && id > 0 {
+		data.MissingSpawn = id
+		data.MapView = modes.MapView{Path: data.SelectedMap, Spawn: id}
+		for _, group := range m.ObjectGroups {
+			for _, obj := range group.Objects {
+				if obj.ID == id && obj.Type != "" {
+					selected := obj
+					data.SelectedSpawn = &selected
+					data.MissingSpawn = 0
+				}
+			}
+		}
+	}
 }
 
 // selectMap resolves ?map= to a map the project has, falling back to the first

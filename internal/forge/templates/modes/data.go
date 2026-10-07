@@ -12,6 +12,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/schema"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
 // Data is everything a mode needs to render.
@@ -54,6 +55,11 @@ type Data struct {
 	// Canvas is the selected map laid out: every cell placed, the layer rows,
 	// the palette and one line per reason a cell could not be drawn.
 	Canvas mapcanvas.Canvas
+	// Objects are parsed from the same working map as Canvas, with their group
+	// and stable id. A selection is URL-addressed and never owns another copy.
+	ObjectGroups  []tiled.ObjectGroup
+	SelectedSpawn *tiled.Object
+	MissingSpawn  int
 	// MapView is the URL's view state — which map, which layers Forge is
 	// hiding, which tile is selected — and is what every link in the mode is
 	// built from, so none of them can drop part of it.

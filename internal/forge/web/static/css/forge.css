@@ -2718,6 +2718,49 @@ option:disabled {
   display: block;
 }
 
+.spawn-palette__type {
+  padding: 5px 8px;
+  border: 2px solid var(--border);
+  color: var(--green);
+  cursor: grab;
+  font: 11px var(--font-mono);
+}
+
+.spawn-palette__type--disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.map-spawns {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.map-spawn {
+  position: absolute;
+  left: calc(var(--spawn-x) * var(--map-zoom) * 1px);
+  top: calc(var(--spawn-y) * var(--map-zoom) * 1px);
+  min-width: calc(var(--tile-w) * var(--map-zoom) * 1px);
+  min-height: calc(var(--tile-h) * var(--map-zoom) * 1px);
+  box-sizing: border-box;
+  border: 2px solid var(--green);
+  background: var(--canvas);
+  color: var(--green);
+  pointer-events: auto;
+  cursor: grab;
+  font: 10px var(--font-mono);
+}
+
+.map-spawn-inspector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--green);
+}
+
 .map-cell {
   position: absolute;
   left: 0;

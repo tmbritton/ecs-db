@@ -33,21 +33,28 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
+	"github.com/tmbritton/ecs-db/internal/tiled"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 	"github.com/tmbritton/ecs-db/internal/world"
 )
 
 func main() {
 	schemaPath := flag.String("schema", "e2e/fixtures/project/schema.json", "schema to bootstrap from")
 	out := flag.String("out", "e2e/fixtures/project/e2e.db", "database to write")
+	mapPath := flag.String("map", "", "optional authored TMX to import through the engine spawn loader")
 	flag.Parse()
 
-	if err := run(*schemaPath, *out); err != nil {
+	if err := runWithMap(*schemaPath, *out, *mapPath); err != nil {
 		log.Fatalf("seed: %v", err)
 	}
 	fmt.Printf("seeded %s\n", *out)
 }
 
 func run(schemaPath, out string) error {
+	return runWithMap(schemaPath, out, "")
+}
+
+func runWithMap(schemaPath, out, mapPath string) error {
 	// Always start from nothing. A leftover database from an older fixture
 	// would be *migrated* rather than rebuilt, so the suite would run against
 	// a shape no seed run ever produced.
@@ -78,7 +85,58 @@ func run(schemaPath, out string) error {
 	}
 	defer func() { _ = store.Close() }()
 
-	return seedEntities(store, loaded)
+	if err := seedEntities(store, loaded); err != nil {
+		return err
+	}
+	if mapPath == "" {
+		return nil
+	}
+	// The fixture omits Tile as an entity type, so the complete tile importer
+	// cannot run against it. This is the actual object importer LoadMap calls,
+	// against the saved file and a new engine database rather than a Go value
+	// constructed beside the browser test.
+	if err := storage.EnsureInterpreterTables(store.DB()); err != nil {
+		return err
+	}
+	raw, err = os.ReadFile(mapPath)
+	if err != nil {
+		return err
+	}
+	m, err := tiled.Parse(raw, mapPath)
+	if err != nil {
+		return err
+	}
+	svc := world.NewEntityService(store)
+	svc.SetSchema(loaded)
+	mapPath = filepath.Clean(mapPath)
+	result, err := tilemap.SyncSpawns(context.Background(), svc, store.DB(), mapPath, m)
+	if err != nil {
+		return err
+	}
+	if len(result.Refused) > 0 {
+		return fmt.Errorf("engine refused saved map spawns: %v", result.Refused)
+	}
+	key := m.Properties.Get(tiled.PropMapID)
+	if key == "" {
+		key = mapPath
+	}
+	for _, group := range m.ObjectGroups {
+		for _, obj := range group.Objects {
+			if obj.Type == "" {
+				continue
+			}
+			var kind string
+			var x, y int
+			if err := store.DB().QueryRow(`SELECT e.entity_type, p.x, p.y FROM spawns s
+				JOIN entities e ON e.id = s.entity_id
+				JOIN comp_position p ON p.entity_id = e.id
+				WHERE s.map = ? AND s.object_id = ?`, key, obj.ID).Scan(&kind, &x, &y); err != nil {
+				return fmt.Errorf("looking up saved object %d in the engine: %w", obj.ID, err)
+			}
+			fmt.Printf("imported spawn object %d: %s at %d,%d\n", obj.ID, kind, x, y)
+		}
+	}
+	return nil
 }
 
 // seedEntities writes a small, fixed population. Counts are what the ENTS and
