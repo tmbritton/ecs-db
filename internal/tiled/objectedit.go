@@ -2,9 +2,56 @@ package tiled
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
+
+// DuplicateObject copies the whole XML subtree so shapes, comments, templates
+// and future Tiled additions survive. The new id is allocated only after the
+// object and destination have been validated.
+func (d *Document) DuplicateObject(id int, x, y float64) (int, error) {
+	original, err := d.objectElement(id)
+	if err != nil {
+		return 0, err
+	}
+	m, err := d.Map()
+	if err != nil {
+		return 0, err
+	}
+	maxX, maxY := float64(m.Width*m.TileWidth), float64(m.Height*m.TileHeight)
+	tile := original.attr("gid") != "" && original.attr("gid") != "0"
+	if math.IsNaN(x) || math.IsInf(x, 0) || math.IsNaN(y) || math.IsInf(y, 0) ||
+		x < 0 || x >= maxX || (tile && (y <= 0 || y > maxY)) ||
+		(!tile && (y < 0 || y >= maxY)) {
+		return 0, fmt.Errorf("tiled: duplicate of object %d is outside the %dx%d map", id, m.Width, m.Height)
+	}
+	newID := d.allocateObjectID()
+	clone := cloneElement(original)
+	clone.setAttr("id", strconv.Itoa(newID))
+	clone.setAttr("x", formatCoord(x))
+	clone.setAttr("y", formatCoord(y))
+	group := original.parent
+	group.appendChild(clone, layerIndentStep(group))
+	d.invalidate()
+	return newID, nil
+}
+
+func cloneElement(src *xelem) *xelem {
+	clone := *src
+	clone.parent = nil
+	clone.attrs = append([]xattr(nil), src.attrs...)
+	clone.kids = make([]xnode, len(src.kids))
+	for i, node := range src.kids {
+		clone.kids[i] = node
+		if node.el != nil {
+			child := cloneElement(node.el)
+			child.parent = &clone
+			clone.kids[i].el = child
+		}
+	}
+	return &clone
+}
 
 // objectElement resolves an id before any mutation: duplicate ids cannot be
 // edited by picking whichever object happens to come first in file order.

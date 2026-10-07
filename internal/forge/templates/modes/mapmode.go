@@ -170,27 +170,49 @@ func selectedWhen(signal string, v uint32, class string) string {
 	return "{'" + class + "': " + eq(signal, v) + "}"
 }
 
-// HideSignal is the signal carrying one layer's visibility. One per layer
-// rather than an array: Datastar tracks a signal, and mutating an element of an
-// array signal is not a change it can see.
+// HideSignal is the legacy index-keyed visibility signal for layers without an
+// ID and direct callers. Real Tiled layers use LayerHideSignal instead. One
+// signal per layer rather than an array: Datastar tracks a signal, and mutating
+// an element of an array signal is not a change it can see.
 //
-// Exported because the paint route reads the same signal back off a request, to
-// refuse a stroke aimed at a layer the view is hiding. That is a name shared
+// Exported because the paint route reads the same name back off a request, to
+// refuse a stroke aimed at a layer the view is hiding. That name is shared
 // across a package boundary, and if the two halves ever disagreed the lookup
 // would return the zero value, the refusal would quietly stop happening, and
 // nothing would say so — strokes would land on an invisible layer. One
-// function, so they cannot disagree.
+// implementation, so they cannot disagree.
 func HideSignal(layerIndex int) string { return "hide" + itoa(layerIndex) }
 
-func hideSignalName(l mapcanvas.Layer) string { return HideSignal(l.Index) }
+// LayerHideSignal uses Tiled's stable layer ID when present. A page keeps view
+// signals across SSE patches; after a move, the same index names another layer.
+// Older files with no IDs retain index-based signals, and cannot be reordered.
+func LayerHideSignal(id, index int) string {
+	if id > 0 {
+		return "hideID" + itoa(id)
+	}
+	return HideSignal(index)
+}
+
+func hideSignalName(l mapcanvas.Layer) string { return LayerHideSignal(l.ID, l.Index) }
 
 func hideSignal(l mapcanvas.Layer) string { return "$" + hideSignalName(l) }
 
 // layerRowClasses is the row's own state: which layer a stroke lands on, and
 // whether this one is being drawn.
 func layerRowClasses(l mapcanvas.Layer) string {
-	return "{'layer-row--active': " + eq("$layer", uint32(l.Index)) +
+	return "{'layer-row--active': " + selectedLayerExpr(l) +
 		", 'layer-row--muted': " + hideSignal(l) + "}"
+}
+
+func selectedLayerExpr(l mapcanvas.Layer) string {
+	if l.ID > 0 {
+		return eq("$layerID", uint32(l.ID))
+	}
+	return eq("$layer", uint32(l.Index))
+}
+
+func selectLayerAction(l mapcanvas.Layer) string {
+	return "$layer = " + itoa(l.Index) + "; $layerID = " + itoa(l.ID)
 }
 
 // zoomLabelExpr is the status line's "3× · 48px cells", computed in the browser
@@ -208,9 +230,9 @@ func activeLayerExpr(c mapcanvas.Canvas) string {
 	}
 	names := make([]string, 0, len(c.Layers))
 	for _, l := range c.Layers {
-		names = append(names, quoteJS(l.Name))
+		names = append(names, selectedLayerExpr(l)+" ? "+quoteJS(l.Name))
 	}
-	return "'painting ' + ([" + strings.Join(names, ",") + "][$layer] ?? 'nothing')"
+	return "'painting ' + (" + strings.Join(names, " : ") + " : 'nothing')"
 }
 
 // quoteJS writes a string as a JavaScript single-quoted literal. Layer names
@@ -310,11 +332,9 @@ func (v MapView) WithSpawn(id int) MapView { return MapView{Path: v.Path, Spawn:
 // __ifmissing is what makes re-declaring safe. Without it every patch would
 // reset visibility to what the file says and undo the eye on each push.
 //
-// What this does not fix is a reload that *reorders* layers: index 3 then means
-// a different layer and keeps the old value. That is visible rather than silent
-// — the row shows which layers are hidden, and clicking corrects it — and the
-// alternative is a stable per-layer identity, which .tmx does not give us: names
-// are not unique and ids are not on tile layers.
+// Tiled's positive layer IDs keep these signals attached to the authored layer
+// when its position changes. Old files without IDs keep index signals and
+// cannot reorder layers until Tiled gives them IDs.
 func hideSeed(l mapcanvas.Layer) string {
 	return `{"` + hideSignalName(l) + `":` + strconv.FormatBool(l.HiddenInFile) + `}`
 }

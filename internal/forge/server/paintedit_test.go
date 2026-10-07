@@ -322,9 +322,10 @@ func TestPaint_ReadsTheVisibilitySignalThePageActuallySeeds(t *testing.T) {
 	_, page := get(t, srv, "/forge/map?map="+url.QueryEscape(configured))
 	seeded := seededSignals(t, page)
 
-	// Hide layer 0 by the name the page uses, and the stroke must be refused.
+	// Hide the layer by the stable ID the page uses; even if it moves, the
+	// stroke must still find this eye's value.
 	code := postSignals(t, srv, "/forge/map/paint?map="+url.QueryEscape(configured)+"&x=0&y=0",
-		`{"tool":"stamp","tile":1,"layer":0,"`+modes.HideSignal(0)+`":true}`)
+		`{"tool":"stamp","tile":1,"layer":0,"layerID":1,"`+modes.LayerHideSignal(1, 0)+`":true}`)
 	if code != 204 {
 		t.Fatalf("status = %d", code)
 	}
@@ -333,9 +334,9 @@ func TestPaint_ReadsTheVisibilitySignalThePageActuallySeeds(t *testing.T) {
 	}
 	// And that name is one the page really seeds, rather than one only this
 	// test and the route agree on.
-	if _, ok := seeded[modes.HideSignal(0)]; !ok {
+	if _, ok := seeded[modes.LayerHideSignal(1, 0)]; !ok {
 		t.Errorf("the page seeds %v, which does not include %q",
-			keysOf(seeded), modes.HideSignal(0))
+			keysOf(seeded), modes.LayerHideSignal(1, 0))
 	}
 }
 

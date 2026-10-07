@@ -688,7 +688,10 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
   - Verified through a saved TMX imported by the engine's spawn path; `make e2e` exercises the field change, optional attach/detach, context badge and warning/refusal paths
   - Re-import now remembers the components each object authored. Removing an optional component in Forge removes its existing entity's row on the next load without deleting a component attached only at runtime; old databases take a non-destructive baseline before this rule applies
 
-- [ ] **Context menus** — Layers, tiles and spawns, on Epic 13's server-state menu pattern.
+- [x] **Context menus** — Layers, tiles and spawns, on Epic 13's server-state menu pattern.
+  - Rename, reorder and delete preserve unknown TMX; moving across layer folders is refused, stale targets cannot edit another layer, and deleting warns that every tile the layer contributed goes away on the next game load. Reorder/delete require unique positive Tiled layer IDs so a view cannot silently retarget after an index shift
+  - The layer eye is view-only, the canvas picks the topmost visible tile into the stamp, and a spawn duplicate clones its whole XML subtree with a fresh id. Empty cells and entity types have no empty menus
+  - Verified with `make test`, both lint tag sets, both builds and 287 passing browser checks; statement coverage: tiled 94.2%, Forge server 86.8%, mode templates 70.7%, map canvas 94.3%
 
 - [ ] **Inline validation** — Every reason the engine would refuse this map, including the one it cannot make itself: two maps in a project sharing a `mapId`.
 

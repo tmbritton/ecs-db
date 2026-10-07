@@ -175,6 +175,7 @@ func (c Cell) Unresolved() bool { return c.Problem != "" }
 // Layer is one row of the layer panel.
 type Layer struct {
 	Index int
+	ID    int // stable positive Tiled ID, or zero when missing/ambiguous
 	Name  string
 	// HiddenInFile is what the map says, which is where Hidden starts. The two
 	// are shown separately because they mean different things: one is a view
@@ -189,6 +190,22 @@ type Layer struct {
 	// panel that only knew about the checkbox showed an open eye over a layer
 	// that draws nothing, with no explanation anywhere.
 	Transparent bool
+}
+
+// UniqueLayerID returns a layer's Tiled ID only when it identifies exactly one
+// layer. Old or malformed maps remain editable using index view signals, but
+// must not let two rows share an eye or route a stroke to a guessed first match.
+func UniqueLayerID(layers []tiled.Layer, index int) int {
+	if index < 0 || index >= len(layers) || layers[index].ID <= 0 {
+		return 0
+	}
+	id := layers[index].ID
+	for i, layer := range layers {
+		if i != index && layer.ID == id {
+			return 0
+		}
+	}
+	return id
 }
 
 // Tileset is one palette section.
@@ -234,6 +251,7 @@ func Build(m *tiled.Map, opts Options) Canvas {
 	for i, layer := range m.Layers {
 		c.Layers = append(c.Layers, Layer{
 			Index:        i,
+			ID:           UniqueLayerID(m.Layers, i),
 			Name:         layer.Name,
 			HiddenInFile: !layer.Visible,
 			Empty:        allEmpty(layer.Data),

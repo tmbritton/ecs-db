@@ -30,10 +30,16 @@ type paintSignals struct {
 	Tool  string
 	Tile  uint32
 	Layer int
-	FlipH bool
-	FlipV bool
-	FlipD bool
-	// Hidden is the per-layer visibility, keyed by modes.HideSignal.
+	// A stable Tiled ID accompanies the old index so a layer reordered by the
+	// server remains the one a queued stroke targets. Older direct callers can
+	// still name an index without a layerID.
+	LayerID    int
+	HasLayerID bool
+	FlipH      bool
+	FlipV      bool
+	FlipD      bool
+	// Hidden is the per-layer visibility, keyed by modes.LayerHideSignal for
+	// pages with layer IDs and by HideSignal for older direct callers.
 	Hidden map[string]bool
 }
 
@@ -90,19 +96,38 @@ func (s *Server) handlePaint(w http.ResponseWriter, r *http.Request) {
 
 	op := paint.Op{
 		Kind:  paint.Kind(sig.Tool),
-		Layer: sig.Layer,
 		From:  from,
 		To:    to,
 		Cells: trail,
 		Tile:  tiled.Tile{GID: sig.Tile, FlipH: sig.FlipH, FlipV: sig.FlipV, FlipD: sig.FlipD},
 		// modes.HideSignal, not a literal: the page names these signals, and a
 		// name built separately here would silently stop matching.
-		Hidden: sig.Hidden[modes.HideSignal(sig.Layer)],
 	}
 	if err := sess.Edit(path, func(d *tiled.Document) error {
 		m, err := d.Map()
 		if err != nil {
 			return err
+		}
+		layer := sig.Layer
+		if sig.HasLayerID && sig.LayerID > 0 {
+			layer = -1
+			for i, candidate := range m.Layers {
+				if candidate.ID == sig.LayerID {
+					if layer != -1 {
+						return fmt.Errorf("selected tile layer ID %d is ambiguous; choose a layer with a unique ID", sig.LayerID)
+					}
+					layer = i
+				}
+			}
+			if layer == -1 {
+				return fmt.Errorf("selected tile layer %d no longer exists; choose another layer", sig.LayerID)
+			}
+		}
+		op.Layer = layer
+		if sig.HasLayerID && sig.LayerID > 0 && layer >= 0 && layer < len(m.Layers) {
+			op.Hidden = sig.Hidden[modes.LayerHideSignal(sig.LayerID, layer)]
+		} else {
+			op.Hidden = sig.Hidden[modes.HideSignal(layer)]
 		}
 		result, err := paint.Apply(m, op)
 		if err != nil {
@@ -140,6 +165,9 @@ func signalsFrom(raw map[string]any) paintSignals {
 			sig.Tile = uint32(number(v))
 		case "layer":
 			sig.Layer = int(number(v))
+		case "layerID":
+			sig.LayerID = int(number(v))
+			sig.HasLayerID = true
 		case "flipH":
 			sig.FlipH, _ = v.(bool)
 		case "flipV":

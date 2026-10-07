@@ -674,6 +674,220 @@ func TestDocument_EmptyAttributeValueDoesNotBecomeItsComment(t *testing.T) {
 	}
 }
 
+const layeredTMX = `<?xml version="1.0" encoding="UTF-8"?>
+<map width="1" height="1" tilewidth="16" tileheight="16" nextlayerid="5" nextobjectid="8">
+ <group id="2" name="folder">
+  <layer id="1" name="ground" width="1" height="1"><data encoding="csv">1</data></layer>
+  <layer id="3" name="props" width="1" height="1"><data encoding="csv">2</data></layer>
+ </group>
+ <imagelayer id="5" name="fog"><image source="fog.png"/></imagelayer>
+ <layer id="4" name="roof" width="1" height="1"><data encoding="csv">3</data></layer>
+ <objectgroup id="6" name="spawns"><object id="7" type="Goblin" x="0" y="0"/></objectgroup>
+</map>
+`
+
+func TestDocument_LayerEditsKeepUnknownMapContent(t *testing.T) {
+	d, err := tiled.ParseDocument([]byte(layeredTMX), "layers.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RenameLayer(1, "items"); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(layeredTMX, `id="3" name="props"`, `id="3" name="items"`, 1)
+	if string(d.Bytes()) != want {
+		t.Errorf("renaming a layer changed more than its name:\n%s", d.Bytes())
+	}
+	if err := d.MoveLayer(1, -1); err != nil {
+		t.Fatal(err)
+	}
+	m, err := d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Layers[0].Name != "items" || m.Layers[1].Name != "ground" || m.Layers[2].Name != "roof" {
+		t.Errorf("file order not the engine's layer order: %+v", m.Layers)
+	}
+	if err := d.DeleteLayer(0); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(d.Bytes()), `id="3" name="items"`) ||
+		!strings.Contains(string(d.Bytes()), `<imagelayer id="5"`) ||
+		!strings.Contains(string(d.Bytes()), `<object id="7"`) ||
+		!strings.Contains(string(d.Bytes()), `nextlayerid="5"`) {
+		t.Errorf("deleting a layer changed unmodeled parts:\n%s", d.Bytes())
+	}
+}
+
+func TestDocument_CanMoveLayerOnlyWithinItsFolder(t *testing.T) {
+	d, err := tiled.ParseDocument([]byte(layeredTMX), "layers.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		index, direction int
+		want             bool
+	}{
+		{0, -1, false},
+		{0, 1, true},
+		{1, -1, true},
+		{1, 1, false},
+		{2, -1, false},
+		{2, 1, false},
+	} {
+		if got := d.CanMoveLayer(tc.index, tc.direction); got != tc.want {
+			t.Errorf("CanMoveLayer(%d, %d) = %v, want %v", tc.index, tc.direction, got, tc.want)
+		}
+	}
+}
+
+func TestDocument_MoveLayerKeepsItsAuthoredComment(t *testing.T) {
+	src := strings.Replace(layeredTMX, `<layer id="1" name="ground"`,
+		`<!-- ground is walkable -->
+  <layer id="1" name="ground"`, 1)
+	src = strings.Replace(src, `<layer id="3" name="props"`,
+		`<!-- props are scenery -->
+  <layer id="3" name="props"`, 1)
+	if !strings.Contains(src, "<!-- ground is walkable -->") || !strings.Contains(src, "<!-- props are scenery -->") {
+		t.Fatal("comment fixture did not include both comments")
+	}
+	d, err := tiled.ParseDocument([]byte(src), "layers.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MoveLayer(1, -1); err != nil {
+		t.Fatal(err)
+	}
+	got := string(d.Bytes())
+	if !strings.Contains(got, "<!-- props are scenery -->\n  <layer id=\"3\"") ||
+		!strings.Contains(got, "<!-- ground is walkable -->\n  <layer id=\"1\"") ||
+		strings.Index(got, "<!-- props are scenery -->") >= strings.Index(got, "<!-- ground is walkable -->") {
+		t.Errorf("reordering detached a layer's comment:\n%s", got)
+	}
+}
+
+func TestDocument_DeleteLayerAlsoRemovesItsAuthoredComment(t *testing.T) {
+	src := strings.Replace(layeredTMX, `<layer id="3" name="props"`,
+		`<!-- this comment belongs to props -->
+  <layer id="3" name="props"`, 1)
+	d, err := tiled.ParseDocument([]byte(src), "layers.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DeleteLayer(1); err != nil {
+		t.Fatal(err)
+	}
+	got := string(d.Bytes())
+	if strings.Contains(got, "this comment belongs to props") || strings.Contains(got, `name="props"`) ||
+		!strings.Contains(got, `name="ground"`) || !strings.Contains(got, `name="roof"`) {
+		t.Errorf("deleting props left its commentary or removed a sibling:\n%s", got)
+	}
+}
+
+func TestDocument_MoveLayerRefusesWhenLayerIDsCannotPreserveViewState(t *testing.T) {
+	for _, tc := range []struct{ name, source string }{
+		{"missing id", strings.Replace(layeredTMX, `id="3" name="props"`, `name="props"`, 1)},
+		{"duplicate id", strings.Replace(layeredTMX, `id="3" name="props"`, `id="1" name="props"`, 1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(tc.source), "layers.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.CanMoveLayer(1, -1) || d.CanDeleteLayer(0) || d.MoveLayer(1, -1) == nil || d.DeleteLayer(0) == nil {
+				t.Error("an index-changing edit with no stable layer identity was accepted")
+			}
+			if string(d.Bytes()) != tc.source {
+				t.Error("a refused move changed the TMX")
+			}
+		})
+	}
+}
+
+func TestDocument_LayerEditsRefuseBoundariesAndCrossFolderMoves(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*tiled.Document) error
+	}{
+		{"missing", func(d *tiled.Document) error { return d.RenameLayer(9, "x") }},
+		{"empty name", func(d *tiled.Document) error { return d.RenameLayer(0, "") }},
+		{"duplicate name", func(d *tiled.Document) error { return d.RenameLayer(1, "ground") }},
+		{"above first", func(d *tiled.Document) error { return d.MoveLayer(0, -1) }},
+		{"below last", func(d *tiled.Document) error { return d.MoveLayer(2, 1) }},
+		{"across folder", func(d *tiled.Document) error { return d.MoveLayer(1, 1) }},
+		{"bad direction", func(d *tiled.Document) error { return d.MoveLayer(0, 2) }},
+		{"delete missing", func(d *tiled.Document) error { return d.DeleteLayer(9) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(layeredTMX), "layers.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.edit(d); err == nil {
+				t.Fatal("invalid layer edit accepted")
+			}
+			if string(d.Bytes()) != layeredTMX {
+				t.Error("refused layer edit changed the file")
+			}
+		})
+	}
+}
+
+func TestDocument_DuplicateObjectKeepsItsUnmodeledChildrenAndGetsNewID(t *testing.T) {
+	d, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := d.DuplicateObject(7, 0, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 42 || d.NextObjectID() != 43 {
+		t.Fatalf("duplicate id %d, next %d", id, d.NextObjectID())
+	}
+	m, err := d.Map()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.ObjectGroups[0].Objects) != 3 || m.ObjectGroups[0].Objects[2].ID != 42 ||
+		m.ObjectGroups[0].Objects[2].X != 0 || m.ObjectGroups[0].Objects[2].Y != 32 {
+		t.Errorf("duplicate object in wrong place: %+v", m.ObjectGroups[0].Objects)
+	}
+	if n := strings.Count(string(d.Bytes()), `<polygon points="0,0 8,0 8,8"/>`); n != 2 {
+		t.Errorf("copied %d polygon bodies, want 2", n)
+	}
+	if n := strings.Count(string(d.Bytes()), `name="Health.hp" type="int" value="5"`); n != 2 {
+		t.Errorf("copied %d authored Health properties, want 2", n)
+	}
+	if err := d.RemoveObject(id); err != nil || d.NextObjectID() != 43 {
+		t.Errorf("deleting duplicate recycled id: %v, next %d", err, d.NextObjectID())
+	}
+}
+
+func TestDocument_DuplicateObjectRefusesBeforeAllocatingAnID(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   int
+		x, y float64
+	}{
+		{"missing", 999, 0, 0},
+		{"outside", 7, 9999, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, err := tiled.ParseDocument([]byte(richTMX), "rich.tmx")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.DuplicateObject(tc.id, tc.x, tc.y); err == nil {
+				t.Fatal("invalid duplicate was accepted")
+			}
+			if string(d.Bytes()) != richTMX || d.NextObjectID() != 42 {
+				t.Error("a refused duplicate changed the source or advanced the counter")
+			}
+		})
+	}
+}
+
 func TestNewDocument_WritesAMapTheEngineCanLoad(t *testing.T) {
 	doc, err := tiled.NewDocument("level2.tmx", tiled.NewMapSpec{
 		MapID: "level2", Width: 4, Height: 3, TileWidth: 32, TileHeight: 32,

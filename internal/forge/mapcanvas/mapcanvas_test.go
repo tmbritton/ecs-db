@@ -61,6 +61,19 @@ func TestBuild_PlacesEveryNonEmptyCell(t *testing.T) {
 	}
 }
 
+func TestBuild_DuplicateLayerIDsDoNotShareViewState(t *testing.T) {
+	a, b, c := layer("first", 1, 1, true, 1), layer("second", 1, 1, true, 2), layer("third", 1, 1, true, 3)
+	a.ID, b.ID, c.ID = 7, 7, 9
+	m := mapOf(1, 1, 16, 16, oneSheet(), a, b, c)
+	canvas := mapcanvas.Build(m, opts())
+	if canvas.Layers[0].ID != 0 || canvas.Layers[1].ID != 0 || canvas.Layers[2].ID != 9 {
+		t.Errorf("duplicate IDs share eye/selection signals: %+v", canvas.Layers)
+	}
+	if mapcanvas.UniqueLayerID(m.Layers, 0) != 0 || mapcanvas.UniqueLayerID(m.Layers, 2) != 9 {
+		t.Error("server and renderer disagree on which ID is unique")
+	}
+}
+
 // The transform comes from the engine's own matrix, so a flipped tile in Forge
 // and a flipped tile in the game are the same picture.
 func TestBuild_AFlippedTileCarriesTheEnginesTransform(t *testing.T) {

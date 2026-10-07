@@ -81,8 +81,9 @@ func Render(slug string, data Data) templ.Component {
 // event, a save or another tab's edit, would re-render the view as it was and
 // undo whatever has happened since.
 //
-// Seeded here and then let go of. `hide<N>` starts from what the *file* says,
-// so a layer the map hides comes up hidden and its eye can still turn it on.
+// Seeded here and then let go of. Each hide signal starts from what the *file*
+// says and follows a stable layer ID when one exists. layerID keeps paint
+// selection attached to that layer if a menu changes the file order.
 func MapSignals(data Data) string {
 	var b strings.Builder
 	b.WriteString(`{"zoom":`)
@@ -96,9 +97,15 @@ func MapSignals(data Data) string {
 	b.WriteString(`,"group":0`)
 	b.WriteString(`,"tile":0,"layer":`)
 	b.WriteString(strconv.Itoa(activeLayerIndex(data.Canvas)))
+	b.WriteString(`,"layerID":`)
+	if i := activeLayerIndex(data.Canvas); i < len(data.Canvas.Layers) {
+		b.WriteString(strconv.Itoa(data.Canvas.Layers[i].ID))
+	} else {
+		b.WriteByte('0')
+	}
 	for _, layer := range data.Canvas.Layers {
 		b.WriteString(`,"`)
-		b.WriteString(HideSignal(layer.Index))
+		b.WriteString(LayerHideSignal(layer.ID, layer.Index))
 		b.WriteString(`":`)
 		b.WriteString(strconv.FormatBool(layer.HiddenInFile))
 	}

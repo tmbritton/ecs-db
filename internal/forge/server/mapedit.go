@@ -23,6 +23,9 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/spawn/delete", s.sameOriginOnly(s.handleSpawnDelete))
 	mux.HandleFunc("POST /forge/map/spawn/component", s.sameOriginOnly(s.handleSpawnComponent))
 	mux.HandleFunc("POST /forge/map/spawn/property", s.sameOriginOnly(s.handleSpawnProperty))
+	mux.HandleFunc("POST /forge/map/spawn/duplicate", s.sameOriginOnly(s.handleSpawnDuplicate))
+	mux.HandleFunc("POST /forge/map/layer", s.sameOriginOnly(s.handleMapLayer))
+	mux.HandleFunc("POST /forge/map/menu", s.sameOriginOnly(s.handleMapMenu))
 }
 
 // mapSession answers with the session or writes the reason there is none.
@@ -202,6 +205,9 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 	// which layers are drawn are signals the browser owns — see modes.MapView
 	// for why they had to stop being query parameters.
 	data.MapView = modes.MapView{Path: data.SelectedMap}
+	if open := s.openMapMenu(); open.Open && open.Path == data.SelectedMap {
+		data.MapMenu = open
+	}
 	// Only where it is drawn. Resolving a map means parsing it and reading its
 	// tilesets, and no mode but MAP renders a cell of it.
 	if slug != "map" || data.SelectedMap == "" {

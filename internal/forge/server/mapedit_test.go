@@ -582,7 +582,7 @@ func TestMapCanvas_HidingALayerIsAViewAndNotAnEdit(t *testing.T) {
 	if !strings.Contains(body, `class="map-layer"`) {
 		t.Errorf("the cells are not grouped by layer:\n%s", body)
 	}
-	if !strings.Contains(body, "$hide0") {
+	if !strings.Contains(body, "$hideID1") {
 		t.Errorf("the layer group does not hide from a signal:\n%s", body)
 	}
 
@@ -635,8 +635,8 @@ func unescaped(body string) string {
 	return strings.NewReplacer("&#34;", `"`, "&#39;", "'", "&amp;", "&").Replace(body)
 }
 
-// There is one link left on the page, and it is the only one that should be:
-// choosing which map to edit. Everything else became a button over a signal.
+// The page's map links navigate to a file or select a spawn. View signals never
+// go into those links; mutation requests may name a layer by index instead.
 //
 // A link is a navigation, and a navigation is ~92ms, a document teardown and a
 // fresh SSE connection. That is the right price for opening a different file
@@ -647,9 +647,15 @@ func TestMapCanvas_OnlyChoosingAMapIsStillALink(t *testing.T) {
 	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured))
 
 	main := body[strings.Index(body, `id="mode-content"`):]
-	for _, gone := range []string{"hide=", "layer=", "zoom=", "tile="} {
-		if strings.Contains(main, gone) {
-			t.Errorf("view state is still in a link (%s):\n%s", gone, main)
+	links := regexp.MustCompile(`href="([^"]+)"`).FindAllStringSubmatch(main, -1)
+	for _, link := range links {
+		if !strings.HasPrefix(link[1], "/forge/map?") {
+			continue
+		}
+		for _, gone := range []string{"hide=", "layer=", "zoom=", "tile="} {
+			if strings.Contains(link[1], gone) {
+				t.Errorf("view state is still in a map link (%s): %s", gone, link[1])
+			}
 		}
 	}
 	if !strings.Contains(main, "/forge/map?map=") {
@@ -755,7 +761,7 @@ func TestMapCanvas_TheActiveLayerIsTheBrowsers(t *testing.T) {
 		t.Errorf("the page does not open painting into a layer:\n%s", body)
 	}
 	// The status line names it from the signal rather than from the render.
-	if !strings.Contains(body, "'painting ' + (['ground'][$layer]") {
+	if !strings.Contains(body, "'painting ' + ($layerID === 1 ? 'ground'") {
 		t.Errorf("the status line does not read the layer signal:\n%s", body)
 	}
 }
@@ -769,7 +775,7 @@ func TestMapCanvas_TheEyeAndTheNameAreDifferentControls(t *testing.T) {
 	if !strings.Contains(body, `data-testid="layer-eye-ground"`) {
 		t.Errorf("the row has no visibility toggle:\n%s", body)
 	}
-	if !strings.Contains(body, "$hide0 = !$hide0") {
+	if !strings.Contains(body, "$hideID1 = !$hideID1") {
 		t.Errorf("the eye does not toggle visibility:\n%s", body)
 	}
 	if !strings.Contains(body, "$layer = 0") {
@@ -809,7 +815,7 @@ func TestMapCanvas_ALayerTheFileHidesStartsHiddenAndCanBeShown(t *testing.T) {
 		t.Errorf("a layer the file hides was left out of the canvas:\n%s", body)
 	}
 	// And not shown, because that is what the file says.
-	if !strings.Contains(body, `"hide0":true`) {
+	if !strings.Contains(body, `"hideID1":true`) {
 		t.Errorf("the page does not start with the layer hidden:\n%s", body)
 	}
 	if !strings.Contains(body, `data-testid="layer-file-hidden-ground"`) {

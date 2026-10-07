@@ -162,6 +162,11 @@ type Server struct {
 	// one session and the modes render from it. Two browsers on one Forge see
 	// each other's menu. Recorded rather than dressed up.
 	canvasMenu CanvasMenu
+	// MAP's right-click menu, on the same per-server terms as canvasMenu.
+	mapMenu modes.MapMenu
+	// An opening token distinguishes a queued action from a newer opening of
+	// the same menu target. Kept under mu with mapMenu.
+	mapMenuSeq uint64
 	// renamedTo follows components through renames.
 	//
 	// A page subscribes to its stream with the component it is showing, and
@@ -278,6 +283,7 @@ func (s *Server) handleMode(w http.ResponseWriter, r *http.Request) {
 	// was clicked away.
 	s.setEditProblem("")
 	s.closeCanvasMenu()
+	s.closeMapMenu()
 	s.hold(saveNone)
 	// And tell the other tabs, because those three fields are per-server and
 	// every open page renders them. This is a GET, so it is not wrapped by

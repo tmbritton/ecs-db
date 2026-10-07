@@ -27,6 +27,19 @@ func TestMapView_SwitchingMapsPointsAtTheNewOne(t *testing.T) {
 	}
 }
 
+func TestMapSignals_LayerIdentitySurvivesReorder(t *testing.T) {
+	data := mapRegionFixture()
+	data.Canvas.Layers = []mapcanvas.Layer{
+		{Index: 0, ID: 3, Name: "props"}, {Index: 1, ID: 1, Name: "ground"},
+	}
+	markup := MapSignals(data) + render(t, mapLayers(data))
+	for _, want := range []string{`"layerID":3`, `"hideID3":false`, `"hideID1":false`, "$layerID === 3", "$hideID3"} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("layer view state is still indexed after a move: missing %q", want)
+		}
+	}
+}
+
 // CSS matrix(a,b,c,d,e,f) is column-major — x' = a·x + c·y + e — and the
 // engine's Matrix is written the other way round, so b and c swap crossing
 // over. Getting it wrong flips every rotated tile about the wrong axis, which

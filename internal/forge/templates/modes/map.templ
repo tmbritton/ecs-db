@@ -205,6 +205,9 @@ templ mapCanvas(data Data) {
 			data-style={ "{'--map-zoom': $zoom}" }
 			data-attr:data-cell-w={ "$zoom * " + itoa(data.Canvas.TileW) }
 			data-attr:data-cell-h={ "$zoom * " + itoa(data.Canvas.TileH) }
+			data-on:contextmenu={ mapCanvasMenuAction(data.SelectedMap) }
+			tabindex="0"
+			aria-label="Map canvas; right-click a tile to pick it"
 			data-on:paintstroke={ strokeAction(data) }
 			data-on:spawndrop={ spawnDropAction(data.SelectedMap) }
 		>
@@ -270,6 +273,7 @@ templ mapCanvas(data Data) {
 								title={ obj.Type + " · object " + itoa(obj.ID) }
 								draggable="true"
 								data-on:dragstart={ "evt.dataTransfer.setData('text/plain', 'move:" + itoa(obj.ID) + "')" }
+								data-on:contextmenu={ mapMenuAction(data.SelectedMap, "spawn", "id", itoa(obj.ID)) }
 							>{ obj.Type }</a>
 						}
 					}
@@ -312,7 +316,8 @@ templ mapLayers(data Data) {
 			data-class={ layerRowClasses(l) }
 			data-testid={ "layer-" + l.Name }
 			data-attr:data-hidden={ flag(hideSignal(l)) }
-			data-attr:data-active={ flag(eq("$layer", uint32(l.Index))) }
+			data-attr:data-active={ flag(selectedLayerExpr(l)) }
+			data-on:contextmenu={ mapMenuAction(data.SelectedMap, "layer", "layer", itoa(l.Index)) }
 		>
 			<button
 				type="button"
@@ -327,11 +332,11 @@ templ mapLayers(data Data) {
 			>{ eyeSeed(l) }</button>
 			<button
 				type="button"
-				data-on:click={ "$layer = " + itoa(l.Index) }
+				data-on:click={ selectLayerAction(l) }
 				class="layer-row__name"
 				data-testid={ "layer-select-" + l.Name }
 				title="paint into this layer"
-				data-attr:aria-current={ flag(eq("$layer", uint32(l.Index))) }
+				data-attr:aria-current={ flag(selectedLayerExpr(l)) }
 			>{ l.Name }</button>
 			if l.HiddenInFile {
 				<span class="badge-override mono" data-testid={ "layer-file-hidden-" + l.Name }>file</span>
@@ -349,6 +354,26 @@ templ mapLayers(data Data) {
 		imports a hidden layer's tiles either way. The highlighted layer is the one
 		a stroke lands on.
 	</p>
+}
+
+// One fixed-position menu, outside the scroll container and inside the small
+// head region. Opening it does not re-send hundreds of canvas cells.
+templ mapContextMenu(data Data) {
+	if data.MapMenu.Open {
+		<div
+			class="ctx-menu__at"
+			style={ mapMenuStyle(data.MapMenu) }
+			data-testid="map-context-menu"
+			data-on:keydown__window={ "evt.key === 'Escape' && " + mapCloseAction(data.MapMenu) }
+			data-on:click__window={ "!el.contains(evt.target) && " + mapCloseAction(data.MapMenu) }
+		>
+			@components.ContextMenu(components.ContextMenuProps{
+				Title: mapMenuTitle(data.MapMenu),
+				Items: mapMenuItems(data.MapMenu),
+				Autofocus: true,
+			})
+		</div>
+	}
 }
 
 // The palette, by tileset. A collection tileset shows its tiles' own pictures,

@@ -76,6 +76,17 @@ func (s *Server) handleSpawnDelete(w http.ResponseWriter, r *http.Request) {
 		s.refuseMapEdit(w, r, err)
 		return
 	}
+	if r.URL.Query().Has("token") && !s.takeSpawnMenu(w, r, id) {
+		return
+	}
+	if !r.URL.Query().Has("token") {
+		// The inspector has no menu token. If it deletes the spawn a menu is
+		// about, dismiss only that opening, not a newer one from another tab.
+		if menu := s.openMapMenu(); menu.Open && menu.Kind == "spawn" &&
+			menu.ObjectID == id && menu.Path == r.URL.Query().Get("map") {
+			s.closeMapMenuIf(menu.Token)
+		}
+	}
 	s.editSpawn(w, r, func(d *tiled.Document) error { return spawn.Delete(d, id) })
 }
 

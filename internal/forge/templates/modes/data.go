@@ -62,6 +62,9 @@ type Data struct {
 	MissingSpawn  int
 	SpawnErrors   []string
 	SpawnWarnings []string
+	// MapMenu is the one MAP context menu currently open on this server, if its
+	// target belongs to the map this page is showing.
+	MapMenu MapMenu
 	// MapView is the URL's view state — which map, which layers Forge is
 	// hiding, which tile is selected — and is what every link in the mode is
 	// built from, so none of them can drop part of it.
@@ -191,6 +194,24 @@ type Data struct {
 	// data, and the confirmation is on screen. The statements it lists come
 	// from Migration, not from a copy taken when the save was attempted.
 	Confirming bool
+}
+
+// MapMenu is one right-click target and its identity at open time. It is kept
+// by the server, not by the browser: the rendered action and the target it
+// changes must agree across a page-stream patch.
+type MapMenu struct {
+	Open                   bool
+	Kind, Path             string
+	Token                  string // identifies this opening, even after the same target is reopened
+	Layer, LayerID         int
+	ViewID                 int // stable only when the Tiled ID is unique
+	LayerName              string
+	CanMoveUp, CanMoveDown bool
+	CanDelete              bool
+	ObjectID               int
+	X, Y                   float64 // viewport coordinates for a fixed-position menu
+	CellX, CellY           int
+	Tile                   tiled.Tile
 }
 
 // CanvasMenu is the statechart's right-click menu: what it is about, and where
