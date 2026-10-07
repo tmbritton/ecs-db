@@ -462,3 +462,94 @@ func turnLabelExpr() string {
 func turnLabelSeed() string {
 	return "stamp " + turnLabelList()[turnKeyOf(tiled.Tile{})]
 }
+
+// The pointer surface's half of the boundary with static/js/paint.js.
+//
+// The module dispatches one `paintstroke` event carrying where a gesture
+// started, where it ended, and every cell it covered. Which of those three the
+// server is meant to act on is the tool's business, and the tool is a signal —
+// so the choice is made here, in an expression, rather than in a module that is
+// not allowed to know what a tool is.
+
+// strokeAction turns a completed gesture into a request.
+//
+// The map is named rather than left to mapShown's default. The default is the
+// map the page resolved and would be right, but a second tab editing another
+// map is exactly the case where "whatever the server would pick" and "what you
+// were looking at" come apart.
+func strokeAction(data Data) string {
+	where := "'/forge/map/paint?map=" + urlValue(data.SelectedMap) +
+		"&x=' + evt.detail.x + '&y=' + evt.detail.y"
+	return "$tool === '" + string(paint.Fill) + "' " +
+		"? @post(" + where + " + '&x2=' + evt.detail.x2 + '&y2=' + evt.detail.y2) " +
+		": @post(" + where + " + '&cells=' + evt.detail.cells)"
+}
+
+// ghostNoteExpr is the label beside the ghost stamp: what a click would do,
+// right now, in words.
+//
+// The tool as well as the orientation, because "stamp 90°" printed beside an
+// eraser describes a stroke that is not the one about to happen. Erase has no
+// orientation to report — the empty cell has no facing — so it says only what
+// it is.
+func ghostNoteExpr() string {
+	return "$tool === '" + string(paint.Erase) + "' ? 'erase' : " +
+		"($tool + ' ' + " + turnLabels() + "[" + turnKey + "])"
+}
+
+// marqueeClass shows the drag rectangle for the one tool that means a
+// rectangle.
+//
+// paint.js sets the rectangle's coordinates and a class saying a drag is under
+// way; it does not know which tool is chosen and must not. So the two halves of
+// the condition come from opposite sides — the pointer says "dragging", the
+// signal says "fill" — and CSS is where they meet.
+//
+// Deliberately not shown for the stamp and the eraser. Those follow the pointer,
+// so a rectangle drawn round a curved drag would promise cells the stroke is not
+// going to paint.
+func marqueeClass() string {
+	return "{'map-marquee--on': $tool === '" + string(paint.Fill) + "'}"
+}
+
+// The grid, as a signal like every other view control on this page.
+
+func gridToggle() string { return "$grid = !$grid" }
+
+func gridClass() string { return "{'map-canvas__grid--off': !$grid}" }
+
+func gridTitleExpr() string {
+	return "$grid ? 'hide the grid' : 'show the grid'"
+}
+
+// shortcutAction is the prototype's tool shortcuts: B stamp, R rect fill, E
+// eraser, Q turn, X mirror, G grid.
+//
+// The prototype also lists Select (M). There is no select tool — no paint.Kind,
+// no route, nothing a selection could mean to the server — and a shortcut that
+// chooses a tool which does not exist is worse than no shortcut.
+//
+// data-on compiles its expression as a function body rather than an expression,
+// so this can be statements and can return early. That is what makes the guards
+// readable, and they are the important part: without them every letter typed
+// into a name field would also change the tool.
+//
+// No regexp literal. Datastar rewrites $name and @name( in the expression text
+// before compiling it, and a literal is not a place it stops looking.
+func shortcutAction() string {
+	d, h, v := turnTables()
+	return "if (evt.ctrlKey || evt.metaKey || evt.altKey) return;" +
+		"const t = evt.target;" +
+		"if (t && (t.isContentEditable || ['INPUT','TEXTAREA','SELECT'].includes(t.tagName))) return;" +
+		"const key = evt.key.toLowerCase();" +
+		"if (key === 'b') $tool = '" + string(paint.Stamp) + "';" +
+		"else if (key === 'r') $tool = '" + string(paint.Fill) + "';" +
+		"else if (key === 'e') $tool = '" + string(paint.Erase) + "';" +
+		// The same tables the turn button uses, not a second copy of the cycle:
+		// two spellings of a rotation that is not guessable by eye is two
+		// spellings that will drift, and nothing would report it.
+		"else if (key === 'q') { const k = " + turnKey + ";" +
+		"$flipD = " + d + "[k]; $flipH = " + h + "[k]; $flipV = " + v + "[k]; }" +
+		"else if (key === 'x') $flipH = !$flipH;" +
+		"else if (key === 'g') " + gridToggle() + ";"
+}

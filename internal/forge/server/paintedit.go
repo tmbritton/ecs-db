@@ -1,9 +1,11 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/starfederation/datastar-go/datastar"
 
@@ -37,10 +39,10 @@ type paintSignals struct {
 
 // handlePaint applies one stroke.
 //
-// One request per stroke, however many cells it covered: a drag arrives as two
-// corners and becomes one entry in the session and one patch on the wire. Forty
-// requests for a forty-cell drag would be forty saves' worth of churn for one
-// gesture.
+// One request per stroke, however many cells it covered: a drag arrives as its
+// two ends and the trail between them, and becomes one entry in the session and
+// one patch on the wire. Forty requests for a forty-cell drag would be forty
+// saves' worth of churn for one gesture.
 func (s *Server) handlePaint(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.mapSession(w)
 	if !ok {
@@ -76,11 +78,22 @@ func (s *Server) handlePaint(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The cells the pointer actually went through, when there was a pointer.
+	// Absent is a click, or any caller without one; empty is a stroke that says
+	// it went nowhere, which is a different thing and is refused rather than
+	// quietly falling back to the rectangle.
+	trail, err := trailFrom(q)
+	if err != nil {
+		s.refuseMapEdit(w, r, err)
+		return
+	}
+
 	op := paint.Op{
 		Kind:  paint.Kind(sig.Tool),
 		Layer: sig.Layer,
 		From:  from,
 		To:    to,
+		Cells: trail,
 		Tile:  tiled.Tile{GID: sig.Tile, FlipH: sig.FlipH, FlipV: sig.FlipV, FlipD: sig.FlipD},
 		// modes.HideSignal, not a literal: the page names these signals, and a
 		// name built separately here would silently stop matching.
@@ -147,6 +160,46 @@ func signalsFrom(raw map[string]any) paintSignals {
 func number(v any) float64 {
 	f, _ := v.(float64)
 	return f
+}
+
+// trailFrom reads the cells a pointer-driven stroke covered: a flat list of
+// coordinates, x then y, in the order the pointer reached them.
+//
+// Flat rather than a JSON array in the body, because the body is the page's
+// signals and a stroke's path is not one — it changes with every gesture and
+// would then travel with every other request the page makes for the rest of its
+// life. The page emits each cell once, so its own strokes can never name more
+// cells than the map has; the length of anything else that arrives here is
+// bounded by the server's header limit, and every cell in it is checked against
+// the layer before a single one is written.
+//
+// A missing parameter is no trail and no error: a click has none, and neither
+// does Fill, which means the rectangle its ends span whatever else it is sent.
+func trailFrom(q map[string][]string) ([]paint.Cell, error) {
+	vals := q["cells"]
+	if len(vals) == 0 {
+		return nil, nil
+	}
+	parts := strings.Split(vals[0], ",")
+	if len(parts) == 1 && parts[0] == "" {
+		return nil, errors.New("the trail names no cells, so there is nothing to paint")
+	}
+	if len(parts)%2 != 0 {
+		return nil, fmt.Errorf("a trail is pairs of coordinates, and that is %d of them", len(parts))
+	}
+	out := make([]paint.Cell, 0, len(parts)/2)
+	for i := 0; i < len(parts); i += 2 {
+		x, err := strconv.Atoi(parts[i])
+		if err != nil {
+			return nil, fmt.Errorf("which cell (trail, %d): %w", i/2, err)
+		}
+		y, err := strconv.Atoi(parts[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("which cell (trail, %d): %w", i/2, err)
+		}
+		out = append(out, paint.Cell{X: x, Y: y})
+	}
+	return out, nil
 }
 
 func cellFrom(q map[string][]string, xKey, yKey string) (paint.Cell, error) {

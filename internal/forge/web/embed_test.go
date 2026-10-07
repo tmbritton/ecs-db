@@ -15,6 +15,7 @@ func TestStatic_RequiredAssetsArePresent(t *testing.T) {
 		"js/vendor/datastar.js",
 		"js/vendor/VERSION",
 		"js/canvas.js",
+		"js/paint.js",
 		"js/autofocus.js",
 		"css/fonts.css",
 		"css/forge.css",

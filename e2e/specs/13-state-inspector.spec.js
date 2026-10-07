@@ -94,6 +94,9 @@ test("the action catalogue is the registry's, gated as the engine gates it", asy
   await selectState(page, "idle");
   const options = byTestId(page, "add-entry-action").locator("option");
 
+  // Selection patches the inspector over SSE. evaluateAll on an empty locator
+  // returns [] immediately; wait for the catalogue before reading its values.
+  await expect(options.filter({ hasText: /^dealDamage/ })).toHaveCount(1);
   const values = await options.evaluateAll((els) => els.map((e) => e.value));
   expect(values).toContain("dealDamage");
   expect(values).toContain("setAnimation");

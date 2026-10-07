@@ -1,6 +1,8 @@
 package paint_test
 
 import (
+	"math"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -148,6 +150,48 @@ func TestApply_RefusesWhatItCannotDo(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("refused with %q, which does not say %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestApply_RefusesUnboundedRectangleBeforeAllocating(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind paint.Kind
+	}{
+		{"fill", paint.Fill},
+		{"stamp without trail", paint.Stamp},
+		{"erase without trail", paint.Erase},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := paint.Apply(mapOf(), paint.Op{
+				Kind: tc.kind, Tile: tiled.Tile{GID: 7},
+				From: paint.Cell{}, To: paint.Cell{X: math.MaxInt},
+			})
+			if err == nil || !strings.Contains(err.Error(), "outside") {
+				t.Fatalf("unbounded rectangle: got %v, want bounds error", err)
+			}
+		})
+	}
+}
+
+func TestApply_RefusesTrailWithInvalidEndpoints(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		from, to paint.Cell
+	}{
+		{"origin", paint.Cell{X: 99}, paint.Cell{}},
+		{"destination", paint.Cell{}, paint.Cell{Y: 99}},
+		{"trail disagrees with origin", paint.Cell{X: 1}, paint.Cell{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := paint.Apply(mapOf(), paint.Op{
+				Kind: paint.Stamp, Tile: tiled.Tile{GID: 7},
+				From: tc.from, To: tc.to, Cells: []paint.Cell{{}},
+			})
+			if err == nil {
+				t.Fatal("inconsistent or out-of-bounds trail was accepted")
 			}
 		})
 	}
@@ -470,5 +514,151 @@ func TestApply_RefusesAStampWithNothingInHand(t *testing.T) {
 	// Erase is the one tool that means something with an empty hand.
 	if _, err := paint.Apply(mapOf(), paint.Op{Kind: paint.Erase, Layer: 0, From: at, To: at}); err != nil {
 		t.Errorf("erase with nothing in hand was refused: %v", err)
+	}
+}
+
+// A stroke that followed a pointer paints where the pointer went, and not the
+// rectangle its two ends happen to span. Until Story 5 nothing could drag
+// diagonally, so the two were the same thing for every gesture that existed;
+// with a pointer, a four-cell diagonal drag used to paint sixteen.
+func TestStamp_FollowsTheCellsTheStrokeVisited(t *testing.T) {
+	m := mapOf(1, 1, 1, 1, 1, 1)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Stamp, Layer: 0,
+		From: paint.Cell{X: 0, Y: 0}, To: paint.Cell{X: 1, Y: 1},
+		// The two ends and nothing else: the rectangle between them is four
+		// cells, and this diagonal is two.
+		Cells: []paint.Cell{{X: 0, Y: 0}, {X: 1, Y: 1}},
+		Tile:  tiled.Tile{GID: 5},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []uint32{5, 1, 1, 1, 5, 1}
+	if !reflect.DeepEqual(got.Data, want) {
+		t.Errorf("painted %v, want %v — the cells between the ends were painted too", got.Data, want)
+	}
+}
+
+// Erase follows the pointer the same way. It is the tool most likely to be
+// dragged in a curve, and a rectangle is exactly what nobody means by it.
+func TestErase_FollowsTheCellsTheStrokeVisited(t *testing.T) {
+	m := mapOf(7, 7, 7, 7, 7, 7)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Erase, Layer: 0,
+		From: paint.Cell{X: 0, Y: 0}, To: paint.Cell{X: 2, Y: 1},
+		Cells: []paint.Cell{{X: 0, Y: 0}, {X: 1, Y: 1}, {X: 2, Y: 1}},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []uint32{0, 7, 7, 7, 0, 0}
+	if !reflect.DeepEqual(got.Data, want) {
+		t.Errorf("erased %v, want %v", got.Data, want)
+	}
+}
+
+// Fill is the tool that means the rectangle, so it ignores the trail even when
+// one is sent. The page sends every description of a gesture with every stroke
+// and the tool decides which one is meant; a Fill that quietly followed the
+// pointer would make the two buttons the same button again.
+func TestFill_IgnoresTheTrailAndSpansTheCorners(t *testing.T) {
+	m := mapOf(1, 1, 1, 1, 1, 1)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Fill, Layer: 0,
+		From: paint.Cell{X: 0, Y: 0}, To: paint.Cell{X: 1, Y: 1},
+		Cells: []paint.Cell{{X: 0, Y: 0}, {X: 1, Y: 1}},
+		Tile:  tiled.Tile{GID: 5},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []uint32{5, 5, 1, 5, 5, 1}
+	if !reflect.DeepEqual(got.Data, want) {
+		t.Errorf("filled %v, want %v — the rectangle is what Fill means", got.Data, want)
+	}
+}
+
+// A click sends no trail, and is then the rectangle of one cell its two equal
+// ends span. That is the same request a drag inside one cell produces, which is
+// the point: they are the same gesture.
+func TestStamp_WithNoTrailIsTheRectangle(t *testing.T) {
+	m := mapOf(1, 1, 1, 1, 1, 1)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Stamp, Layer: 0,
+		From: paint.Cell{X: 2, Y: 0}, To: paint.Cell{X: 2, Y: 0},
+		Tile: tiled.Tile{GID: 5},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []uint32{1, 1, 5, 1, 1, 1}
+	if !reflect.DeepEqual(got.Data, want) {
+		t.Errorf("painted %v, want %v", got.Data, want)
+	}
+}
+
+// Both ends inside the map and a cell in the middle outside it. Checking the
+// ends is what a rectangle needs and is not enough for a trail — the trail is
+// a list, and nothing about the ends bounds what is between them.
+func TestApply_ChecksEveryCellOfATrail(t *testing.T) {
+	m := mapOf()
+	_, err := paint.Apply(m, paint.Op{
+		Kind: paint.Stamp, Layer: 0,
+		From: paint.Cell{X: 0, Y: 0}, To: paint.Cell{X: 2, Y: 1},
+		Cells: []paint.Cell{{X: 0, Y: 0}, {X: 9, Y: 0}, {X: 2, Y: 1}},
+		Tile:  tiled.Tile{GID: 5},
+	})
+	if err == nil {
+		t.Fatal("the trail was accepted with a cell off the map in it")
+	}
+	if !strings.Contains(err.Error(), "outside") {
+		t.Errorf("refused with %q, which does not say the cell is off the map", err)
+	}
+}
+
+// And nothing is written when one cell of a trail is refused: the whole stroke
+// is one operation, so a trail that leaves the map paints none of itself rather
+// than the part that happened to be checked first.
+func TestApply_WritesNothingWhenOneCellOfATrailIsOff(t *testing.T) {
+	m := mapOf()
+	before := append([]uint32(nil), m.Layers[0].Data...)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Stamp, Layer: 0,
+		From: paint.Cell{X: 0, Y: 0}, To: paint.Cell{X: 0, Y: 0},
+		Cells: []paint.Cell{{X: 0, Y: 0}, {X: 1, Y: 0}, {X: 3, Y: 0}},
+		Tile:  tiled.Tile{GID: 5},
+	})
+	if err == nil {
+		t.Fatal("the trail was accepted")
+	}
+	if got.Changed || got.Data != nil {
+		t.Errorf("a refused stroke came back with data: %+v", got)
+	}
+	if !reflect.DeepEqual(m.Layers[0].Data, before) {
+		t.Errorf("the map was written anyway: %v", m.Layers[0].Data)
+	}
+}
+
+// An empty trail that is a slice rather than a nil is still no trail: the
+// caller has a pointer and it went nowhere, which is a click. Only the route
+// can tell the difference between "there was no cells= parameter" and "there
+// was an empty one", and it refuses the second before it gets here — so what
+// this pins is that Apply has one meaning for both, rather than a third for the
+// one nobody can reach.
+func TestApply_AnEmptyTrailIsNoTrail(t *testing.T) {
+	m := mapOf(1, 1, 1, 1, 1, 1)
+	got, err := paint.Apply(m, paint.Op{
+		Kind: paint.Stamp, Layer: 0,
+		From: paint.Cell{X: 1, Y: 0}, To: paint.Cell{X: 1, Y: 0},
+		Cells: []paint.Cell{},
+		Tile:  tiled.Tile{GID: 5},
+	})
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	want := []uint32{1, 5, 1, 1, 1, 1}
+	if !reflect.DeepEqual(got.Data, want) {
+		t.Errorf("painted %v, want %v — an empty trail painted nothing at all", got.Data, want)
 	}
 }

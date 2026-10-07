@@ -90,6 +90,9 @@ func MapSignals(data Data) string {
 	// The tool and the stamp's orientation. They are the browser's, and travel
 	// to the server with each stroke; see turnAction.
 	b.WriteString(`,"tool":"stamp","flipH":false,"flipV":false,"flipD":false`)
+	// The grid is drawn, like Tiled's and like the prototype's default. View
+	// state, never written to the file — it is scaffolding for the eye.
+	b.WriteString(`,"grid":true`)
 	b.WriteString(`,"tile":0,"layer":`)
 	b.WriteString(strconv.Itoa(activeLayerIndex(data.Canvas)))
 	for _, layer := range data.Canvas.Layers {

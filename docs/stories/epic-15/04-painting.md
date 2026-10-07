@@ -1,7 +1,7 @@
 # Story 4: Painting, server-side
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete
 **Priority:** High — the thing the mode is for
 
 **Depends on:** Story 3

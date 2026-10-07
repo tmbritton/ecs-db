@@ -1,7 +1,7 @@
 # Story 5: Painting, the pointer surface
 
 **Epic:** 15 — Forge: MAP mode (AUTHORED)  
-**Status:** 🔲 Not started  
+**Status:** ✅ Complete
 **Priority:** High — without it the mode is unusable, with it the mode is done
 
 **Depends on:** Story 4

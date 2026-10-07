@@ -361,3 +361,131 @@ func keysOf(m map[string]any) []string {
 	sort.Strings(out)
 	return out
 }
+
+// A stroke that followed a pointer paints where the pointer went. The two ends
+// here span the whole 2x2 map; the trail is its diagonal, and the two cells off
+// that diagonal must be untouched.
+func TestPaint_FollowsTheTrailAndNotTheRectangle(t *testing.T) {
+	srv, s, _, configured := mapServer(t)
+	before := layerData(t, s, configured)
+	if before[1] == 1 {
+		t.Fatalf("the fixture changed: cell (1,0) already holds the tile in hand: %v", before)
+	}
+
+	code := postSignals(t, srv,
+		"/forge/map/paint?map="+url.QueryEscape(configured)+"&x=0&y=0&x2=1&y2=1&cells=0,0,1,1",
+		held("stamp", 1))
+	if code != 204 {
+		t.Fatalf("paint = %d (%s)", code, problemOf(s))
+	}
+
+	after := layerData(t, s, configured)
+	if after[0] != 1 || after[3] != 1 {
+		t.Errorf("the diagonal was not painted: %v", after)
+	}
+	if after[1] != before[1] || after[2] != before[2] {
+		t.Errorf("the rectangle was painted, not the trail: %v -> %v", before, after)
+	}
+}
+
+// The coordinates are read x first. A symmetric trail cannot tell — 0,0,1,1
+// transposes to itself — so this one is deliberately off the diagonal, and a
+// stroke read the other way round lands a row away from where it was drawn.
+func TestPaint_ReadsTheTrailXFirst(t *testing.T) {
+	srv, s, _, configured := mapServer(t)
+
+	// The 2x2 fixture is [2,2 / 2,1]: cell (1,0) is index 1 and cell (0,1) is
+	// index 2, so a transposition is visible rather than a coincidence.
+	code := postSignals(t, srv,
+		"/forge/map/paint?map="+url.QueryEscape(configured)+"&x=1&y=0&cells=1,0",
+		held("stamp", 1))
+	if code != 204 {
+		t.Fatalf("paint = %d (%s)", code, problemOf(s))
+	}
+
+	after := layerData(t, s, configured)
+	if after[1] != 1 {
+		t.Errorf("cell (1,0) is %d, want the tile in hand: %v", after[1], after)
+	}
+	if after[2] != 2 {
+		t.Errorf("cell (0,1) was painted, so the pair was read y first: %v", after)
+	}
+}
+
+// Fill is sent the same trail — the page sends every description of a gesture
+// with every stroke and the tool decides which one is meant — and still fills
+// the rectangle. Without this the two toolbar buttons would be one button.
+func TestPaint_FillIgnoresTheTrailItWasSent(t *testing.T) {
+	srv, s, _, configured := mapServer(t)
+
+	code := postSignals(t, srv,
+		"/forge/map/paint?map="+url.QueryEscape(configured)+"&x=0&y=0&x2=1&y2=1&cells=0,0,1,1",
+		held("fill", 1))
+	if code != 204 {
+		t.Fatalf("fill = %d (%s)", code, problemOf(s))
+	}
+
+	for i, gid := range layerData(t, s, configured) {
+		if gid != 1 {
+			t.Errorf("cell %d is %d, want the whole 2x2 filled", i, gid)
+		}
+	}
+}
+
+// A trail is pairs of numbers. Anything else is a request nobody could have
+// meant, and reading it loosely is how half a stroke lands somewhere nobody
+// dragged.
+func TestPaint_RefusesATrailThatIsNotCells(t *testing.T) {
+	for _, tc := range []struct{ name, cells, says string }{
+		{"an odd number of coordinates", "0,0,1", "pairs"},
+		{"something that is not a number", "0,0,1,x", "trail"},
+		{"an empty coordinate", "0,0,,1", "trail"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, s, _, configured := mapServer(t)
+			before := layerData(t, s, configured)
+
+			code := postSignals(t, srv,
+				"/forge/map/paint?map="+url.QueryEscape(configured)+"&x=0&y=0&cells="+url.QueryEscape(tc.cells),
+				held("stamp", 1))
+			if code != 204 {
+				t.Fatalf("paint = %d, want the refusal on the page rather than a status", code)
+			}
+			problem := problemOf(s)
+			if !strings.Contains(problem, tc.says) {
+				t.Errorf("refused with %q, which does not say %q", problem, tc.says)
+			}
+			after := layerData(t, s, configured)
+			for i := range before {
+				if before[i] != after[i] {
+					t.Fatalf("a refused stroke painted anyway: %v -> %v", before, after)
+				}
+			}
+		})
+	}
+}
+
+// An empty cells= is a trail of no cells, which is not the same as no trail at
+// all: it is a request that says where it went and went nowhere. Falling back
+// to the rectangle would paint the click that started it, which is a cell the
+// stroke deliberately did not name.
+func TestPaint_RefusesATrailWithNoCellsInIt(t *testing.T) {
+	srv, s, _, configured := mapServer(t)
+	before := layerData(t, s, configured)
+
+	code := postSignals(t, srv,
+		"/forge/map/paint?map="+url.QueryEscape(configured)+"&x=0&y=0&cells=",
+		held("stamp", 1))
+	if code != 204 {
+		t.Fatalf("paint = %d", code)
+	}
+	if problem := problemOf(s); !strings.Contains(problem, "trail") {
+		t.Errorf("refused with %q, which does not mention the trail", problem)
+	}
+	after := layerData(t, s, configured)
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("an empty trail painted something: %v -> %v", before, after)
+		}
+	}
+}

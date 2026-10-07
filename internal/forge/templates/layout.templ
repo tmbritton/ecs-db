@@ -25,6 +25,10 @@ templ Layout(title string) {
 			// binding once from the document — the mode content is replaced by
 			// the page stream, so anything bound to it would die with it.
 			<script type="module" src="/static/js/canvas.js"></script>
+			// The map canvas's pointer handling, on the same terms: a module,
+			// loaded once, binding once from the document. Two hand-written
+			// pointer surfaces is the budget for the whole tool.
+			<script type="module" src="/static/js/paint.js"></script>
 			// The browser honours autofocus only on content the parser
 			// inserted, and everything the page stream delivers is built with
 			// DOM APIs instead. This makes the attribute mean what it says

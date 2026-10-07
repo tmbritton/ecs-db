@@ -49,6 +49,22 @@ type Op struct {
 	Layer int
 	// From and To are the ends of the stroke. A click has them equal.
 	From, To Cell
+	// Cells are the cells a pointer-driven stroke actually covered, in the
+	// order the caller reports them. Fill ignores it — the rectangle its two
+	// ends span is the whole meaning of that tool — and the tools that follow
+	// the pointer use it when it is there.
+	//
+	// Repeats are harmless rather than forbidden: writing a cell twice writes
+	// the same gid twice. The browser sends each once because a shorter request
+	// is worth having, not because anything here depends on it.
+	//
+	// Empty is a click, or any caller with no pointer behind it, and the stroke
+	// is then the rectangle From..To. That is the same thing for every gesture
+	// that could be made before there was a pointer surface, which is why the
+	// rectangle was all three tools until Story 5: a stamp dragged across the
+	// map is a rectangle one cell tall or wide only while the drag is straight,
+	// and a diagonal one paints its whole bounding box.
+	Cells []Cell
 	// Tile is what is in hand, flags and all — a rotated stamp is the same tile
 	// with different flags, not a different tile.
 	Tile tiled.Tile
@@ -98,11 +114,29 @@ func Apply(m *tiled.Map, op Op) (Result, error) {
 	}
 
 	layer := m.Layers[op.Layer]
+	// Check both ends before expanding a rectangle. Otherwise a far-out
+	// coordinate can allocate an unbounded slice (or overflow its capacity)
+	// before the ordinary per-cell check has a chance to refuse it.
 	if err := inside(layer, op.From); err != nil {
 		return Result{}, err
 	}
 	if err := inside(layer, op.To); err != nil {
 		return Result{}, err
+	}
+	if op.Kind != Fill && len(op.Cells) > 0 && op.Cells[0] != op.From {
+		return Result{}, errors.New("the trail does not start at the stroke origin")
+	}
+	// Every cell, not just the two ends. Checking the ends is what a rectangle
+	// needs, because they bound it; a trail is a list, and nothing about where
+	// it started and finished says anything about what is in between.
+	//
+	// Before the copy below, so a stroke that leaves the map paints none of
+	// itself rather than the part that came before the cell that was refused.
+	touched := cells(op)
+	for _, c := range touched {
+		if err := inside(layer, c); err != nil {
+			return Result{}, err
+		}
 	}
 
 	// Written into a copy, so the caller's map is untouched whatever happens.
@@ -123,10 +157,10 @@ func Apply(m *tiled.Map, op Op) (Result, error) {
 	}
 
 	changed := false
-	for _, c := range cells(op) {
+	for _, c := range touched {
 		i := c.Y*layer.Width + c.X
 		if i < 0 || i >= len(next) {
-			// Not unreachable, though both ends are checked above: a layer
+			// Not unreachable, though every cell is checked above: a layer
 			// off disk can declare a size larger than its data, and a cell
 			// inside the declared bounds is then still past the end. The
 			// alternative to this check is a panic in the middle of a save.
@@ -146,12 +180,23 @@ func Apply(m *tiled.Map, op Op) (Result, error) {
 
 // cells is every cell a stroke touches.
 //
-// A rectangle for all three tools, because a stamp dragged across the map is a
-// rectangle one cell tall or wide and a click is a rectangle of one cell. What
-// differs between the tools is what gets written, not where.
+// Fill is the rectangle its two ends span, always: that is what the tool means,
+// and a Fill that quietly followed the pointer would make it the same tool as
+// the stamp beside it. Everything else follows the pointer when the pointer
+// said where it went, and is the rectangle otherwise — which for a click is one
+// cell, and for a caller with no pointer behind it is what it always was.
 func cells(op Op) []Cell {
-	x0, x1 := order(op.From.X, op.To.X)
-	y0, y1 := order(op.From.Y, op.To.Y)
+	if op.Kind != Fill && len(op.Cells) > 0 {
+		return op.Cells
+	}
+	return rect(op.From, op.To)
+}
+
+// rect is every cell between two corners, both included, whichever way round
+// they were dragged.
+func rect(from, to Cell) []Cell {
+	x0, x1 := order(from.X, to.X)
+	y0, y1 := order(from.Y, to.Y)
 	out := make([]Cell, 0, (x1-x0+1)*(y1-y0+1))
 	for y := y0; y <= y1; y++ {
 		for x := x0; x <= x1; x++ {

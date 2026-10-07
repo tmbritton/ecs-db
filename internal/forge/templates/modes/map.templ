@@ -67,7 +67,17 @@ templ noMaps(data Data) {
 // running game's database — and each says which epic delivers it rather than
 // leaving a hole where the control goes.
 templ mapToolbar(data Data) {
-	<div class="map-toolbar" data-testid="map-toolbar">
+	// The shortcut binding is on the window rather than on the canvas: the
+	// canvas is not focusable, and reaching for a tool should not require having
+	// clicked one first. Guarded by Drawn() so the keys do nothing on a map with
+	// no tools on screen to change.
+	<div
+		class="map-toolbar"
+		data-testid="map-toolbar"
+		if data.Canvas.Drawn() {
+			data-on:keydown__window={ shortcutAction() }
+		}
+	>
 		<div class="segmented" role="group" aria-label="Source" data-testid="source-lens">
 			<span class="segmented__on" data-testid="lens-authored" aria-current="true">AUTHORED</span>
 			<button
@@ -151,6 +161,22 @@ templ mapToolbar(data Data) {
 			// blank gap until Datastar hydrates, and the stamp always starts
 			// upright anyway.
 			<span class="map-toolbar__note mono" data-testid="map-tools-note" data-text={ turnLabelExpr() }>{ turnLabelSeed() }</span>
+			// The grid is scaffolding for the eye and is never written to the
+			// file, which is why it is a signal beside the zoom rather than
+			// anything the server renders.
+			<div class="segmented" role="group" aria-label="Grid" data-testid="grid-control">
+				<button
+					type="button"
+					data-on:click={ gridToggle() }
+					class="segmented__link"
+					data-class="{'segmented__on': $grid}"
+					data-attr:data-current={ flag("$grid") }
+					data-attr:aria-pressed={ flag("$grid") }
+					data-testid="grid-toggle"
+					title="show or hide the grid"
+					data-attr:title={ gridTitleExpr() }
+				>#</button>
+			</div>
 		}
 	</div>
 }
@@ -163,6 +189,12 @@ templ mapCanvas(data Data) {
 		// Two boxes, because a transform does not change the box it is on: the
 		// outer one takes up the scaled space so the viewport scrolls right,
 		// the inner one is scaled and holds the cells at their own size.
+		//
+		// data-on:paintstroke is static/js/paint.js's other end. The module
+		// dispatches one event on release, having done the pointer arithmetic and
+		// nothing else; which of the gesture's three descriptions the request
+		// carries is decided from the tool signal here — see strokeAction, and
+		// the module's own opening comment for why it is not decided there.
 		<div
 			class="map-canvas"
 			data-testid="map-canvas"
@@ -170,11 +202,27 @@ templ mapCanvas(data Data) {
 			data-style={ "{'--map-zoom': $zoom}" }
 			data-attr:data-cell-w={ "$zoom * " + itoa(data.Canvas.TileW) }
 			data-attr:data-cell-h={ "$zoom * " + itoa(data.Canvas.TileH) }
+			data-on:paintstroke={ strokeAction(data) }
 		>
 			// The grid is outside the scaled box on purpose: inside it, an 8×
 			// zoom would draw 8px lines. Its own spacing scales by calc so the
 			// squares still line up with the tiles.
-			<div class="map-canvas__grid" aria-hidden="true"></div>
+			<div class="map-canvas__grid" aria-hidden="true" data-class={ gridClass() }></div>
+			// The ghost and the marquee. Server-rendered so that what they look
+			// like and what they say stay Datastar's; paint.js only writes where
+			// they are, as custom properties on the box above.
+			//
+			// Outside the scaled box, like the grid, so a 2px dashed border is
+			// 2px at every zoom rather than sixteen.
+			<div class="map-ghost" aria-hidden="true" data-testid="map-ghost">
+				<span class="map-ghost__note mono" data-testid="map-ghost-note" data-text={ ghostNoteExpr() }>{ turnLabelSeed() }</span>
+			</div>
+			<div
+				class="map-marquee"
+				aria-hidden="true"
+				data-testid="map-marquee"
+				data-class={ marqueeClass() }
+			></div>
 			<div class="map-canvas__scaled">
 				for _, l := range data.Canvas.Layers {
 					<div
