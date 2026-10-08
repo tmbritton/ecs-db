@@ -43,6 +43,8 @@ as sentences meant for a person. Call those, do not restate them.
 - [x] A layer whose size disagrees with the map's is reported — `checkShape`
       refuses it, and a map that imports as fewer cells than it has deletes the
       difference
+- [x] Missing, nonpositive or duplicate tile-layer IDs mark the affected rows
+      and explain why Forge cannot safely reorder or delete those layers
 - [x] Every problem is shown against the thing that caused it — a cell, a spawn,
       a layer, the map — not only in a list
 - [x] All problems at once, not the first: a map with three mistakes is fixed in
@@ -80,10 +82,13 @@ as sentences meant for a person. Call those, do not restate them.
   the ambiguity even if one claimant is untyped, and the TMX mutators refuse
   to move/delete either claimant. Invalid XML characters in a new mapId are
   refused before a working file is changed.
-- Verified: `make test`, both lint tag sets, both builds, and `make e2e` (295
+- Layer-ID findings are **Forge edit-safety checks**, not engine load refusals:
+  a freshly generated or hand-edited map can still paint, but an index-changing
+  edit requires unique positive IDs. Both claimants of a duplicate are marked.
+- Verified: `make test`, both lint tag sets, both builds, and `make e2e` (297
   passing browser checks). Four working maps with 50×50 cells validated in
   ~6.1 ms per benchmark iteration. Statement coverage: tilemap 91.6%, tiled
-  94.3%, Forge maps 88.8%, mapvalidation 95.0%, server 86.8%, mode templates
+  94.3%, Forge maps 88.8%, mapvalidation 95.5%, server 86.8%, mode templates
   70.3%.
 
 - **The messages are the engine's.** `tilemap` and `world` already write

@@ -193,7 +193,7 @@ type Layer struct {
 }
 
 // UniqueLayerID returns a layer's Tiled ID only when it identifies exactly one
-// layer. Old or malformed maps remain editable using index view signals, but
+// layer. Idless or malformed maps remain editable using index view signals, but
 // must not let two rows share an eye or route a stroke to a guessed first match.
 func UniqueLayerID(layers []tiled.Layer, index int) int {
 	if index < 0 || index >= len(layers) || layers[index].ID <= 0 {

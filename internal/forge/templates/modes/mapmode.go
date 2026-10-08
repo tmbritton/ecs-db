@@ -185,7 +185,7 @@ func HideSignal(layerIndex int) string { return "hide" + itoa(layerIndex) }
 
 // LayerHideSignal uses Tiled's stable layer ID when present. A page keeps view
 // signals across SSE patches; after a move, the same index names another layer.
-// Older files with no IDs retain index-based signals, and cannot be reordered.
+// Files missing a unique ID retain index-based signals and cannot reorder.
 func LayerHideSignal(id, index int) string {
 	if id > 0 {
 		return "hideID" + itoa(id)
@@ -333,8 +333,8 @@ func (v MapView) WithSpawn(id int) MapView { return MapView{Path: v.Path, Spawn:
 // reset visibility to what the file says and undo the eye on each push.
 //
 // Tiled's positive layer IDs keep these signals attached to the authored layer
-// when its position changes. Old files without IDs keep index signals and
-// cannot reorder layers until Tiled gives them IDs.
+// when its position changes. Files with missing or duplicated IDs use index
+// signals and cannot reorder layers until their IDs are repaired.
 func hideSeed(l mapcanvas.Layer) string {
 	return `{"` + hideSignalName(l) + `":` + strconv.FormatBool(l.HiddenInFile) + `}`
 }

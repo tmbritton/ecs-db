@@ -46,6 +46,35 @@ test("two maps with one mapId name both files", async ({ page }) => {
   await expect(byTestId(page, "map-identity-conflict")).toContainText("e2e-duplicate-id.tmx");
 });
 
+test("an idless tile layer shows why its reorder and delete are unavailable", async ({ page }) => {
+  const src = level.replace('value="e2e-level"', 'value="idless-layer"')
+    .replace('<layer id="1" name="ground"', '<layer name="ground"');
+  seed("e2e-idless-layer.tmx", src);
+  await openSeeded(page, "e2e-idless-layer.tmx");
+  await expect(byTestId(page, "layer-ground")).toHaveAttribute("data-invalid", "true");
+  await expect(byTestId(page, "layer-props")).toHaveAttribute("data-invalid", "false");
+  await expect(byTestId(page, "map-validation")).toContainText("positive Tiled ID");
+  const opened = page.waitForRequest((req) => req.url().includes("/forge/map/menu?") && req.method() === "POST");
+  await byTestId(page, "layer-ground").click({ button: "right" });
+  await opened;
+  await expect(byTestId(page, "map-context-menu")).toBeVisible();
+  await expect(byTestId(page, "map-context-menu").locator(".ctx-menu__item")).toHaveCount(2);
+});
+
+test("both layers with a duplicate ID get the collision, not only the second", async ({ page }) => {
+  const src = level.replace('value="e2e-level"', 'value="duplicate-layer-id"')
+    .replace('<layer id="3" name="props"', '<layer id="1" name="props"');
+  seed("e2e-duplicate-layer-id.tmx", src);
+  await openSeeded(page, "e2e-duplicate-layer-id.tmx");
+  for (const name of ["ground", "props"]) {
+    await expect(byTestId(page, `layer-${name}`)).toHaveAttribute("data-invalid", "true");
+  }
+  await expect(byTestId(page, "map-validation")).toContainText("ground");
+  await expect(byTestId(page, "map-validation")).toContainText("props");
+  await byTestId(page, "layer-props").click({ button: "right" });
+  await expect(byTestId(page, "map-context-menu").locator(".ctx-menu__item")).toHaveCount(2);
+});
+
 test("an unknown spawn class is flagged on its own marker and clears on reload", async ({ page }) => {
   const withSpawn = level.replace('value="e2e-level"', 'value="bad-class"')
     .replace('<objectgroup id="2" name="spawns"/>',

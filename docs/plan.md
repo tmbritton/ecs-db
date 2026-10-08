@@ -696,7 +696,8 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
 - [x] **Inline validation** — Engine-backed cell, layer, spawn and tileset findings appear together against their authors; a project-wide duplicate `mapId` names both maps.
   - Missing map identity warns in the engine's words; mapId edits preserve TMX and clear the warning without navigation. Partial previews keep valid cells and spawns visible even when other tilesets fail
   - Strict/warning entity contracts and property spellings use the engine's validator, duplicate object IDs mark both claimants, and a broken map can still be saved. Malformed layer shapes are named by the parser in project problems before a canvas can open
-  - Verified with `make test`, both lint tag sets, both builds and 295 passing browser checks; 4×50×50 validation ~6.1 ms/iteration; statement coverage: tilemap 91.6%, tiled 94.3%, Forge maps 88.8%, mapvalidation 95.0%, server 86.8%, mode templates 70.3%
+  - Forge now marks tile layers with missing, nonpositive or duplicate IDs and explains why those rows cannot reorder/delete, including in newly generated maps; both duplicate claimants are marked
+  - Verified with `make test`, both lint tag sets, both builds and 297 passing browser checks; 4×50×50 validation ~6.1 ms/iteration; statement coverage: tilemap 91.6%, tiled 94.3%, Forge maps 88.8%, mapvalidation 95.5%, server 86.8%, mode templates 70.3%
 
 ---
 

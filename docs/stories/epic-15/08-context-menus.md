@@ -64,10 +64,10 @@ treatment: recorded, not dressed up.
   eye changes remain view-only; layer rename, order and deletion edit the TMX.
   Duplication clones the object XML, allocating a new ID and keeping unknown
   authored content. Stable layer IDs keep the eye and paint selection attached
-  through a move; an absent selected layer refuses the next stroke. Legacy maps
-  without unique layer IDs can paint and rename, but refuse reorder/delete
-  until Tiled supplies identities. A stale
-  menu cannot mutate a renamed, reordered or removed layer.
+  through a move; an absent selected layer refuses the next stroke. A newly
+  hand-edited or generated map with missing/duplicate layer IDs can paint and
+  rename, but refuses reorder/delete until the IDs are repaired. A stale menu
+  cannot mutate a renamed, reordered or removed layer.
 
 - Reuse `templates/components`' menu primitives rather than writing a second
   menu. If the statechart's menu is not reusable as it stands, making it so is

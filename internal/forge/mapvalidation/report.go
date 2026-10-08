@@ -128,6 +128,30 @@ func Build(s *schema.DatabaseSchema, path string, m *tiled.Map, identities []Ide
 	for _, problem := range refs {
 		add(Issue{Kind: Tileset, Tileset: problem.Index, Message: problem.Err.Error()})
 	}
+	// Layer IDs are not an engine load requirement: it reads layers in file
+	// order. They are an editor identity requirement. A move/delete shifts
+	// indices, and without unique positive IDs an open tab's eye and paint
+	// selection could silently follow a different layer. Name the affected
+	// rows here, where the author can see why those actions are absent.
+	byLayerID := make(map[int][]int, len(m.Layers))
+	for i, layer := range m.Layers {
+		if layer.ID > 0 {
+			byLayerID[layer.ID] = append(byLayerID[layer.ID], i)
+		}
+	}
+	for i, layer := range m.Layers {
+		switch {
+		case layer.ID <= 0:
+			add(Issue{Kind: Layer, Layer: i, Message: fmt.Sprintf(
+				"layer %q at row %d has no positive Tiled ID; assign a unique positive Tiled ID before you can reorder or delete it",
+				layer.Name, i+1)})
+		case len(byLayerID[layer.ID]) > 1:
+			rows := byLayerID[layer.ID]
+			add(Issue{Kind: Layer, Layer: i, Message: fmt.Sprintf(
+				"tile layer ID %d is shared by %d layers (%q at row %d and %q at row %d); give each a unique positive Tiled ID before you can reorder or delete it",
+				layer.ID, len(rows), m.Layers[rows[0]].Name, rows[0]+1, m.Layers[rows[1]].Name, rows[1]+1)})
+		}
+	}
 	for _, issue := range tilemap.MapIssues(m) {
 		kind := Cell
 		if issue.Layer < 0 {

@@ -105,8 +105,8 @@ func layerLead(kids []xnode, at int) int {
 }
 
 // CanDeleteLayer reports whether deleting a layer can leave existing view
-// signals attached to every surviving layer. Older maps without unique IDs
-// still support paint and rename, but not index-changing edits.
+// signals attached to every surviving layer. An idless or duplicate-ID map
+// can still paint and rename, but cannot make an index-changing edit.
 func (d *Document) CanDeleteLayer(index int) bool {
 	layers := d.tileLayers()
 	return index >= 0 && index < len(layers) && uniqueLayerIDs(layers)

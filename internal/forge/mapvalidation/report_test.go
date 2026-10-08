@@ -1,6 +1,7 @@
 package mapvalidation_test
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -219,7 +220,7 @@ func TestReport_LookupsDoNotLeakBetweenOwners(t *testing.T) {
 		{"indexed", func() mapvalidation.Report {
 			m := &tiled.Map{
 				Name: "m.tmx", Width: 2, Height: 1, TileWidth: 16, TileHeight: 16,
-				Layers: []tiled.Layer{{Name: "short", Width: 1, Height: 1, Data: []uint32{1}}},
+				Layers: []tiled.Layer{{ID: 1, Name: "short", Width: 1, Height: 1, Data: []uint32{1}}},
 			}
 			s := validationSchema(schema.ValidationStrict)
 			return mapvalidation.Build(&s, "m.tmx", m, nil, nil)
@@ -260,6 +261,55 @@ func TestBuild_MissingInputsDoNotInventFindings(t *testing.T) {
 	}
 }
 
+func TestBuild_TileLayerIDsExplainUnsafeEditsOnTheirRows(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ids  []int
+		want []string // one expected layer message fragment per row; empty means valid
+	}{
+		{"unique Tiled IDs", []int{1, 3}, []string{"", ""}},
+		{"missing and negative", []int{0, -1}, []string{"positive Tiled ID", "positive Tiled ID"}},
+		{"duplicate", []int{3, 3}, []string{"ground", "props"}},
+		{"three claimants", []int{3, 3, 3}, []string{"3 layers", "3 layers", "3 layers"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &tiled.Map{
+				Name: "level.tmx", Width: 1, Height: 1, TileWidth: 16, TileHeight: 16,
+				Properties: tiled.Properties{tiled.PropMapID: {Value: "level"}},
+			}
+			for i, id := range tc.ids {
+				name := []string{"ground", "props", "roof"}[i]
+				m.Layers = append(m.Layers, tiled.Layer{ID: id, Name: name, Width: 1, Height: 1, Data: []uint32{0}})
+			}
+			s := validationSchema(schema.ValidationStrict)
+			report := mapvalidation.Build(&s, "level.tmx", m, nil, nil)
+			if again := mapvalidation.Build(&s, "level.tmx", m, nil, nil); !reflect.DeepEqual(report.Issues, again.Issues) {
+				t.Errorf("layer-ID findings changed order between renders: %+v vs %+v", report.Issues, again.Issues)
+			}
+			for i, want := range tc.want {
+				issues := report.LayerIssues(i)
+				if want == "" {
+					if len(issues) != 0 {
+						t.Errorf("healthy layer %d has problems: %+v", i, issues)
+					}
+					continue
+				}
+				if len(issues) != 1 || issues[0].Warning || !strings.Contains(issues[0].Message, want) ||
+					!strings.Contains(issues[0].Message, "reorder or delete") {
+					t.Errorf("layer %d has no actionable ID error: %+v", i, issues)
+				}
+			}
+			if tc.name == "duplicate" {
+				for _, issue := range report.Issues {
+					if issue.Kind == mapvalidation.Layer && (!strings.Contains(issue.Message, "ground") || !strings.Contains(issue.Message, "props")) {
+						t.Errorf("collision does not name both layers: %q", issue.Message)
+					}
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkBuild_FourMapsWith50x50Tiles(b *testing.B) {
 	s := validationSchema(schema.ValidationStrict)
 	maps := make([]*tiled.Map, 4)
@@ -276,7 +326,7 @@ func BenchmarkBuild_FourMapsWith50x50Tiles(b *testing.B) {
 			Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: &tiled.Tileset{
 				Name: "fixture", TileCount: 1, Image: tiled.Image{Source: "tiles.png", Path: "tiles.png"},
 			}}},
-			Layers: []tiled.Layer{{Name: "ground", Width: 50, Height: 50, Data: data}},
+			Layers: []tiled.Layer{{ID: 1, Name: "ground", Width: 50, Height: 50, Data: data}},
 		}
 		ids[i] = mapvalidation.Identity{Path: path, ID: path}
 	}
