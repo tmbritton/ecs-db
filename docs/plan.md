@@ -2,6 +2,10 @@
 
 Implementation plan derived from the architecture doc. Build the schema system as a complete unit first, then the agents runtime, then a working monolithic game (interpreter + Ebitengine renderer in one binary), then the debugger as the one natural process boundary, then time-travel, effects, and polish. Epics 10 onward build **Forge**, the content-authoring front-end, against the file formats and read layer the engine epics establish. Each epic will be refined into concrete tasks in a follow-up pass.
 
+**Next implementation target after Epic 16:** the [4e-inspired point-and-click adventure-board-game demo](#gameplay-milestone-4e-inspired-point-and-click-adventure-board-game-demo). Finish Epic 16 first, then build this playable milestone before returning to the remaining Forge epics. It can proceed independently of those modes; the 20 Hz wandering prototype in Epic 5 is not the intended interaction model for this demo. See also the [turn-based roguelike review](turn-based-roguelike-review.md) for the code-level motivation and complementary remediations.
+
+For replay and determinism, the gameplay milestone and the updated Epics 7 and 19 below supersede the earlier transition-log replay claims in `docs/game-engine-arch.md`.
+
 ---
 
 ## Epic 1: Schema-driven data foundation
@@ -294,33 +298,33 @@ Scope note: this epic delivers the **read layer and its HTTP routes**, not a bes
 
 ## Epic 7: Time-travel debugging
 
-Promoted from "future directions" to a headline capability. The `transitions` table is a complete, append-only audit trail of every state change the engine has ever made. This epic turns that log into an interactive debugging tool: checkpoint the database, replay sessions forward, and scrub the timeline in the debugger UI.
+Promoted from "future directions" to a headline capability. The `transitions` table explains machine transitions but does not record every player command, component mutation or random decision. Build replay on ordered commands/external events and reproducible randomness from a checkpoint, using `transitions` as an explanation trace. Prove this contract with the gameplay milestone before claiming full-world time travel.
 
 - [ ] **Checkpoint infrastructure** — Periodic database snapshots the replay engine can start from.
-  - Interpreter writes checkpoint files (SQLite backup API) at configurable tick intervals
+  - Interpreter writes checkpoint files (SQLite backup API) at configurable simulation-step intervals
   - Checkpoints stored alongside `world.sqlite`; retention policy configurable (keep last N)
-  - Checkpoint metadata table: `tick`, `wall_ms`, `file_path`
+  - Checkpoint metadata identifies simulation step, actor turn and round, plus `wall_ms` and `file_path`
 
-- [ ] **Replay engine** — Re-run a session from a checkpoint through the `transitions` log.
-  - Open a checkpoint as a read-only base
-  - Walk `transitions` rows in tick order, applying each to reconstruct world state at any tick
-  - Expose as a debugger-callable interface: `replay(checkpoint, target_tick) → world_snapshot`
+- [ ] **Replay engine** — Re-run a session from a checkpoint through the recorded command/event stream.
+  - Open a checkpoint as an isolated replay base, never mutate the running game
+  - Reapply recorded commands and external events in simulation order with reproducible RNG state or recorded random decisions; compare snapshots or state hashes to detect drift
+  - Use `transitions` to explain decisions, not as component-write deltas; expose `replay(checkpoint, target_step) → world_snapshot` as a debugger-callable interface
 
 - [ ] **Debugger timeline endpoint** — Query replay state.
-  - `GET /timeline` — List available checkpoints with tick ranges
-  - `GET /timeline/:tick` — Reconstruct and return world snapshot at given tick
-  - `GET /timeline/:tick/entities` — Entity roster at that tick
-  - `GET /timeline/:tick/transitions?entity_id=N` — Transitions around that tick
+  - `GET /timeline` — List available checkpoints with simulation-step ranges
+  - `GET /timeline/:step` — Reconstruct and return world snapshot at given step
+  - `GET /timeline/:step/entities` — Entity roster at that step
+  - `GET /timeline/:step/transitions?entity_id=N` — Transitions around that step
 
 - [ ] **Debugger timeline UI** — Scrubber and step controls.
-  - Timeline scrubber showing tick range and checkpoint markers
+  - Timeline scrubber showing simulation-step range and checkpoint markers
   - Step forward / backward through transitions for a selected entity
-  - Entity state panel updates to match selected tick
+  - Entity state panel updates to match selected simulation step
   - Works without pausing the live game
 
 - [ ] **Smoke test: reproduce a bug via replay** — The capability only counts if it works.
-  - Record a session; identify a tick where an entity entered an unexpected state
-  - Replay from checkpoint to that tick; confirm entity state matches live recording
+  - Record a session; identify a simulation step where an entity entered an unexpected state
+  - Replay from checkpoint to that step; confirm full world state matches live recording
   - Step through preceding transitions to find the cause
 
 ---
@@ -759,11 +763,11 @@ Forge writes nothing here. The one-writer-per-table contract is honoured by cons
 
 ## Epic 19: Forge — REPLAY & time-travel
 
-The REPLAY source lens: scrub the `transitions` log with checkpoints, breakpoints and forking. The headline capability of the architecture, delivered as an authoring-tool feature.
+The REPLAY source lens: scrub checkpointed world history reconstructed from commands/events, with `transitions` alongside it to explain behavior; add breakpoints and forking. The headline capability of the architecture, delivered as an authoring-tool feature after the gameplay replay proof.
 
 - [ ] **Timeline dock** — Transition-density waveform, scrub, checkpoint diamonds, breakpoint markers, playhead.
 
-- [ ] **Fork from tick** — Branch a new session from any point in the log.
+- [ ] **Fork from simulation step** — Branch a new session from any replayable point in the recorded history.
 
 - [ ] **Transition history navigation** — Click a transition to jump the timeline; entity trails on the canvas.
 
@@ -776,6 +780,34 @@ Saved SQL predicates rendered as map overlays — `hp < 20% · pulse`, aggro ran
 - [ ] **Query layer authoring** — Named, parameterised, read-only predicates with per-layer styling.
 
 - [ ] **Overlay rendering** — Matching live entities highlighted on the map canvas.
+
+---
+
+## Gameplay milestone: 4e-inspired point-and-click adventure-board-game demo
+
+**Priority: next playable demo after Epic 16, independent of the Forge epic numbering.** Use the D&D 4th-edition SRD as the reference for a tactical adventure-board-game turn structure, then iterate toward original systems and features. Pin the exact 4e SRD and referenced rules passages when refining stories: the 4e SRD is a reference to rules, not a complete rules text. Implement a small, explicit subset for the first encounter, rather than claiming the game already implements all of 4e. Mouse point-and-click is the default input; keyboard movement is not a prerequisite. Rendering/animation continues while the simulation waits on a player decision. The 20 Hz real-time prototype may coexist.
+
+### Round, action, and event contract
+
+- [ ] **Headless encounter and initiative scheduler** — Roll or set initiative on encounter start, keep a stable ordered roster (with a deterministic tie-break), advance through individual actor turns and increment the round after the last actor. Persist active actor, round, initiative order and remaining actions so save/continue restores the middle of a turn. Define how combat starts/ends and how newly spawned, incapacitated or dead actors enter/leave initiative. Do not equate a render frame, a clicked command, an actor turn and a round; give audit/scheduled events a documented monotonic simulation sequence. No enemy advances while the player is choosing an action.
+- [ ] **4e-style action budget and turn resolver** — On each actor's turn offer one **standard**, one **move** and one **minor** action, plus bounded **free** actions; permit the 4e-style downgrade from standard to move/minor and move to minor. Show remaining actions and an explicit **End Turn** button (which forfeits unused actions). Validate target, range, resources and action cost before committing; invalid clicks cost nothing. Resolve each accepted action atomically in a headless transaction, then resume the same actor until they end their turn or a rule ends it. On failure roll back the action or isolate and report a failed delivery, never consume an event and commit partial consequences. Define an explicit cost for a blocked but valid attempted move.
+- [ ] **Point-and-click action selection and grid movement** — Click a visible destination to preview a route and spend a move action to follow it up to the actor's remaining movement allowance in squares. Check occupancy and interruption **per square**, not just at the endpoint; stop on a newly blocked square or an encounter reaction. A route longer than the allowance stays a preview, not an automatic series of future turns: the player chooses another legal action or End Turn, and must authorize movement on a later turn. Click an adjacent enemy for a basic attack, an adjacent door to interact, or an adjacent item to pick it up; on-screen controls choose actions and use items. When layers/occupants overlap, select a deterministic target and show what action will occur. UI clicks and held mouse buttons cannot issue duplicate actions. All commands go through the resolver, not direct player Position writes.
+- [ ] **Targeted events, interrupts and reactions** — Promote `event_queue` beyond `after` timers: enqueue recipients and JSON payloads, deliver in stable order and bound event chains. Scheduler grants a turn to one actor; doors and other passive entities react only to targeted events, not a universal `TICK`. Define timing windows for off-turn reactions, interrupts and opportunity actions, with their own per-round/turn usage limits; the demo needs one concrete example (such as leaving a hostile adjacent square). Resolve the reaction at the triggering square before continuing movement, and show it in the log. Keep real-time `TICK` optional, not the combat scheduler.
+- [ ] **Simulation-time durations** — Schedule encounter effects against actor turns or round boundaries with explicit start/end timing, not milliseconds-to-20-Hz-ticks. Effects do not expire while the player is thinking. Wall-clock time remains for UI and animation; later condition and power systems build on the same turn/round clock.
+
+### One complete encounter
+
+- [ ] **Creature occupancy and basic 4e-style combat** — Separate creature-vs-creature occupancy from terrain `Passability`; specify occupied squares, allies, swaps and multi-cell footprints. Keep player movement, enemy movement and A* consistent. Implement one melee basic attack with a seeded d20 + attack bonus versus AC, then damage/HP resolution, including miss, death and removal/loot. For the demo, assign the attack a standard-action cost and make the goblin choose from the same action budget. Pin the precise range, modifiers and reaction rules to the selected 4e reference before implementation; keep rules data configurable for later redesign.
+- [ ] **Door and one item** — Put a door and a pick-up/use item on the map. Specify the demo action cost for opening, picking up and using (rather than assuming every interaction is free); show the cost before a click. Define ground-versus-carried placement, ownership, pickup/drop/use and death behavior. An example `Inventory` in the architecture doc is not yet a game rule.
+- [ ] **Perception and board-game feedback** — Use sight rules to show visible squares, remember explored terrain separately, and hide unseen actors. Define what the goblin can perceive rather than granting it omniscience. Show initiative/round/active actor, action budget, move range/path, valid click targets, roll/defense/damage results, reactions and a message log. Visual effects alone do not explain why an action was legal or what happened.
+- [ ] **Run lifecycle and save/reload** — Distinguish an authored map's initial state from an ongoing run. The current re-import rule reapplies file-authored changes on startup and a deleted spawn can reappear; continuing a run must not resurrect the goblin or reset an opened door. Define new-run, continue-run and deliberate development re-import behavior; preserve initiative, current actor, action budget, effects and inventory. Snapshot a live WAL database consistently.
+
+### Proof before time-travel claims
+
+- [ ] **Deterministic command/replay proof** — Record the encounter setup/initiative rolls, ordered player and enemy actions, external events, reaction choices and random results or reproducible RNG state. Machine `transitions` list action names but not every world mutation or roll; treat them as an explanation trace until replay from a checkpoint reproduces actor order, resources, positions and HP. Feed this into Epics 7 and 19 before implementing their replay UIs.
+- [ ] **Playable acceptance run** — Seed the demo encounter with the player first in initiative; idle for several seconds on the player's turn with no world advancement while animations play. Click a reachable destination: movement spends its action, respects square allowance and can provoke the demo reaction; click an enemy to spend a standard attack and show roll, defense, damage and HP. Show a minor interaction/item action and the ability to downgrade an unused action. End Turn advances to the goblin in initiative order; after the last actor the round increments once. Invalid/out-of-range clicks spend nothing. Save mid-turn, continue with the same action budget, and replay recorded actions to the same state.
+
+**Following gameplay slices, not prerequisites for this demo:** powers and their at-will/encounter/daily use limits, action points, ready/delay, conditions and end-of-turn saves; multiple floors and map transitions; procedural generation and seed/versioning if generated runs suit the game; equipment, consumables and loot breadth; character progression; win/loss, restart and run summary. Use the 4e-style turn foundation as a starting point for original rules, not a commitment to reproduce every 4e subsystem. Each slice needs a playable example and a save/reload rule before a broad authoring UI is built around it.
 
 ---
 
