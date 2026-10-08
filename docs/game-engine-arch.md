@@ -149,6 +149,39 @@ The schema is intended to evolve during development. Adding new components or en
 
 A `Weapon` exists in the world (has `Position`) when it's on the ground, or has a `Wielder` (no `Position`) when it's held. A `Goblin` declares `"behavior": "wandering_goblin"` — the interpreter activates that machine automatically when a Goblin entity is created. `"Behavior"` is a reserved name; schema validation rejects any user-defined component with that name.
 
+### Spatial entities and independent interactions
+
+**Everything visible in the game world is an entity.** Each authored nonempty
+tile in each TMX layer has its own Tile entity, including tiles hidden by that
+layer's visual state. Its stable identity is `(mapId, layerId, cell)`. TMX and
+TSX files are import sources; tile instances and draw order are component
+state read by the game renderer. Image bytes remain file-backed assets. Epic
+16 Story 2 replaced the shortcut that imported only the topmost Tile at a cell
+while drawing every layer directly from the map file.
+
+A wall is a separate entity placed at a cell. A river or water region is one
+entity whose `OccupiedCells` component lists grid-cell offsets relative to
+its `Position`; it is not copied into one entity per cell or authored as a
+polygon. Art Tile entities may occupy the same cells without becoming the
+wall or river's movement rule. A visual multi-cell occupant is drawn across
+its footprint under **one** entity ID (Epic 16 Story 3).
+
+`Passability` and `Visibility` are independent, attachable components on
+**any** occupant. They carry schema-validated taxonomy values rather than
+universal Boolean flags. A mover's **independent capability components**
+(Walking, Swimming, Flying, Phased) are evaluated against each occupant's
+Passability category under a schema-validated interaction policy; **all**
+restrictions must permit the mover. Within map bounds, a cell with no art is
+enterable when no occupant denies it. Line of sight instead evaluates the
+observer's own independent components (such as NightVision) against
+occupants' Visibility categories. A person can see across water they cannot
+cross; a phased entity can pass a wall it cannot see through. Visibility here
+means sight occlusion, not sprite drawing or detecting an invisible target.
+DetectsMagic is an example of an observer capability whose target-detection
+semantics belong to a later feature. The present `Tile.passable`
+column and `TileGrid.IsPassable` are transitional implementations, to be
+replaced before the TILES mode authors gameplay metadata (Epic 16 Story 3).
+
 ## The contract
 
 The SQLite schema is the IPC contract. Changes are versioned. Every process checks the schema version on startup and refuses to run against incompatible versions. The contract has five conventions:

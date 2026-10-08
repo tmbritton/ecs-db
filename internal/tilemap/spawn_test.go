@@ -649,7 +649,7 @@ func TestLoadMap_SpawnsTheMapsObjects(t *testing.T) {
 	const withSpawn = `<?xml version="1.0" encoding="UTF-8"?>
 <map version="1.10" orientation="orthogonal" width="3" height="2" tilewidth="8" tileheight="8">
  <tileset firstgid="1" source="dungeon.tsx"/>
- <layer name="ground" width="3" height="2"><data encoding="csv">2,1,2,
+  <layer id="1" name="ground" width="3" height="2"><data encoding="csv">2,1,2,
 2,2,2</data></layer>
  <objectgroup id="2" name="spawns">
   <object id="4" name="gob" type="Goblin" x="8" y="8">

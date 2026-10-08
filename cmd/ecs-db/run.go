@@ -100,10 +100,10 @@ func runGame(cmd *cobra.Command, args []string) error {
 					"entities are placed on the second and tiles on the first, so they must agree",
 				cfg.Map.Path, src.TileWidth, src.TileHeight, cfg.Window.TileSize)
 		}
-		// The parsed map goes to the renderer as well as the database: the
-		// database holds one row per cell and cannot say what is stacked on it.
-		t, err := renderer.NewTilemapRenderer(src, imageCache,
-			cfg.Window.Width, cfg.Window.Height, cfg.Window.TileSize)
+		// The renderer reads current tile entities; the parsed map is used only
+		// for startup validation and the same stable identity as the importer.
+		mapID := tilemap.MapID(cfg.Map.Path, src)
+		t, err := renderer.NewTilemapRenderer(store.DB(), mapID, imageCache)
 		if err != nil {
 			return fmt.Errorf("building tilemap renderer: %w", err)
 		}

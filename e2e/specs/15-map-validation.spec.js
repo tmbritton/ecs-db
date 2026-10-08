@@ -23,7 +23,9 @@ test.beforeEach(async ({ page }) => { await page.goto("/forge/map"); });
 test.afterEach(async ({ page }) => {
   while (seeded.length) {
     const name = seeded.pop();
-    await page.request.post(`/forge/map/discard?map=${encodeURIComponent(`e2e/fixtures/project/maps/${name}`)}`);
+    if (name.endsWith(".tmx") || name.endsWith(".tmj")) {
+      await page.request.post(`/forge/map/discard?map=${encodeURIComponent(`e2e/fixtures/project/maps/${name}`)}`);
+    }
     fs.rmSync(path.join(MAPS, name), { force: true });
   }
 });
@@ -54,6 +56,7 @@ test("an idless tile layer shows why its reorder and delete are unavailable", as
   await expect(byTestId(page, "layer-ground")).toHaveAttribute("data-invalid", "true");
   await expect(byTestId(page, "layer-props")).toHaveAttribute("data-invalid", "false");
   await expect(byTestId(page, "map-validation")).toContainText("positive Tiled ID");
+  await expect(byTestId(page, "map-validation")).toContainText("cannot import");
   const opened = page.waitForRequest((req) => req.url().includes("/forge/map/menu?") && req.method() === "POST");
   await byTestId(page, "layer-ground").click({ button: "right" });
   await opened;
@@ -71,6 +74,7 @@ test("both layers with a duplicate ID get the collision, not only the second", a
   }
   await expect(byTestId(page, "map-validation")).toContainText("ground");
   await expect(byTestId(page, "map-validation")).toContainText("props");
+  await expect(byTestId(page, "map-validation")).toContainText("cannot import");
   await byTestId(page, "layer-props").click({ button: "right" });
   await expect(byTestId(page, "map-context-menu").locator(".ctx-menu__item")).toHaveCount(2);
 });
@@ -141,6 +145,30 @@ test("an unresolved gid marks its cell and several independent problems stay vis
   await expect(byTestId(page, "map-validation")).toContainText("does not hold it");
   await expect(byTestId(page, "map-validation")).toContainText("unknown entity type");
   await expect(byTestId(page, "save-footer")).not.toHaveAttribute("data-blocked", "true");
+});
+
+test("a covered tile on a hidden lower layer still reports its import refusal", async ({ page }) => {
+  const broken = level.replace('value="e2e-level"', 'value="buried-bad-tile"')
+    .replace('<layer id="1" name="ground"', '<layer id="1" name="ground" visible="0"')
+    .replace('1,12,15,15,14,1,', '1,99999,15,15,14,1,');
+  seed("e2e-buried-bad-tile.tmx", broken);
+  await openSeeded(page, "e2e-buried-bad-tile.tmx");
+  await expect(byTestId(page, "map-validation-count")).toContainText("1");
+  await expect(byTestId(page, "map-validation")).toContainText("does not hold it");
+  await expect(byTestId(page, "map-layer-0").locator('[data-cell="ground:1,1"]'))
+    .toHaveAttribute("data-invalid", "true");
+});
+
+test("a tile whose image rectangle is outside its sheet reports the load refusal", async ({ page }) => {
+  const sheet = fs.readFileSync(path.join(MAPS, "e2e-tiles.tsx"), "utf8")
+    .replace('width="128" height="240"', 'width="16" height="240"');
+  seed("e2e-shrunken-tiles.tsx", sheet);
+  seed("e2e-bad-art.tmx", level.replace('value="e2e-level"', 'value="bad-art"')
+    .replace('source="e2e-tiles.tsx"', 'source="e2e-shrunken-tiles.tsx"'));
+  await openSeeded(page, "e2e-bad-art.tmx");
+  await expect(byTestId(page, "map-validation")).toContainText("tiny16-basic.png");
+  await expect(byTestId(page, "map-layer-0").locator('[data-cell="ground:1,1"]'))
+    .toHaveAttribute("data-invalid", "true");
 });
 
 test("an unloadable working map can still be saved with its validation visible", async ({ page }) => {

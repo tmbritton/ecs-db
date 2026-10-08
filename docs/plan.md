@@ -703,13 +703,20 @@ Two more corrections. A spawn cannot name a behaviour — `SyncBehaviors` binds 
 
 ## Epic 16: Forge — TILES & SPRT modes
 
-Tileset metadata authoring and sprite-sheet slicing.
+Entity-backed tile rendering, occupant-aware grid traversal and its MAP
+authoring surface, followed by tileset metadata and sprite-sheet slicing.
 
-Two claims here were checked while planning Epic 15 and are false. **There is no TSX writer** — `internal/tiled` parses `.tsx`/`.tsj` and emits nothing, so TILES needs the same fidelity work Epic 15 Story 1 does for maps, against a format that also carries wangsets, terrains and per-tile collision object groups. And **the engine does not hot-reload tilesets**: the watcher covers behaviours directories, `animations.toml` and `mods/*/assets/sprites`, which is where SPRT writes and is not where a tileset lives. SPRT hot-reloads; TILES takes effect on the next `ecs-db run`, and the mode must say so. Refined into eight ordered stories in [`docs/stories/epic-16/`](stories/epic-16/), starting with a TSX writer; only the first assets mod's `animations.toml` is game-loaded, and sprite frames are a one-row horizontal strip of `window.tileSize` squares.
+Two claims here were checked while planning Epic 15 and are false. **There was no TSX writer** — Epic 16 Story 1 added one to preserve wangsets, terrains and per-tile collision object groups even though the initial map does not use polygons. And **the engine does not hot-reload tilesets**: the watcher covers behaviours directories, `animations.toml` and `mods/*/assets/sprites`, which is where SPRT writes and is not where a tileset lives. SPRT hot-reloads; TILES takes effect on the next `ecs-db run`, and the mode must say so. Refined into eleven ordered stories in [`docs/stories/epic-16/`](stories/epic-16/); before TILES authoring, Story 2 makes every authored tile an entity rendered from database state, and Story 3 replaces universal Boolean passability with a rule over the mover and entities occupying each destination cell. Only the first assets mod's `animations.toml` is game-loaded, and sprite frames are a one-row horizontal strip of `window.tileSize` squares.
 
 - [x] **Lossless TSX writer** — External `.tsx` files can now be opened as editable documents without discarding unknown XML, per-tile collision shapes, animations, wangsets or terrain. Sparse collection IDs and both class spellings survive surgical tile edits; `.tsj` and embedded tilesets stay read-only. `make test`, both lint tag sets, both builds and 295 browser checks pass; `internal/tiled` statement coverage 94.3%.
 
-- [ ] **TILES mode** — Tileset grid and enlarged tile with truthful Collision / Animation / Terrain / Class metadata. The TSX writer is ready; runtime effects exist for `passable` and tile type/class, while collision shapes, terrain and tile animation have no engine consumer yet.
+- [x] **Entity-backed tile layers** — Every nonempty authored layer tile is now a stable entity, keyed by `(mapId,layerID,cell)` and rendered from `TileLayer`/`TileVisual` database components instead of a static TMX snapshot. The old topmost Boolean grid remains until Story 3. `make test`, both builds, both lint tag sets and 299 browser checks pass; `internal/tilemap` coverage 91.2%, `internal/tiled` 94.2%. See [Epic 16 Story 2](stories/epic-16/02-entity-backed-tiles.md).
+
+- [ ] **Occupant-aware traversal and visibility** — Replace universal `Tile.passable`/`TileGrid.IsPassable` with separate schema-validated `Passability` and `Visibility` taxonomy components attachable to any entity. Movement evaluates independent mover components (Flying/Phased/Swimming) against destination occupants; sight evaluates independent observer components (such as NightVision) against sight-affecting occupants, not one vision-mode enum. Walls and multi-cell water are entities. A phased mover crosses a wall it cannot see through; a walker sees over a river it cannot cross. See [Epic 16 Story 3](stories/epic-16/03-occupant-traversal.md).
+
+- [ ] **MAP occupant authoring** — Place and inspect walls and multi-cell water/river entities with their movement restrictions and occupied-cell sets, not polygon collision geometry (Epic 16 Story 4).
+
+- [ ] **TILES mode** — Tileset grid and enlarged tile with class/type and art metadata. The TSX writer is ready; movement restrictions are authored on occupant entities in MAP, not on tile artwork. No polygon collision authoring or global `passable` toggle. Tiled tile animation and collision polygons have no engine consumer yet.
 
 - [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
   - Constrain the UI to what the renderer supports: 1×N horizontal strips of `tileSize` squares, frames as column indices. Multi-row grids are renderer work.
@@ -724,7 +731,9 @@ The modal set, each computing its live derived values, backed by a persisted pre
 
 - [ ] **Map dialogs** — New Map, Open Map, Map Properties, Resize Map (9-point anchor + clip warning).
 
-- [ ] **Asset dialogs** — Add Tileset (live tile-count grid), Import Sprite Sheet (frame count, grid, loop duration).
+- [ ] **Asset dialogs** — Add Tileset (live tile-count grid). Import Sprite
+      Sheet belongs to Epic 16 Story 11, with the renderer's one-row frame
+      constraint rather than a duplicate multi-row dialog here.
 
 - [ ] **Shell dialogs** — Keyboard Shortcuts, Preferences, About.
 

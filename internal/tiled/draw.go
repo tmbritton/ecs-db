@@ -148,6 +148,16 @@ type Placement struct {
 // Call after ResolveTilesets. A tileset that was never resolved is a problem
 // rather than an empty one.
 func (m *Map) Placements() []Placement {
+	return m.placements(false)
+}
+
+// AllPlacements also projects hidden and fully transparent layer tiles. Import
+// needs their art even when the current layer settings do not draw them.
+func (m *Map) AllPlacements() []Placement {
+	return m.placements(true)
+}
+
+func (m *Map) placements(includeHidden bool) []Placement {
 	out := make([]Placement, 0)
 
 	// Which corner a layer is drawn from. Invisible for square tiles and the
@@ -162,11 +172,11 @@ func (m *Map) Placements() []Placement {
 		// Visibility is honoured here and nowhere else. The loader ignores it
 		// on purpose: hiding a layer is what the editor shows you, not what the
 		// map holds. Drawing is the thing the checkbox is actually about.
-		if !layer.Visible {
+		if !includeHidden && !layer.Visible {
 			continue
 		}
 		// Fully transparent draws nothing, and there is no point placing it.
-		if layer.Opacity == 0 {
+		if !includeHidden && layer.Opacity == 0 {
 			continue
 		}
 		for _, y := range order(layer.Height, downward) {

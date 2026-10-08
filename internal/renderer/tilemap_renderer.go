@@ -3,115 +3,57 @@
 package renderer
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"image"
 	"log"
-	"maps"
-	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/tmbritton/ecs-db/internal/tiled"
+	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
 
-// TilemapRenderer builds a static *ebiten.Image of a map, drawn from the
-// tilesets the map names. The image is rebuilt on construction and again
-// whenever Invalidate is called.
+// TilemapRenderer draws the current TileVisual components in their database
+// layer order. Only decoded PNGs are cached; no map-file snapshot is kept.
 type TilemapRenderer struct {
-	img      *ebiten.Image
-	w, h     int
-	tileSize int
-
-	// src is the parsed map — where the appearance comes from. Not the
-	// database: comp_tile holds one row per cell by design, so it can say what
-	// a cell is and never what is stacked on it, and a stack is most of what a
-	// tileset is for.
-	src *tiled.Map
-	// images loads a tileset's picture once and keeps it. Shared with the
-	// sprite renderer rather than a second cache of the same PNGs.
-	images *ImageCache
+	db      *sql.DB
+	mapID   string
+	images  *ImageCache
+	missing map[string]bool
 }
 
-// NewTilemapRenderer builds the static map image.
-//
-// src used to be allowed to be nil, for a map in the character format this
-// engine started with — those were coloured by comp_tile.tile_type, a grey
-// rectangle per cell. Story 7 migrated the one map that used it and deleted the
-// reader, so every map that reaches here is a Tiled map and the colours could
-// only ever have drawn an empty picture. A nil map is a caller's mistake now.
-func NewTilemapRenderer(src *tiled.Map, images *ImageCache, w, h, tileSize int) (*TilemapRenderer, error) {
-	if src == nil {
-		return nil, fmt.Errorf("renderer: a tilemap renderer needs a parsed map to draw")
+func NewTilemapRenderer(db *sql.DB, mapID string, images *ImageCache) (*TilemapRenderer, error) {
+	if db == nil || mapID == "" || images == nil {
+		return nil, fmt.Errorf("renderer: tilemap requires a database, map identity and image cache")
 	}
-	// Not "make one if there isn't one". There is exactly one image cache in
-	// the process, because it is also what hot-reload evicts from — a second
-	// one would decode the same PNGs twice and see half the evictions. A caller
-	// with nothing to pass has made a mistake worth hearing about.
-	if images == nil {
-		return nil, fmt.Errorf("renderer: a tilemap renderer needs the process's image cache")
-	}
-	r := &TilemapRenderer{src: src, images: images, w: w, h: h, tileSize: tileSize}
-	r.rebuild()
-	return r, nil
+	return &TilemapRenderer{db: db, mapID: mapID, images: images, missing: make(map[string]bool)}, nil
 }
 
-func (r *TilemapRenderer) Image() *ebiten.Image { return r.img }
+// Draw queries entity components each frame, so edits and deletions made by the
+// game are visible on the next draw without re-reading TMX or rebuilding art.
+func (r *TilemapRenderer) Draw(screen *ebiten.Image) error {
+	return r.drawTo(screen)
+}
 
-// Invalidate rebuilds the static image.
-//
-// Nothing calls it. The comment here used to say setTilePassable did, and that
-// action writes comp_tile.passable and the grid and never touches the renderer
-// — so an opened door has never redrawn, and would not have even if it were
-// called, because the old fallback colours by tile_type and that action does
-// not write one.
-//
-// It is dead by construction rather than by oversight: the picture comes from
-// the map file, which is read once at startup and never changed, so a rebuild is
-// guaranteed to produce the same pixels. Making a tile's appearance change at
-// run time means giving the database something the renderer reads, which is a
-// story and not a comment.
-//
-// It returns nothing, and so does rebuild. There used to be an error, from the
-// query the colour fallback ran; drawing from the map file cannot fail — a
-// picture that will not open is logged by name and its tiles are skipped.
-func (r *TilemapRenderer) Invalidate() { r.rebuild() }
+type imageDrawer interface {
+	DrawImage(*ebiten.Image, *ebiten.DrawImageOptions)
+}
 
-func (r *TilemapRenderer) rebuild() { r.img = r.drawTiles() }
-
-// drawTiles paints every tile of every visible layer from its tileset.
-//
-// The arithmetic is all in tiled.DrawList, which is untagged and tested: which
-// layer covers which, which tileset owns an id, where a tile taller than its
-// cell goes. What is left here is opening files and calling DrawImage, which is
-// the part no test without a display can see.
-func (r *TilemapRenderer) drawTiles() *ebiten.Image {
-	img := ebiten.NewImage(r.w, r.h)
-	draws, problems := r.src.DrawList()
-
-	// Each picture once, and each one that will not open named once — not per
-	// tile, and not per frame. A map is three hundred cells and this rebuilds
-	// on every Invalidate.
-	loaded := map[string]*ebiten.Image{}
-	missing := map[string]int{}
-	for _, d := range draws {
-		if _, tried := loaded[d.Image]; tried {
-			continue
-		}
-		if _, gone := missing[d.Image]; gone {
-			continue
-		}
-		if sheet, ok := r.images.Get(d.Image); ok {
-			loaded[d.Image] = sheet
-		} else {
-			missing[d.Image] = 0
-		}
+func (r *TilemapRenderer) drawTo(screen imageDrawer) error {
+	draws, err := tilemap.ReadTileDraws(context.Background(), r.db, r.mapID)
+	if err != nil {
+		return err
 	}
-
 	for _, d := range draws {
-		sheet, ok := loaded[d.Image]
+		sheet, ok := r.images.Get(d.Image)
 		if !ok {
-			missing[d.Image]++
+			if !r.missing[d.Image] {
+				log.Printf("tilemap: image %q would not load; tile not drawn", d.Image)
+				r.missing[d.Image] = true
+			}
 			continue
 		}
+		delete(r.missing, d.Image)
 		m := d.Transform()
 		op := &ebiten.DrawImageOptions{}
 		if d.Alpha < 1 {
@@ -123,14 +65,7 @@ func (r *TilemapRenderer) drawTiles() *ebiten.Image {
 		op.GeoM.SetElement(1, 0, m.C)
 		op.GeoM.SetElement(1, 1, m.D)
 		op.GeoM.SetElement(1, 2, m.TY)
-		img.DrawImage(sheet.SubImage(image.Rect(d.SX, d.SY, d.SX+d.SW, d.SY+d.SH)).(*ebiten.Image), op)
+		screen.DrawImage(sheet.SubImage(image.Rect(d.SX, d.SY, d.SX+d.SW, d.SY+d.SH)).(*ebiten.Image), op)
 	}
-
-	for _, path := range slices.Sorted(maps.Keys(missing)) {
-		log.Printf("tilemap: %s would not load; %d tile(s) not drawn", path, missing[path])
-	}
-	for _, p := range problems {
-		log.Printf("tilemap: %s: %s", r.src.Name, p)
-	}
-	return img
+	return nil
 }

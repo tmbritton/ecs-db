@@ -128,11 +128,10 @@ func Build(s *schema.DatabaseSchema, path string, m *tiled.Map, identities []Ide
 	for _, problem := range refs {
 		add(Issue{Kind: Tileset, Tileset: problem.Index, Message: problem.Err.Error()})
 	}
-	// Layer IDs are not an engine load requirement: it reads layers in file
-	// order. They are an editor identity requirement. A move/delete shifts
-	// indices, and without unique positive IDs an open tab's eye and paint
-	// selection could silently follow a different layer. Name the affected
-	// rows here, where the author can see why those actions are absent.
+	// The importer keys every Tile entity by a positive, unique layer ID.
+	// The editor also needs those IDs: moving or deleting a layer changes its
+	// index and could silently retarget an open tab's eye or paint selection.
+	// Name both consequences on every affected row.
 	byLayerID := make(map[int][]int, len(m.Layers))
 	for i, layer := range m.Layers {
 		if layer.ID > 0 {
@@ -143,12 +142,12 @@ func Build(s *schema.DatabaseSchema, path string, m *tiled.Map, identities []Ide
 		switch {
 		case layer.ID <= 0:
 			add(Issue{Kind: Layer, Layer: i, Message: fmt.Sprintf(
-				"layer %q at row %d has no positive Tiled ID; assign a unique positive Tiled ID before you can reorder or delete it",
+				"layer %q at row %d has no positive Tiled ID; the engine cannot import this map, and you cannot reorder or delete it until you assign a unique positive Tiled ID",
 				layer.Name, i+1)})
 		case len(byLayerID[layer.ID]) > 1:
 			rows := byLayerID[layer.ID]
 			add(Issue{Kind: Layer, Layer: i, Message: fmt.Sprintf(
-				"tile layer ID %d is shared by %d layers (%q at row %d and %q at row %d); give each a unique positive Tiled ID before you can reorder or delete it",
+				"tile layer ID %d is shared by %d layers (%q at row %d and %q at row %d); the engine cannot import this map, and you cannot reorder or delete these layers until each has a unique positive Tiled ID",
 				layer.ID, len(rows), m.Layers[rows[0]].Name, rows[0]+1, m.Layers[rows[1]].Name, rows[1]+1)})
 		}
 	}

@@ -26,10 +26,26 @@ func tileSchema() schema.DatabaseSchema {
 					"tile_type": {Type: "string"},
 				},
 			},
+			"TileLayer": {Type: "object", Properties: map[string]schema.Property{
+				"map_id": {Type: "string"}, "layer_id": {Type: "integer"},
+				"layer_order": {Type: "integer"}, "draw_order": {Type: "integer"},
+			}},
+			"TileVisual": {Type: "object", Properties: map[string]schema.Property{
+				"image": {Type: "string"}, "source_x": {Type: "integer"},
+				"source_y": {Type: "integer"}, "source_w": {Type: "integer"},
+				"source_h": {Type: "integer"}, "dest_x": {Type: "integer"},
+				"dest_y": {Type: "integer"}, "flip_h": {Type: "boolean"},
+				"flip_v": {Type: "boolean"}, "flip_d": {Type: "boolean"},
+				"alpha": {Type: "number"}, "visible": {Type: "boolean"},
+			}},
+			"RuntimeNote": {Type: "object", Properties: map[string]schema.Property{
+				"value": {Type: "string"},
+			}},
 		},
 		EntityTypes: map[string]schema.EntityType{
 			"Tile": {
 				RequiredComponents:   []string{"Tile"},
+				OptionalComponents:   []string{"TileLayer", "TileVisual", "RuntimeNote"},
 				AllowExtraComponents: false,
 				ValidationLevel:      "strict",
 			},

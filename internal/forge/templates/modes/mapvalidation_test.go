@@ -32,6 +32,11 @@ func TestMapValidation_RendersMessagesAndMarksTheirOwners(t *testing.T) {
 			t.Errorf("missing owner mark or feedback %q", want)
 		}
 	}
+	for _, id := range []string{"map-layer-0", "map-validation-count"} {
+		if n := strings.Count(markup, `data-testid="`+id+`"`); n != 1 {
+			t.Errorf("browser selector %s occurs %d times, want one", id, n)
+		}
+	}
 }
 
 func TestMapValidation_PinsConflictTilesetAndDuplicateSpawnBrowserSelectors(t *testing.T) {

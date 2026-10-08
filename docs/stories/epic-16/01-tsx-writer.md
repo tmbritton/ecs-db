@@ -55,9 +55,13 @@ save button.
   browser checks passing). `internal/tiled`: 94.3% statement coverage.
 
 - This story is data-only. The TILES grid, sessions, routes, file Save and
-  Playwright steps belong to Stories 2–5. No browser surface changes here.
+  Playwright steps belong to the later stories. Editing `passable` in its Go
+  tests proves surgical XML mutation of an existing Tiled property; it does
+  **not** prescribe a universal passability toggle for the TILES mode. Story
+  3's occupant-aware traversal contract supersedes that gameplay rule.
+  No browser surface changes here.
 - An external TSX may be shared by maps. The writer owns only its bytes; Story
-  2 decides who holds it, who saves it and which map previews must refresh.
+  5 decides who holds it, who saves it and which map previews must refresh.
 - TSX polygon collision and Tiled `<animation>` survive edits but have **no
   engine consumer**. Preserve them; do not interpret them as this game's
   collision or sprite-animation contract.

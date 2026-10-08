@@ -50,7 +50,26 @@ func (g *TileGrid) Rebuild(ctx context.Context, db *sql.DB) error {
 		`SELECT entities.id, comp_tile.x, comp_tile.y, comp_tile.passable
 		 FROM entities
 		 JOIN comp_tile ON entities.id = comp_tile.entity_id
-		 WHERE entities.entity_type = 'Tile'`)
+		 LEFT JOIN comp_tilelayer l ON l.entity_id = entities.id
+		 WHERE entities.entity_type = 'Tile'
+		 ORDER BY COALESCE(l.layer_order, 0), COALESCE(l.draw_order, 0), entities.id`)
+	return g.rebuildRows(rows, err)
+}
+
+// RebuildMap indexes the active map only. The topmost imported tile is the
+// transitional Boolean/EntityAt projection until Story 3 replaces it with
+// occupant-aware traversal; this does not determine which tiles exist or draw.
+func (g *TileGrid) RebuildMap(ctx context.Context, db *sql.DB, mapID string) error {
+	rows, err := db.QueryContext(ctx,
+		`SELECT e.id, t.x, t.y, t.passable FROM entities e
+		 JOIN comp_tile t ON e.id = t.entity_id
+		 JOIN comp_tilelayer l ON l.entity_id = e.id
+		 WHERE e.entity_type = 'Tile' AND l.map_id = ?
+		 ORDER BY l.layer_order, l.draw_order, e.id`, mapID)
+	return g.rebuildRows(rows, err)
+}
+
+func (g *TileGrid) rebuildRows(rows *sql.Rows, err error) error {
 	if err != nil {
 		return fmt.Errorf("TileGrid.Rebuild: %w", err)
 	}

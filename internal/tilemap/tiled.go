@@ -32,11 +32,11 @@ func readTiled(path string, data []byte) (loaded, error) {
 	if err := m.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
 		return loaded{}, err
 	}
-	want, err := tilesOfTiled(m)
+	layers, err := LayerTilesOfTiled(m, MapID(path, m))
 	if err != nil {
 		return loaded{}, err
 	}
-	return loaded{Tiles: want, Width: m.Width, Height: m.Height, Source: m}, nil
+	return loaded{LayerTiles: layers, Width: m.Width, Height: m.Height, Source: m}, nil
 }
 
 func checkOrientation(m *tiled.Map) error {
@@ -46,36 +46,21 @@ func checkOrientation(m *tiled.Map) error {
 	return nil
 }
 
-// tilesOfTiled is the cell of every position the map describes a tile at.
-//
-// Iterated over the map's own dimensions rather than over the layers' data,
-// because a cell nothing draws in is a cell and not a gap — and because the
-// two guards below make the map's dimensions the only ones that matter.
-func tilesOfTiled(m *tiled.Map) (map[Point]TileState, error) {
-	if err := checkShape(m); err != nil {
-		return nil, err
-	}
-	want := make(map[Point]TileState)
-	for y := 0; y < m.Height; y++ {
-		for x := 0; x < m.Width; x++ {
-			state, ok, err := cellAt(m, x, y)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				want[Point{X: x, Y: y}] = state
-			}
+// MapID is shared by import and game rendering. An authored ID survives file
+// renames; a map without one falls back to its cleaned path, like spawns.
+func MapID(path string, m *tiled.Map) string {
+	if m != nil {
+		if id := m.Properties.Get(tiled.PropMapID); id != "" {
+			return id
 		}
 	}
-	return want, nil
+	return filepath.Clean(path)
 }
 
 // checkShape refuses a map that would import as fewer cells than it has.
 //
-// What these cells are handed to *deletes* every tile they do not mention, so a
-// map that arrives smaller than it is takes the difference with it. The
-// character format made the same check on its own row list, where a misspelled
-// `rows` key unmarshalled into a map of zeroes.
+// Re-import *deletes* every (layer, cell) the map no longer describes, so a
+// truncated layer must be refused rather than silently deleting valid tiles.
 //
 // It is narrower than "refuse a map that imports as nothing", and deliberately:
 // a Tiled map whose tile layer has been deleted really does describe no cells,
@@ -106,44 +91,6 @@ func checkShape(m *tiled.Map) error {
 		}
 	}
 	return nil
-}
-
-// cellAt is the tile a cell holds, and reports false when it holds none.
-//
-// **The topmost non-empty tile is the cell's tile**, and it decides both
-// passability and type. Not a preference: comp_tile holds one row per cell, so
-// the loader has to choose one tile out of a stack of layers, and the one the
-// author drew on top is the one they see there.
-//
-// A cell every layer leaves empty is not a tile and creates no entity. It is
-// still impassable, because TileGrid has no entry for it — which is a different
-// statement from a tile whose tileset says nothing about passability. Nothing to
-// stand on is not the same as a floor nobody described.
-func cellAt(m *tiled.Map, x, y int) (TileState, bool, error) {
-	for i := len(m.Layers) - 1; i >= 0; i-- {
-		layer := m.Layers[i]
-		// Visibility is not consulted. Hiding a layer is what the editor shows
-		// you, not what the map is: an author who hides the wall layer to look
-		// at the floor underneath it, saves, and finds every wall gone has been
-		// robbed by a checkbox. Story 5 honours Visible for drawing, which is
-		// what it is for.
-		gid := layer.TileAt(x, y).GID
-		if gid == 0 {
-			continue
-		}
-		where := fmt.Sprintf("tilemap: %s: layer %q: the tile at (%d,%d) has global id %d",
-			m.Name, layer.Name, x, y, gid)
-		ts, local, err := tileOf(m, where, gid)
-		if err != nil {
-			return TileState{}, false, err
-		}
-		state, err := stateOf(ts, local, where)
-		if err != nil {
-			return TileState{}, false, err
-		}
-		return state, true, nil
-	}
-	return TileState{}, false, nil
 }
 
 // tileOf is the tileset a global id belongs to and the id of the tile within

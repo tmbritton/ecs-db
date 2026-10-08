@@ -57,6 +57,7 @@ func newGridDB(t *testing.T) *sql.DB {
 	for _, stmt := range []string{
 		`CREATE TABLE entities (id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT NOT NULL, created_tick INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE comp_tile (entity_id INTEGER PRIMARY KEY, x INTEGER NOT NULL, y INTEGER NOT NULL, passable INTEGER NOT NULL, tile_type TEXT NOT NULL)`,
+		`CREATE TABLE comp_tilelayer (entity_id INTEGER PRIMARY KEY, layer_order INTEGER NOT NULL, draw_order INTEGER NOT NULL, map_id TEXT NOT NULL)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("setup: %v", err)

@@ -47,7 +47,9 @@
 5. Run targeted `go test -cover ./internal/tiled`, `make test`, both lint tag
    sets and both builds. Review the staged diff with a fresh-context reviewer,
    fix findings, rerun affected checks and commit Story 1. There is no Forge
-   browser change in this story, so its first Playwright spec is Story 3's.
+   browser change in this story; after the traversal/occupant stories were
+   added to the epic, the TILES read surface and its first Playwright spec are
+   Story 6's.
 
 ## Review follow-up
 

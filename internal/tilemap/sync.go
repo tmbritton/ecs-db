@@ -9,9 +9,8 @@ import (
 	"github.com/tmbritton/ecs-db/internal/world"
 )
 
-// TileState is what a map file says about one cell. It is deliberately the
-// fields the file owns and nothing else — see SyncTiles for why that boundary
-// is the whole point of this file.
+// TileState is the legacy movement/type metadata of one authored layer tile.
+// Story 3 replaces its Boolean; TileVisual owns its appearance meanwhile.
 type TileState struct {
 	Passable bool
 	TileType string
@@ -66,8 +65,7 @@ type Result struct {
 	Updated int
 	// Deleted counts cells the file no longer describes.
 	Deleted int
-	// Repaired counts extra rows removed from a cell that held more than one —
-	// a state nothing should produce, and not the same news as a map that shrank.
+	// Repaired counts duplicate rows removed during import.
 	Repaired  int
 	Unchanged int
 }
@@ -147,6 +145,10 @@ func planTiles(have []storedTile, want map[Point]TileState) tilePlan {
 
 // SyncTiles brings the Tile entities in the database in line with what a map
 // file says, and reports what it did.
+//
+// Deprecated: this single-cell writer is retained for its legacy tests only.
+// The game imports maps through SyncLayerTiles; Story 3 removes this API when
+// the transitional Tile.passable field is retired.
 //
 // Nothing is written when the two already agree: the plan comes out empty and
 // no transaction is opened, so a restart with no edit to the map is a read.

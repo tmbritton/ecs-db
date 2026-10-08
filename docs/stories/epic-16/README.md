@@ -1,22 +1,74 @@
 # Epic 16 — Forge: TILES and SPRT modes
 
-Tileset metadata authoring and sprite-sheet slicing, on the formats the game
-actually reads. The roadmap's three bullets are refined below before touching
-either mode.
+Occupant-aware grid traversal and MAP authoring, then tileset metadata and
+sprite-sheet slicing on the formats the game actually reads. The roadmap's
+three bullets are refined below before touching either asset mode.
 
 ## Verified against the code
 
 | Roadmap assumption | What the code does |
 |---|---|
-| Epic 14 supplies a TSX writer | **False.** `tiled.ParseTileset` reads TSX/TSJ and embedded map tilesets. `tiled.Document` is a lossless writer for **TMX maps only** and refuses a root other than `<map>`. Its `xtree` machinery is reusable, but there is no editable TSX document or save route. |
+| Epic 14 supplies a TSX writer | **False.** `tiled.ParseTileset` reads TSX/TSJ and embedded map tilesets. `tiled.Document` is a lossless writer for **TMX maps only** and refuses a root other than `<map>`. Epic 16 Story 1 added `TilesetDocument` using its `xtree`; the TSX editing session and save route belong to Story 5. |
 | TILES edits hot-reload | **False.** `cmd/ecs-db/run.go` watches behaviours, `animations.toml` and the first assets mod's `sprites/` directory. A changed `.tsx` takes effect at the next `ecs-db run`. The mode and save confirmation must say so. |
-| Every Collision / Animation / Terrain / Class tab changes the game | **False.** `tilemap.stateOf` reads per-tile/tileset `passable` and tile `type`/`class`; it does not read collision polygons, wangsets, terrain definitions or per-tile `<animation>`. `tiled.Tileset` currently drops those shapes on parse. Show only supported effects as editable engine properties. Unsupported metadata may be read and described as editor-only, but never sold as runtime collision or animation. |
+| Every Collision / Animation / Terrain / Class tab changes the game | **False.** `tilemap.stateOf` currently reads per-tile/tileset `passable` and tile `type`/`class`; it does not read collision polygons, wangsets, terrain definitions or per-tile `<animation>`. `tiled.Tileset` drops those shapes on parse. The current Boolean passability is a temporary engine implementation, **not** the TILES authoring contract: traversal must depend on the mover and the wall/water entities occupying its destination. |
 | A tileset is always a rectangular sheet | **False.** `Tileset.Collection()` identifies a sparse image collection. A grid of `0..tilecount-1` only describes a sheet. Collection tiles need their own pictures and declared IDs. |
 | SPRT can slice an arbitrary sheet | **False.** The renderer crops `image.Rect(column*tileSize, 0, (column+1)*tileSize, tileSize)` and reads column indices from `[[animation]].frames`. Only a one-row horizontal strip of square `window.tileSize` frames is presently playable. |
 | All mods' assets are merged | **False.** `cmd/ecs-db/run.go` selects the **first** mod with a nonempty `assets` directory for `animations.toml` and `sprites/`. An editor presenting a later mod's sheet as game-loaded would lie. |
 | The sprite file already has a lossless writer | **False.** `renderer.AnimLoader.Load` decodes `[[animation]]` and `[[entity_asset]]` with BurntSushi/toml into runtime structs. Re-encoding only those fields would discard comments, ordering and unknown metadata. SPRT needs an editing session and a preservation decision before Save. |
 
 ## Contracts and boundaries
+
+**Movement decision (before TILES authoring):** The first map stays grid-based
+and has no collision polygons. Walls are **separate entities** occupying
+cells; water or a river is one entity occupying a **set** of cells. A mover's
+ability to enter a cell depends on its components and the components of the
+entities occupying that cell, not on `Tile.passable` or a tile class string.
+Walking, swimming, flying and phasing therefore have different outcomes at a
+wall or water.
+Story 1's generic XML writer proving it can change a `passable` property does
+not mean TILES should offer a universal passability toggle.
+
+**Confirmed independent interactions:** `Passability` and `Visibility` are
+attachable components on **any** entity. They carry taxonomy/enum values,
+not universal Boolean fields or hard-coded wall/water type switches. A mover's
+**independent components** — e.g. Flying, Swimming or Phased — are evaluated
+against the `Passability` taxonomy of **every** destination occupant. Every
+restricting occupant must allow that mover. A flyer crosses a wall and river;
+a swimmer crosses water; a phased walker crosses a wall. An in-bounds cell
+without art is enterable when no occupant denies it. A river's occupied cells
+are an explicit set of offsets relative to its Position, without a polygon.
+
+`Visibility` is evaluated separately against the observer's **independent
+components**, such as NightVision; those abilities are not values in a
+universal vision-mode enum. A person sees over water they cannot traverse. A
+phased Kitty Pryde crosses a wall but does **not** see through it merely by
+phasing.
+Today's `LineOfSight` instead reads `TileGrid.IsPassable`; Story 3 removes
+that coupling. Schema currently supports string/array component fields but
+**not enum constraints**; Story 3 must validate the taxonomy vocabulary so
+an unknown category never silently means passable or transparent. Visibility
+controls sight occlusion here, not renderer drawing. DetectsMagic illustrates
+another independent observer capability, but revealing a hidden magical
+*target* is a **later detection feature**, not Story 3's occlusion rule. See
+[Story 3](03-occupant-traversal.md).
+
+**Rendering decision — implemented in Story 2:** the former importer created
+one Tile entity for the topmost nonempty tile per cell, while the renderer
+drew every visual layer directly from TMX/TSX. Lower visible tiles were not
+entities, and changing a Tile entity did not change the cached artwork. Now
+**every nonempty authored layer tile is a Tile entity**, including
+hidden layers whose visual component says not to draw. The game renderer
+reads component-backed per-instance artwork and order, with PNGs remaining
+file-backed assets. `mapId + layerID + cell` is the stable tile identity;
+reordering a layer does not replace its entities. Forge's unsaved working-map
+preview may still draw directly from the editor's TMX because that is an
+authoring view, not the game world's state.
+
+An occupant with its own visual component is likewise one entity even when
+its `OccupiedCells` covers several cells. The current Sprite renderer draws
+only once at Position; Story 3 must draw that one occupant across its
+footprint so a moving river does not leave its picture behind. Separate Tile
+entities can still supply background art.
 
 - TSX editing is an external tileset's own file session, not a mutation of the
   TMX that references it. The engine may resolve one TSX from several maps;
@@ -28,10 +80,11 @@ either mode.
   `passable` or `type` must leave those bytes intact, and the parser must read
   back the edited meaning. Do not convert a TSJ or rewrite an embedded tileset
   in the first story under a TSX-save label.
-- TILES may edit the engine's Boolean `passable` and per-tile class/type.
-  Polygon collision objects and Tiled tile animation do **not** control this
-  game's collision or sprite animator. If visible as metadata, say so. Saving a
-  TSX cannot hot-reload `comp_tile` or a running grid.
+- TILES shows tile pictures and type/class metadata. **MAP** authors walls,
+  rivers and other occupying entities and their movement components/footprints
+  after Stories 2–4. Do not offer a global `passable` toggle or polygon
+  collision authoring. Tiled tile animation does not control this game's sprite
+  animator. Saving a TSX cannot hot-reload the running game's grid.
 - SPRT writes `animations.toml` in the first assets mod, with
   `[[animation]] {name,sheet,frames,fps,loop}` and `[[entity_asset]]`
   `{entity_type,sheet}` as its contract. The renderer watches that TOML and the
@@ -47,13 +100,16 @@ either mode.
 | # | Story | Delivers |
 |---|---|---|
 | 1 | [Lossless TSX writer](01-tsx-writer.md) | Editable external TSX document with exact no-op round trip and surgical tile-property/class edits; unknown XML survives. |
-| 2 | Tileset editing session | Discover referenced external TSX/TSJ, one working value per path, dirty/save/discard/reload/conflict and project-scoped asset serving. |
-| 3 | TILES read surface | Sheet grid or sparse collection, enlarged selected tile, truthful authored/inherited metadata and source file; engine-only effects labelled. |
-| 4 | TILES property editing | `passable` and class/type authoring through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |
-| 5 | TILES validation | Parser, image and property refusals on tiles/tilesets; no silently ignored edit or false collision/animation promise. |
-| 6 | Animation-file session | Lossless `animations.toml` editing, first-assets-mod discovery, save/conflict and hot-reload behavior without exposing other mods as loaded. |
-| 7 | SPRT mode | One-row sheet preview, column-index frame sequencing, `fps`, `loop` and entity-to-sheet binding, within the renderer's bounds. |
-| 8 | Import sprite sheet | Dialog inside SPRT that picks/copies a project-local image, verifies its dimensions and creates playable frames/binding. Epic 17's generic asset dialogs must not duplicate this flow. |
+| 2 | [Entity-backed tile layers](02-entity-backed-tiles.md) | Import every authored layer tile as a stable entity and render tile instances from database components, not a static TMX snapshot. |
+| 3 | [Occupant-aware traversal](03-occupant-traversal.md) | Replace universal tile `passable` with a predicate over the mover and destination occupants, shared by player movement, A*, reachability and path steps; separate line of sight and render multi-cell occupants as one entity. |
+| 4 | MAP occupant authoring | Place a wall and an irregular, multi-cell water/river entity; inspect and edit their traversal components and occupied cells, without polygons. |
+| 5 | Tileset editing session | Discover referenced external TSX/TSJ, one working value per path, dirty/save/discard/reload/conflict and project-scoped asset serving. |
+| 6 | TILES read surface | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
+| 7 | TILES property editing | Per-tile class/type and supported art metadata through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |
+| 8 | TILES validation | Parser, image and metadata refusals on tiles/tilesets; no silently ignored edit or false polygon/animation promise. |
+| 9 | Animation-file session | Lossless `animations.toml` editing, first-assets-mod discovery, save/conflict and hot-reload behavior without exposing other mods as loaded. |
+| 10 | SPRT mode | One-row sheet preview, column-index frame sequencing, `fps`, `loop` and entity-to-sheet binding, within the renderer's bounds. |
+| 11 | Import sprite sheet | Dialog inside SPRT that picks/copies a project-local image, verifies its dimensions and creates playable frames/binding. Epic 17's generic asset dialogs must not duplicate this flow. |
 
 Each story gets its own acceptance criteria, implementation plan and Playwright
 steps (when it has a browser surface) **before** implementation, as in Epics

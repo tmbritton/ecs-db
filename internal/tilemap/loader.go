@@ -18,7 +18,7 @@ import (
 // It used to be a one-time bootstrap: it counted Tile entities and created none
 // if any existed, which made the database the source of truth after the first
 // run and the file decoration. A map edited afterwards loaded without error and
-// changed nothing. Loading now diffs — see SyncTiles for what the file owns and
+// changed nothing. Loading now diffs — see SyncLayerTiles for what the file owns and
 // what survives it.
 //
 // One format. The engine started with a bespoke TOML of '.' and '#' characters,
@@ -30,9 +30,8 @@ import (
 // It needs storage.EnsureInterpreterTables to have run: the spawns table is how
 // an object that has left the map takes its entity with it.
 //
-// The second result is the parsed map, for callers that need the file rather
-// than the grid — the renderer, which draws layers and tilesets that comp_tile
-// has no room for. Never nil when the error is nil.
+// The second result is the parsed map for startup metadata such as tile size
+// and object spawns. Game tile drawing reads the entities, not this map.
 func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path string) (*TileGrid, *tiled.Map, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,7 +42,8 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 		return nil, nil, err
 	}
 
-	if _, err := SyncTiles(ctx, svc, db, file.Tiles); err != nil {
+	mapID := MapID(path, file.Source)
+	if _, err := SyncLayerTiles(ctx, svc, db, mapID, filepath.Clean(path), file.LayerTiles); err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
 	}
 
@@ -67,7 +67,7 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 	}
 
 	grid := NewTileGrid(file.Width, file.Height)
-	if err := grid.Rebuild(ctx, db); err != nil {
+	if err := grid.RebuildMap(ctx, db, mapID); err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
 	}
 	return grid, file.Source, nil
@@ -79,11 +79,10 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 // already a width and a height nobody could tell apart at a call site, and the
 // parsed map makes five.
 type loaded struct {
-	Tiles  map[Point]TileState
-	Width  int
-	Height int
-	// Source is the parsed map. The renderer draws from it rather than from
-	// comp_tile, which holds one row per cell and so cannot say what is
-	// stacked on it.
+	LayerTiles []LayerTile
+	Width      int
+	Height     int
+	// Source is the parsed map; its layers have already been projected into
+	// LayerTiles, and it is used here only for spawns and map metadata.
 	Source *tiled.Map
 }

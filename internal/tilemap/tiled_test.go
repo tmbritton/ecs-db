@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -50,11 +51,19 @@ func tiledMap(t *testing.T, tileset, file, name string) string {
 // mapOf wraps layers in a map element of the given size with the two-tile
 // tileset attached at first gid 1 — so gid 1 is floor and gid 2 is wall.
 func mapOf(w, h int, layers ...string) string {
+	index := 0
+	layout := regexp.MustCompile(`<layer\b[^>]*>`).ReplaceAllStringFunc(strings.Join(layers, "\n"), func(tag string) string {
+		index++
+		if strings.Contains(tag, ` id="`) {
+			return tag
+		}
+		return strings.Replace(tag, "<layer ", fmt.Sprintf(`<layer id="%d" `, index), 1)
+	})
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <map version="1.10" orientation="orthogonal" renderorder="right-down" width="%d" height="%d" tilewidth="8" tileheight="8">
  <tileset firstgid="1" source="dungeon.tsx"/>
 %s
-</map>`, w, h, strings.Join(layers, "\n"))
+</map>`, w, h, layout)
 }
 
 // layerOf is one CSV tile layer of the given size.
@@ -79,7 +88,9 @@ func loadTiledMap(t *testing.T, path string) (*TileGrid, *sql.DB) {
 func tileTypeAt(t *testing.T, db *sql.DB, x, y int) string {
 	t.Helper()
 	var got string
-	err := db.QueryRow(`SELECT tile_type FROM comp_tile WHERE x = ? AND y = ?`, x, y).Scan(&got)
+	err := db.QueryRow(`SELECT t.tile_type FROM comp_tile t
+		JOIN comp_tilelayer l ON l.entity_id = t.entity_id WHERE t.x = ? AND t.y = ?
+		ORDER BY l.layer_order DESC, l.draw_order DESC LIMIT 1`, x, y).Scan(&got)
 	if err != nil {
 		t.Fatalf("reading tile_type at (%d,%d): %v", x, y, err)
 	}
@@ -142,7 +153,7 @@ func TestLoadMap_ReadsTMJAsWellAsTMX(t *testing.T) {
 	const tmj = `{"width":3,"height":1,"tilewidth":8,"tileheight":8,
  "orientation":"orthogonal",
  "tilesets":[{"firstgid":1,"source":"dungeon.tsx"}],
- "layers":[{"type":"tilelayer","name":"ground","width":3,"height":1,"data":[2,1,2]}]}`
+ "layers":[{"id":1,"type":"tilelayer","name":"ground","width":3,"height":1,"data":[2,1,2]}]}`
 
 	grid, db := loadTiledMap(t, tiledMap(t, twoTileTSX, tmj, "level.tmj"))
 
@@ -154,9 +165,8 @@ func TestLoadMap_ReadsTMJAsWellAsTMX(t *testing.T) {
 	}
 }
 
-// The decision this story had to make, and the one Forge's MAP mode depends on:
-// comp_tile holds one row per cell, so the loader must pick one tile out of the
-// stack, and the one it picks is the one the author sees on top.
+// Until Story 3, the topmost tile decides legacy movement; every authored tile
+// still has its own entity, including the floor below this wall.
 func TestLoadMap_TheTopmostNonEmptyTileDecidesTheCell(t *testing.T) {
 	// Floor everywhere; a wall drawn over the middle cell only.
 	path := tiledMap(t, twoTileTSX, mapOf(3, 1,
@@ -174,8 +184,8 @@ func TestLoadMap_TheTopmostNonEmptyTileDecidesTheCell(t *testing.T) {
 	if got := tileTypeAt(t, db, 1, 0); got != "wall" {
 		t.Errorf("tile_type at (1,0) = %q — the type comes from the same tile the passability does", got)
 	}
-	if n := tileCount(t, db); n != 3 {
-		t.Errorf("tile count = %d, want 3 — two layers is still one tile per cell", n)
+	if n := tileCount(t, db); n != 4 {
+		t.Errorf("tile count = %d, want 4 — every nonempty tile is an entity", n)
 	}
 }
 
@@ -517,19 +527,18 @@ func TestLoadMap_AMapThatDoesNotSayItsOrientationIsOrthogonal(t *testing.T) {
 	}
 }
 
-// Unreachable through LoadMap, which resolves its tilesets before it reads
-// them, and reachable from Forge's MAP mode, which will hand this a map it
-// built. Asserted directly rather than left as a guard nothing can enter.
-func TestCellAt_RefusesATilesetThatWasNeverRead(t *testing.T) {
+// Import may also be asked to project a map built in memory, without a
+// resolved tileset. That mistake is named rather than dereferenced.
+func TestLayerTilesOfTiled_RefusesATilesetThatWasNeverRead(t *testing.T) {
 	m := &tiled.Map{
 		Name: "in-memory", Width: 1, Height: 1,
 		Tilesets: []tiled.TilesetRef{{FirstGID: 1}},
 		Layers: []tiled.Layer{{
-			Name: "ground", Width: 1, Height: 1, Data: []uint32{1},
+			ID: 1, Name: "ground", Width: 1, Height: 1, Visible: true, Opacity: 1, Data: []uint32{1},
 		}},
 	}
 
-	_, _, err := cellAt(m, 0, 0)
+	_, err := LayerTilesOfTiled(m, "memory")
 	if err == nil {
 		t.Fatal("a tile from an unresolved tileset was accepted")
 	}
@@ -581,7 +590,7 @@ func TestLoadMap_RefusesAMapThatNamesNoTilesetAtAll(t *testing.T) {
 	svc, db := syncFixture(t)
 	file := `<?xml version="1.0"?>
 <map version="1.10" orientation="orthogonal" width="1" height="1" tilewidth="8" tileheight="8">
- <layer name="ground" width="1" height="1"><data encoding="csv">5</data></layer>
+ <layer id="1" name="ground" width="1" height="1"><data encoding="csv">5</data></layer>
 </map>`
 
 	_, _, err := LoadMap(context.Background(), svc, db, tiledMap(t, "", file, "level.tmx"))
@@ -708,7 +717,7 @@ func TestLoadMap_ATilesClassOutranksItsTilesets(t *testing.T) {
 // map that describes no cells is not an empty map — it is the level gone. The
 // parser accepts a map with no dimensions because nothing below it had a reason
 // to care; this is where the reason lives.
-func TestTilesOfTiled_RefusesAMapThatDescribesNoCells(t *testing.T) {
+func TestLayerTilesOfTiled_RefusesAMapThatDescribesNoCells(t *testing.T) {
 	cases := []struct {
 		name string
 		m    *tiled.Map
@@ -726,7 +735,7 @@ func TestTilesOfTiled_RefusesAMapThatDescribesNoCells(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := tilesOfTiled(c.m)
+			_, err := LayerTilesOfTiled(c.m, "memory")
 			if err == nil {
 				t.Fatal("accepted a map that would import as no cells")
 			}
@@ -737,12 +746,11 @@ func TestTilesOfTiled_RefusesAMapThatDescribesNoCells(t *testing.T) {
 	}
 }
 
-// ── What the loader hands the renderer ───────────────────────────────
+// ── What the loader hands its other consumers ───────────────────────────────
 
-// A Tiled map comes back alongside the grid, because the renderer draws layers
-// and tilesets that comp_tile has no room for: it holds one row per cell, so it
-// can say what a cell is and never what is stacked on it.
-func TestLoadMap_ReturnsTheParsedMapForTheRenderer(t *testing.T) {
+// The parsed map is still needed for spawns and startup tile-size validation;
+// game tile drawing reads its imported entities instead.
+func TestLoadMap_ReturnsTheParsedMapForSpawnAndMetadata(t *testing.T) {
 	svc, db := syncFixture(t)
 	path := tiledMap(t, twoTileTSX, mapOf(3, 2,
 		layerOf("ground", 3, 2, "", "2,1,2,\n2,2,2")), "level.tmx")
@@ -752,12 +760,12 @@ func TestLoadMap_ReturnsTheParsedMapForTheRenderer(t *testing.T) {
 		t.Fatalf("LoadMap: %v", err)
 	}
 	if src == nil {
-		t.Fatal("a Tiled map came back with nothing for the renderer to draw")
+		t.Fatal("a Tiled map came back with no source metadata")
 	}
 	if len(src.Layers) != 1 || src.Layers[0].Name != "ground" {
 		t.Errorf("the map has layers %+v, want the one named ground", src.Layers)
 	}
-	// Resolved, not just referenced: the renderer needs a path that opens.
+	// Import resolved the tileset path before projecting visual components.
 	if !src.Drawable() {
 		t.Error("the map came back with unresolved tilesets, so nothing can be drawn from it")
 	}

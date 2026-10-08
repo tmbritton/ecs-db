@@ -295,7 +295,8 @@ func TestBuild_TileLayerIDsExplainUnsafeEditsOnTheirRows(t *testing.T) {
 					continue
 				}
 				if len(issues) != 1 || issues[0].Warning || !strings.Contains(issues[0].Message, want) ||
-					!strings.Contains(issues[0].Message, "reorder or delete") {
+					!strings.Contains(issues[0].Message, "reorder or delete") ||
+					!strings.Contains(issues[0].Message, "cannot import") {
 					t.Errorf("layer %d has no actionable ID error: %+v", i, issues)
 				}
 			}

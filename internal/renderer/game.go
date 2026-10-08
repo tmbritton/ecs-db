@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"log"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -138,7 +139,9 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.Black)
 	if g.tr != nil {
-		screen.DrawImage(g.tr.Image(), nil)
+		if err := g.tr.Draw(screen); err != nil {
+			log.Printf("tilemap: draw: %v", err)
+		}
 	}
 
 	rows, err := g.db.Query(`

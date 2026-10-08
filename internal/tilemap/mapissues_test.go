@@ -36,22 +36,24 @@ func TestMapIssues_ReportsEveryEngineRefusalAgainstItsLayerAndCell(t *testing.T)
 	}
 }
 
-func TestMapIssues_CoveredBadTileIsNotAnEngineRefusal(t *testing.T) {
+func TestMapIssues_CoveredBadTileIsAnEngineRefusal(t *testing.T) {
 	m := &tiled.Map{
 		Name: "stacked.tmx", Width: 1, Height: 1,
 		Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: &tiled.Tileset{
-			Name: "floor", TileCount: 1, Image: tiled.Image{Source: "floor.png"},
+			Name: "floor", TileWidth: 16, TileHeight: 16, TileCount: 1, Columns: 1,
+			Image: tiled.Image{Source: "floor.png", Path: "floor.png", Width: 16, Height: 16},
 		}}},
 		Layers: []tiled.Layer{
 			{Name: "buried", Width: 1, Height: 1, Data: []uint32{99}},
 			{Name: "top", Width: 1, Height: 1, Data: []uint32{1}},
 		},
 	}
-	if issues := tilemap.MapIssues(m); len(issues) != 0 {
-		t.Errorf("engine loads the valid top tile; buried bad gid is not a load refusal: %+v", issues)
+	issues := tilemap.MapIssues(m)
+	if len(issues) != 1 || issues[0].Layer != 0 || !strings.Contains(issues[0].Message, "does not hold it") {
+		t.Errorf("bad lower tile is now imported, so it must be reported: %+v", issues)
 	}
 	m.Layers[1].Data[0] = 0
-	issues := tilemap.MapIssues(m)
+	issues = tilemap.MapIssues(m)
 	if len(issues) != 1 || issues[0].Layer != 0 || !strings.Contains(issues[0].Message, "does not hold it") {
 		t.Errorf("uncovering the bad tile did not attach its error to the buried layer: %+v", issues)
 	}
@@ -72,5 +74,24 @@ func TestMapIssues_NonOrthogonalMapUsesTheLoaderRefusal(t *testing.T) {
 	if len(issues) == 0 || issues[0].Layer != -1 ||
 		!strings.Contains(issues[0].Message, "square cells") {
 		t.Errorf("engine orientation refusal missing: %+v", issues)
+	}
+}
+
+func TestMapIssues_ReportsTileWhoseImageRectangleCannotBeDrawn(t *testing.T) {
+	m := &tiled.Map{
+		Name: "bad-art.tmx", Width: 1, Height: 1, TileWidth: 16, TileHeight: 16,
+		Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: &tiled.Tileset{
+			Name: "small", TileWidth: 16, TileHeight: 16, TileCount: 1, Columns: 1,
+			Image: tiled.Image{Source: "tiny.png", Path: "tiny.png", Width: 8, Height: 8},
+		}}},
+		Layers: []tiled.Layer{{
+			ID: 1, Name: "ground", Width: 1, Height: 1,
+			Visible: true, Opacity: 1, Data: []uint32{1},
+		}},
+	}
+	issues := tilemap.MapIssues(m)
+	if len(issues) != 1 || issues[0].Layer != 0 || issues[0].X != 0 ||
+		issues[0].Y != 0 || !strings.Contains(issues[0].Message, "tiny.png") {
+		t.Fatalf("missing image geometry refusal: %+v", issues)
 	}
 }

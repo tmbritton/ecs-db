@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "components": {
     "Position": {
       "type": "object",
@@ -30,6 +30,32 @@
         "y":         { "type": "integer" },
         "passable":  { "type": "boolean" },
         "tile_type": { "type": "string" }
+      }
+    },
+    "TileLayer": {
+      "type": "object",
+      "properties": {
+        "map_id":      { "type": "string" },
+        "layer_id":    { "type": "integer" },
+        "layer_order": { "type": "integer" },
+        "draw_order":  { "type": "integer" }
+      }
+    },
+    "TileVisual": {
+      "type": "object",
+      "properties": {
+        "image":    { "type": "string" },
+        "source_x": { "type": "integer" },
+        "source_y": { "type": "integer" },
+        "source_w": { "type": "integer" },
+        "source_h": { "type": "integer" },
+        "dest_x":   { "type": "integer" },
+        "dest_y":   { "type": "integer" },
+        "flip_h":   { "type": "boolean" },
+        "flip_v":   { "type": "boolean" },
+        "flip_d":   { "type": "boolean" },
+        "alpha":    { "type": "number" },
+        "visible":  { "type": "boolean" }
       }
     },
     "Path": {
@@ -68,7 +94,7 @@
       "validationLevel": "strict"
     },
     "Tile": {
-      "requiredComponents": ["Tile"],
+      "requiredComponents": ["Tile", "TileLayer", "TileVisual"],
       "optionalComponents": [],
       "allowExtraComponents": false,
       "validationLevel": "strict"

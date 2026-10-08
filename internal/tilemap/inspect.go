@@ -1,6 +1,10 @@
 package tilemap
 
-import "github.com/tmbritton/ecs-db/internal/tiled"
+import (
+	"fmt"
+
+	"github.com/tmbritton/ecs-db/internal/tiled"
+)
 
 // MapIssue is an engine refusal projected onto the authored layer/cell that
 // caused it. Coordinates are -1 when the refusal belongs to a whole layer or
@@ -11,10 +15,9 @@ type MapIssue struct {
 	Message string
 }
 
-// MapIssues collects cell and shape refusals with the engine's own checkShape
-// and cellAt. Like the loader, it considers only the topmost non-empty tile at
-// each cell: an invalid lower tile hidden under a valid one does not stop the
-// engine loading. Unlike the loader, one bad cell does not hide the next.
+// MapIssues collects cell and shape refusals for every authored layer tile.
+// The importer no longer ignores a bad tile just because another layer covers
+// it. Unlike the loader, one bad cell does not hide the next.
 func MapIssues(m *tiled.Map) []MapIssue {
 	if m == nil {
 		return nil
@@ -35,20 +38,33 @@ func MapIssues(m *tiled.Map) []MapIssue {
 			issues = append(issues, MapIssue{Layer: i, X: -1, Y: -1, Message: err.Error()})
 		}
 	}
-	for y := 0; y < m.Height; y++ {
-		for x := 0; x < m.Width; x++ {
-			owner := -1
-			for i := len(m.Layers) - 1; i >= 0; i-- {
-				if m.Layers[i].TileAt(x, y).GID != 0 {
-					owner = i
-					break
+	type cell struct{ layer, x, y int }
+	drawProblems := make(map[cell]string)
+	for _, placement := range m.AllPlacements() {
+		if placement.Problem != "" {
+			drawProblems[cell{placement.LayerIndex, placement.X, placement.Y}] = placement.Problem
+		}
+	}
+	for i, layer := range m.Layers {
+		for y := 0; y < m.Height; y++ {
+			for x := 0; x < m.Width; x++ {
+				gid := layer.TileAt(x, y).GID
+				if gid == 0 {
+					continue
 				}
-			}
-			if owner < 0 {
-				continue
-			}
-			if _, _, err := cellAt(m, x, y); err != nil {
-				issues = append(issues, MapIssue{Layer: owner, X: x, Y: y, Message: err.Error()})
+				where := fmt.Sprintf("tilemap: %s: layer %q: tile at (%d,%d) has global id %d", m.Name, layer.Name, x, y, gid)
+				ts, local, err := tileOf(m, where, gid)
+				if err == nil {
+					_, err = stateOf(ts, local, where)
+				}
+				if err == nil {
+					if why := drawProblems[cell{i, x, y}]; why != "" {
+						err = fmt.Errorf("%s: %s", where, why)
+					}
+				}
+				if err != nil {
+					issues = append(issues, MapIssue{Layer: i, X: x, Y: y, Message: err.Error()})
+				}
 			}
 		}
 	}

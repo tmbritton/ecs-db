@@ -24,7 +24,7 @@ type SpawnResult struct {
 	// Deleted counts entities whose object is no longer in the map.
 	Deleted int
 	// Unchanged counts objects the database already agreed with, on the same
-	// terms as SyncTiles' Result: a load with no edit to the map writes nothing.
+	// terms as SyncLayerTiles' Result: a load with no edit to the map writes nothing.
 	Unchanged int
 	// Refused is one sentence per object that could not be spawned, in file
 	// order. Refusals do not stop the import: a map with a typo in one goblin
