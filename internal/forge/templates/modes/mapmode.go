@@ -281,7 +281,7 @@ func cellsOfLayer(c mapcanvas.Canvas, index int) []mapcanvas.Cell {
 // reach into mapcanvas for a list it only renders.
 func Steps() []int { return mapcanvas.Steps() }
 
-// MapView is which map is being edited, and nothing else.
+// MapView is which map and authored thing are being inspected.
 //
 // It used to carry the zoom, the tile in hand, the active layer and which
 // layers were drawn, all of them in the query string. They are signals now, for
@@ -291,12 +291,15 @@ func Steps() []int { return mapcanvas.Steps() }
 // as it was and undo whatever had happened since. What the server does not
 // render, a re-render cannot clobber.
 //
-// The map itself stays, because it is not view state: it says which file is
-// being edited, it belongs in a URL somebody can paste, and changing it is a
-// page load rather than a repaint.
+// The map and selected spawn/Tile stay in the URL: they identify authored
+// content for an inspector, and a page load gives its fixed subscription the
+// same selection. Zoom, tool, visibility and tile in hand remain signals.
 type MapView struct {
-	Path  string
-	Spawn int
+	Path    string
+	Spawn   int
+	LayerID int
+	CellX   int
+	CellY   int
 }
 
 // Href is the page for this view.
@@ -308,16 +311,26 @@ func (v MapView) Href() string {
 	if v.Spawn > 0 {
 		query.Set("spawn", strconv.Itoa(v.Spawn))
 	}
+	if v.LayerID > 0 {
+		query.Set("layer", strconv.Itoa(v.LayerID))
+		query.Set("x", strconv.Itoa(v.CellX))
+		query.Set("y", strconv.Itoa(v.CellY))
+	}
 	return "/forge/map?" + query.Encode()
 }
 
-// WithMap is this view pointed at another map. Nothing carries over, because
-// nothing else is left to carry: what used to survive this call — a layer
-// index, a tile id — meant different things in a different map anyway.
+// WithMap points at another map; an authored selection in the old map cannot
+// be carried to a different file.
 func (v MapView) WithMap(path string) MapView { return MapView{Path: path} }
 
 // WithSpawn selects one object without changing the map it belongs to.
 func (v MapView) WithSpawn(id int) MapView { return MapView{Path: v.Path, Spawn: id} }
+
+// WithCell selects one positioned Tile by stable layer ID and cell coordinate.
+// Even the origin needs explicit x=0,y=0 to distinguish selection from none.
+func (v MapView) WithCell(layerID, x, y int) MapView {
+	return MapView{Path: v.Path, LayerID: layerID, CellX: x, CellY: y}
+}
 
 // hideSeed declares one layer's visibility signal, seeded from the file, and
 // only if the page does not already have it.
@@ -339,22 +352,21 @@ func hideSeed(l mapcanvas.Layer) string {
 	return `{"` + hideSignalName(l) + `":` + strconv.FormatBool(l.HiddenInFile) + `}`
 }
 
-// A Tool is one of the three things a stroke can do.
+// A Tool is one of the gestures on the MAP canvas.
 type Tool struct {
 	Kind  string
 	Glyph string
 	Title string
 }
 
-// Tools are the tools the toolbar offers, in the prototype's order. The kinds
-// are paint.Stamp, paint.Fill and paint.Erase — named as strings here because
-// the template writes them into a signal, and the server parses that signal
-// back into a paint.Kind. paint's own switch is what refuses anything else.
+// Inspect uses the completed gesture to select a positioned Tile in the URL;
+// only stamp, fill and erase become paint operations on the server.
 func Tools() []Tool {
 	return []Tool{
 		{Kind: "stamp", Glyph: "🖌", Title: "paint the tile in hand"},
 		{Kind: "fill", Glyph: "▧", Title: "fill a rectangle with the tile in hand"},
 		{Kind: "erase", Glyph: "⌫", Title: "clear a cell"},
+		{Kind: "inspect", Glyph: "⌕", Title: "inspect the selected layer's Tile"},
 	}
 }
 
@@ -508,9 +520,62 @@ func turnLabelSeed() string {
 func strokeAction(data Data) string {
 	where := "'/forge/map/paint?map=" + urlValue(data.SelectedMap) +
 		"&x=' + evt.detail.x + '&y=' + evt.detail.y"
-	return "$tool === '" + string(paint.Fill) + "' " +
+	inspect := "'/forge/map?map=" + urlValue(data.SelectedMap) +
+		"&layer=' + $layerID + '&x=' + evt.detail.x + '&y=' + evt.detail.y"
+	return "$tool === 'inspect' ? (" + persistMapViewAction(data) + ", window.location.assign(" + inspect + ")) : $tool === '" + string(paint.Fill) + "' " +
 		"? @post(" + where + " + '&x2=' + evt.detail.x2 + '&y2=' + evt.detail.y2) " +
 		": @post(" + where + " + '&cells=' + evt.detail.cells)"
+}
+
+func mapViewKey(data Data) string { return quoteJS("forge-map-view:" + data.SelectedMap) }
+
+func persistMapViewAction(data Data) string {
+	return "window.sessionStorage.setItem(" + mapViewKey(data) + ", JSON.stringify(" + mapViewSignals(data) + "))"
+}
+
+func mapViewSignals(data Data) string {
+	var fields []string
+	for _, name := range []string{"zoom", "tool", "tile", "flipH", "flipV", "flipD", "grid", "group", "layer", "layerID"} {
+		fields = append(fields, quoteJS(name)+":$"+name)
+	}
+	for _, layer := range data.Canvas.Layers {
+		name := LayerHideSignal(layer.ID, layer.Index)
+		fields = append(fields, quoteJS(name)+":$"+name)
+	}
+	return "{" + strings.Join(fields, ",") + "}"
+}
+
+// The head is SSE-patched, so restoration removes its one-use value before
+// assigning signals. Later patches must not rewind view state the user changed.
+func restoreMapViewAction(data Data) string {
+	if data.SelectedMap == "" {
+		return ""
+	}
+	var assigns []string
+	for _, name := range []string{"zoom", "tool", "tile", "flipH", "flipV", "flipD", "grid", "group", "layer", "layerID"} {
+		assigns = append(assigns, "$"+name+"=view["+quoteJS(name)+"]")
+	}
+	for _, layer := range data.Canvas.Layers {
+		name := LayerHideSignal(layer.ID, layer.Index)
+		assigns = append(assigns, "if(Object.prototype.hasOwnProperty.call(view,"+quoteJS(name)+")) $"+name+"=view["+quoteJS(name)+"]")
+	}
+	return "const key=" + mapViewKey(data) + ";const raw=window.sessionStorage.getItem(key);" +
+		"if(raw){window.sessionStorage.removeItem(key);try{const view=JSON.parse(raw);" +
+		strings.Join(assigns, ";") + ";}catch{}}"
+}
+
+// Inspect's keyboard cursor belongs to the focused canvas, not the stamp or
+// the browser's held-key paint gesture. It changes no file until Enter selects
+// a URL-addressed Tile; arrows move only the visible browser-owned cursor.
+func inspectKeyAction(data Data) string {
+	selectURL := "'/forge/map?map=" + urlValue(data.SelectedMap) +
+		"&layer=' + $layerID + '&x=' + $inspectX + '&y=' + $inspectY"
+	return "if ($tool !== 'inspect' || evt.target !== el) return;" +
+		"if (evt.key === 'ArrowRight') { evt.preventDefault(); $inspectX = Math.min(" + itoa(data.Canvas.Cols-1) + ", $inspectX + 1); return; }" +
+		"if (evt.key === 'ArrowLeft') { evt.preventDefault(); $inspectX = Math.max(0, $inspectX - 1); return; }" +
+		"if (evt.key === 'ArrowDown') { evt.preventDefault(); $inspectY = Math.min(" + itoa(data.Canvas.Rows-1) + ", $inspectY + 1); return; }" +
+		"if (evt.key === 'ArrowUp') { evt.preventDefault(); $inspectY = Math.max(0, $inspectY - 1); return; }" +
+		"if (evt.key === 'Enter' || evt.key === ' ') { evt.preventDefault(); " + persistMapViewAction(data) + "; window.location.assign(" + selectURL + "); }"
 }
 
 // ghostNoteExpr is the label beside the ghost stamp: what a click would do,
@@ -521,7 +586,7 @@ func strokeAction(data Data) string {
 // orientation to report — the empty cell has no facing — so it says only what
 // it is.
 func ghostNoteExpr() string {
-	return "$tool === '" + string(paint.Erase) + "' ? 'erase' : " +
+	return "$tool === 'inspect' ? 'inspect' : $tool === '" + string(paint.Erase) + "' ? 'erase' : " +
 		"($tool + ' ' + " + turnLabels() + "[" + turnKey + "])"
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
 	"github.com/tmbritton/ecs-db/internal/forge/mapvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 	"github.com/tmbritton/ecs-db/internal/tilemap"
 )
@@ -20,6 +21,7 @@ func (s *Server) registerMapEditRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/map/discard", s.sameOriginOnly(s.handleMapDiscard))
 	mux.HandleFunc("POST /forge/map/reload", s.sameOriginOnly(s.handleMapReload))
 	mux.HandleFunc("POST /forge/map/paint", s.sameOriginOnly(s.handlePaint))
+	mux.HandleFunc("POST /forge/map/tile/link", s.sameOriginOnly(s.handleTileLink))
 	mux.HandleFunc("POST /forge/map/spawn/place", s.sameOriginOnly(s.handleSpawnPlace))
 	mux.HandleFunc("POST /forge/map/spawn/move", s.sameOriginOnly(s.handleSpawnMove))
 	mux.HandleFunc("POST /forge/map/spawn/delete", s.sameOriginOnly(s.handleSpawnDelete))
@@ -259,8 +261,30 @@ func (s *Server) addMapData(data *modes.Data, r *http.Request, slug string) {
 		}
 	}
 	data.MapValidation = mapvalidation.Build(&data.Schema, data.SelectedMap, m, identities, refProblems)
+	data.MapPreview = m
 	data.Canvas = mapcanvas.Build(m, mapcanvas.Options{AssetURL: assetURL})
 	data.ObjectGroups = m.ObjectGroups
+	if r.URL.Query().Has("layer") && !r.URL.Query().Has("spawn") {
+		layerID, err := strconv.Atoi(r.URL.Query().Get("layer"))
+		if err != nil || layerID <= 0 {
+			data.TileProblem = "selected tile layer must have a positive Tiled ID"
+		} else {
+			data.MapView = data.MapView.WithCell(layerID, 0, 0)
+			x, xErr := strconv.Atoi(r.URL.Query().Get("x"))
+			y, yErr := strconv.Atoi(r.URL.Query().Get("y"))
+			if !r.URL.Query().Has("x") || !r.URL.Query().Has("y") || xErr != nil || yErr != nil {
+				data.TileProblem = "select a tile with integer x and y cell coordinates"
+			} else {
+				data.MapView = data.MapView.WithCell(layerID, x, y)
+				selected, inspectErr := tilelinks.Inspect(m, layerID, tilelinks.Cell{X: x, Y: y})
+				if inspectErr != nil {
+					data.TileProblem = inspectErr.Error()
+				} else {
+					data.SelectedTile = &selected
+				}
+			}
+		}
+	}
 	if id, err := strconv.Atoi(r.URL.Query().Get("spawn")); err == nil && id > 0 {
 		data.MissingSpawn = id
 		data.MapView = modes.MapView{Path: data.SelectedMap, Spawn: id}

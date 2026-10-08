@@ -91,14 +91,18 @@ func MapSignals(data Data) string {
 	// The tool and the stamp's orientation. They are the browser's, and travel
 	// to the server with each stroke; see turnAction.
 	b.WriteString(`,"tool":"stamp","flipH":false,"flipV":false,"flipD":false`)
+	b.WriteString(`,"inspectX":`)
+	b.WriteString(strconv.Itoa(data.MapView.CellX))
+	b.WriteString(`,"inspectY":`)
+	b.WriteString(strconv.Itoa(data.MapView.CellY))
 	// The grid is drawn, like Tiled's and like the prototype's default. View
 	// state, never written to the file — it is scaffolding for the eye.
 	b.WriteString(`,"grid":true`)
 	b.WriteString(`,"group":0`)
 	b.WriteString(`,"tile":0,"layer":`)
-	b.WriteString(strconv.Itoa(activeLayerIndex(data.Canvas)))
+	b.WriteString(strconv.Itoa(selectedLayerIndex(data)))
 	b.WriteString(`,"layerID":`)
-	if i := activeLayerIndex(data.Canvas); i < len(data.Canvas.Layers) {
+	if i := selectedLayerIndex(data); i < len(data.Canvas.Layers) {
 		b.WriteString(strconv.Itoa(data.Canvas.Layers[i].ID))
 	} else {
 		b.WriteByte('0')
@@ -111,6 +115,17 @@ func MapSignals(data Data) string {
 	}
 	b.WriteByte('}')
 	return b.String()
+}
+
+func selectedLayerIndex(data Data) int {
+	if data.MapView.LayerID > 0 {
+		for _, layer := range data.Canvas.Layers {
+			if layer.ID == data.MapView.LayerID {
+				return layer.Index
+			}
+		}
+	}
+	return activeLayerIndex(data.Canvas)
 }
 
 // activeLayerIndex is the layer a stroke lands on when the page opens: the

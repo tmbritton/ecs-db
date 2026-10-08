@@ -20,7 +20,11 @@ func TestStrokeAction_SendsTheGestureTheToolMeans(t *testing.T) {
 	}
 	// Fill means the rectangle its two ends span, so it is the branch that sends
 	// the far corner and no trail.
-	fill, trailed, ok := strings.Cut(got, ":")
+	inspect, paintBranches, ok := strings.Cut(got, " : ")
+	if !ok || !strings.Contains(inspect, "window.location.assign") || strings.Contains(inspect, "/forge/map/paint") {
+		t.Fatalf("inspect must navigate without painting: %s", got)
+	}
+	fill, trailed, ok := strings.Cut(paintBranches, " : ")
 	if !ok {
 		t.Fatalf("the expression is not a choice between two posts: %s", got)
 	}

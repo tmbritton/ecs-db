@@ -105,7 +105,7 @@ entity with Sprite and OccupiedCells still draws across its own footprint.
 | 1 | [Lossless TSX writer](01-tsx-writer.md) | Editable external TSX document with exact no-op round trip and surgical tile-property/class edits; unknown XML survives. |
 | 2 | [Entity-backed tile layers](02-entity-backed-tiles.md) | Import every authored layer tile as a stable entity and render tile instances from database components, not a static TMX snapshot. |
 | 3 | [Occupant-aware traversal](03-occupant-traversal.md) | Replace universal tile `passable` with a predicate over every entity referenced by the destination's positioned Tiles, shared by player movement, A*, reachability and path steps; separate line of sight. |
-| 4 | MAP occupant authoring | Painting a Tile instantiates or links its referenced entities; inspect/edit links and share one River instance among an irregular set of Tiles, without polygons. |
+| 4 | [MAP occupant authoring](04-map-occupant-authoring.md) | Painting a Tile instantiates or links its referenced entities; inspect/edit links and share one River instance among an irregular set of Tiles, without polygons. |
 | 5 | Tileset editing session | Discover referenced external TSX/TSJ, one working value per path, dirty/save/discard/reload/conflict and project-scoped asset serving. |
 | 6 | TILES read surface | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
 | 7 | TILES property editing | Per-tile class/type and supported art metadata through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |
@@ -118,3 +118,7 @@ Each story gets its own acceptance criteria, implementation plan and Playwright
 steps (when it has a browser surface) **before** implementation, as in Epics
 12–15. TILES and SPRT can then be verified without treating any unimplemented
 prototype tab as a working feature.
+
+After Story 11 completes Epic 16, the next implementation target is the
+[turn-based point-and-click gameplay demo](../../plan.md#gameplay-milestone-turn-based-point-and-click-demo).
+The remaining Forge epics resume after that playable milestone.

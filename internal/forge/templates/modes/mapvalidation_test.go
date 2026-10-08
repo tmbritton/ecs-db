@@ -62,3 +62,22 @@ func TestMapValidation_PinsConflictTilesetAndDuplicateSpawnBrowserSelectors(t *t
 		t.Error("ambiguous IDs expose a navigation or drag that edits the wrong claimant")
 	}
 }
+
+func TestMapCanvas_UntypedLinkedObjectGetsVisibleNoninteractiveProblemMarker(t *testing.T) {
+	data := mapRegionFixture()
+	obj := tiled.Object{ID: 5, X: 0, Y: 0, Properties: tiled.Properties{"TileLink.layerID": {Type: "int", Value: "1"}}}
+	data.ObjectGroups = []tiled.ObjectGroup{{Objects: []tiled.Object{obj}}}
+	data.MapValidation = mapvalidation.Report{Issues: []mapvalidation.Issue{{
+		Kind:  mapvalidation.Spawn,
+		Group: 0, ObjectIndex: 0, ObjectID: 5, Message: "TileLink object 5 has no entity type",
+	}}}
+	markup := render(t, mapCanvas(data))
+	for _, want := range []string{`data-testid="tile-link-object-5"`, `data-invalid="true"`, `has no entity type`} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("invalid untyped TileLink is invisible: missing %q", want)
+		}
+	}
+	if strings.Contains(markup, `href="/forge/map?map=level.tmx&amp;spawn=5"`) {
+		t.Error("untyped linked object pretends to have an editable spawn")
+	}
+}

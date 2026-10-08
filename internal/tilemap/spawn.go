@@ -679,6 +679,33 @@ func ValidateSpawn(s *schema.DatabaseSchema, m *tiled.Map, obj tiled.Object) (wo
 	return world.ValidateEntityCreation(s, obj.Type, names), nil
 }
 
+// ValidateSpawnFields checks the non-null fields of every component a linked
+// object actually authors. A type contract can accept TileVisual by name while
+// an incomplete TileVisual row still fails on SQLite insertion.
+func ValidateSpawnFields(s *schema.DatabaseSchema, m *tiled.Map, obj tiled.Object) error {
+	components, err := spawnComponents(s, m, obj)
+	if err != nil {
+		return err
+	}
+	for _, component := range components {
+		declared := s.Components[component.Name]
+		if schema.StorageLayout(declared.Type) != schema.LayoutColumns {
+			continue
+		}
+		var fields []string
+		for name := range declared.Properties {
+			fields = append(fields, name)
+		}
+		sort.Strings(fields)
+		for _, name := range fields {
+			if _, present := component.Values[name]; !present && !schema.PropertyNullable(declared.Properties[name].Type) {
+				return fmt.Errorf("object %d: %s.%s is required to spawn its entity", obj.ID, component.Name, name)
+			}
+		}
+	}
+	return nil
+}
+
 // spawnComponents turns an object into the components an entity is made of.
 //
 // Position comes from the object's own coordinates. Everything else is a custom

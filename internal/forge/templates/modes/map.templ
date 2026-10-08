@@ -129,6 +129,9 @@ templ mapToolbar(data Data) {
 						data-attr:data-current={ flag("$tool === '" + tool.Kind + "'") }
 						data-attr:aria-current={ flag("$tool === '" + tool.Kind + "'") }
 						data-testid={ "tool-" + tool.Kind }
+						if tool.Kind == "inspect" {
+							aria-label="Inspect a Tile"
+						}
 						title={ tool.Title }
 					>{ tool.Glyph }</button>
 				}
@@ -211,6 +214,7 @@ templ mapCanvas(data Data) {
 			tabindex="0"
 			aria-label="Map canvas; right-click a tile to pick it"
 			data-on:paintstroke={ strokeAction(data) }
+			data-on:keydown={ inspectKeyAction(data) }
 			data-on:spawndrop={ spawnDropAction(data.SelectedMap) }
 		>
 			// The grid is outside the scaled box on purpose: inside it, an 8×
@@ -268,7 +272,11 @@ templ mapCanvas(data Data) {
 					</div>
 				}
 			</div>
-			<div class="map-spawns" data-testid="spawn-canvas">
+			<div class="map-inspect-cursor" data-testid="map-inspect-cursor" aria-hidden="true"
+				data-class="{'map-inspect-cursor--on': $tool === 'inspect'}"
+				data-style={ "{'left': ($inspectX * $zoom * " + itoa(data.Canvas.TileW) + ") + 'px', 'top': ($inspectY * $zoom * " + itoa(data.Canvas.TileH) + ") + 'px'}" }
+			></div>
+			<div class="map-spawns" data-testid="spawn-canvas" data-class="{'map-spawns--tile-tool': $tool === 'inspect' || $tool === 'erase'}">
 				for gi, group := range data.ObjectGroups {
 					for oi, obj := range group.Objects {
 						if obj.Type != "" {
@@ -294,6 +302,16 @@ templ mapCanvas(data Data) {
 									<span class="map-validation-mark" role="img" aria-label="spawn has a warning">!</span>
 							}</a>
 							}
+						} else if hasAuthoredTileLink(obj) {
+							<div
+								class="map-spawn map-spawn--invalid map-spawn--ambiguous"
+								style={ spawnStyle(obj, data.Canvas.TileH) }
+								data-testid={ invalidTileLinkID(ids, gi, oi, obj.ID) }
+								data-invalid="true"
+								role="img"
+								aria-label={ "untyped TileLink object " + itoa(obj.ID) + " has a problem" }
+								title={ mapProblemTitle(data.MapValidation, "spawn", 0, 0, 0, gi, oi) }
+							>!</div>
 						}
 					}
 				}

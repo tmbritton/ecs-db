@@ -73,6 +73,92 @@ func TestBuild_ReportsEveryPropertyMistakeAndTheMissingComponentOnItsSpawn(t *te
 	}
 }
 
+func TestBuild_InvalidTileLinkMarksItsObjectOnTheMap(t *testing.T) {
+	m := &tiled.Map{
+		Width: 1, Height: 1, TileWidth: 8, TileHeight: 8,
+		Layers: []tiled.Layer{{ID: 1, Name: "ground", Width: 1, Height: 1, Data: []uint32{0}}},
+		ObjectGroups: []tiled.ObjectGroup{{Objects: []tiled.Object{{
+			ID: 5, Type: "Goblin", X: 0, Y: 0,
+			Properties: tiled.Properties{
+				"Health.hp": {Type: "int", Value: "4"}, "TileLink.layerID": {Type: "int", Value: "1"},
+			},
+		}}}},
+	}
+	s := validationSchema(schema.ValidationStrict)
+	report := mapvalidation.Build(&s, "level.tmx", m, nil, nil)
+	problems := report.SpawnIssues(0, 0)
+	found := false
+	for _, issue := range problems {
+		if strings.Contains(issue.Message, "empty") && issue.ObjectID == 5 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("TileLink's bad cell was not attributed to object 5: %+v", problems)
+	}
+}
+
+func TestBuild_LinkedObjectWithIncompleteOptionalComponentIsMarked(t *testing.T) {
+	m := &tiled.Map{
+		Width: 1, Height: 1, TileWidth: 8, TileHeight: 8,
+		Layers: []tiled.Layer{{ID: 1, Name: "ground", Width: 1, Height: 1, Data: []uint32{0}}},
+		ObjectGroups: []tiled.ObjectGroup{{Objects: []tiled.Object{{
+			ID: 5, Type: "Goblin", X: 0, Y: 0,
+			Properties: tiled.Properties{
+				"Health.hp": {Type: "int", Value: "4"}, "Visibility.kind": {Value: "clear"},
+				"TileLink.layerID": {Type: "int", Value: "1"},
+			},
+		}}}},
+	}
+	s := validationSchema(schema.ValidationStrict)
+	s.Components["Visibility"] = schema.Component{Type: "object", Properties: map[string]schema.Property{
+		"kind": {Type: "string"}, "radius": {Type: "number"},
+	}}
+	s.Interactions = map[string]map[string]schema.InteractionRule{"Visibility": {"clear": {Open: true}}}
+	goType := s.EntityTypes["Goblin"]
+	goType.OptionalComponents = []string{"Visibility"}
+	s.EntityTypes["Goblin"] = goType
+	report := mapvalidation.Build(&s, "level.tmx", m, nil, nil)
+	found := false
+	for _, issue := range report.SpawnIssues(0, 0) {
+		found = found || strings.Contains(issue.Message, "Visibility.radius")
+	}
+	if !found {
+		t.Fatalf("linked object with incomplete optional component was not marked: %+v", report.SpawnIssues(0, 0))
+	}
+}
+
+func TestBuild_InvalidTileLinkObjectIdentityIsMarkedEvenWithoutAClass(t *testing.T) {
+	for _, tt := range []struct {
+		name, typ string
+		id        int
+		want      string
+	}{
+		{"untyped object", "", 5, "no entity type"},
+		{"nonpositive object ID", "Goblin", 0, "positive"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &tiled.Map{
+				Width: 1, Height: 1, TileWidth: 8, TileHeight: 8,
+				Layers: []tiled.Layer{{ID: 1, Width: 1, Height: 1, Data: []uint32{1}}},
+				ObjectGroups: []tiled.ObjectGroup{{Objects: []tiled.Object{{
+					ID: tt.id, Type: tt.typ,
+					Properties: tiled.Properties{"TileLink.layerID": {Type: "int", Value: "1"}, "Health.hp": {Type: "int", Value: "4"}},
+				}}}},
+			}
+			s := validationSchema(schema.ValidationStrict)
+			report := mapvalidation.Build(&s, "level.tmx", m, nil, nil)
+			found := false
+			for _, issue := range report.SpawnIssues(0, 0) {
+				found = found || strings.Contains(issue.Message, tt.want)
+			}
+			if !found {
+				t.Fatalf("TileLink invalid identity not marked: %+v", report.SpawnIssues(0, 0))
+			}
+		})
+	}
+}
+
 func TestBuild_DuplicateMapAndSpawnIdentitiesNameBothOwners(t *testing.T) {
 	m := &tiled.Map{
 		Name: "a.tmx", Width: 2, Height: 1, TileWidth: 16, TileHeight: 16,

@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
+	"github.com/tmbritton/ecs-db/internal/schema"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
 func TestMapView_AnEmptyViewIsThePlainMode(t *testing.T) {
@@ -24,6 +27,165 @@ func TestMapView_SwitchingMapsPointsAtTheNewOne(t *testing.T) {
 	got := MapView{Path: "/p/a.tmx"}.WithMap("/p/b.tmx")
 	if got.Path != "/p/b.tmx" {
 		t.Errorf("path is %q", got.Path)
+	}
+}
+
+func TestMapView_CellSelectionKeepsLayerIdentityAndClearsOnOtherSelection(t *testing.T) {
+	base := MapView{Path: "mods/map/level.tmx"}
+	for _, tt := range []struct {
+		name string
+		view MapView
+		want string
+	}{
+		{"origin cell", base.WithCell(7, 0, 0), "/forge/map?layer=7&map=mods%2Fmap%2Flevel.tmx&x=0&y=0"},
+		{"other cell", base.WithCell(9, 3, 2), "/forge/map?layer=9&map=mods%2Fmap%2Flevel.tmx&x=3&y=2"},
+		{"spawn clears cell", base.WithCell(7, 0, 0).WithSpawn(6), "/forge/map?map=mods%2Fmap%2Flevel.tmx&spawn=6"},
+		{"switching map clears cell", base.WithCell(7, 0, 0).WithMap("other.tmx"), "/forge/map?map=other.tmx"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.view.Href(); got != tt.want {
+				t.Fatalf("MapView.Href = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMapSignals_SelectedCellSeedsItsLayerAndKeyboardCursor(t *testing.T) {
+	data := mapRegionFixture()
+	data.Canvas.Layers = []mapcanvas.Layer{{Index: 0, ID: 4}, {Index: 1, ID: 9}}
+	data.MapView = MapView{Path: "level.tmx"}.WithCell(9, 1, 0)
+	got := MapSignals(data)
+	for _, want := range []string{`"layer":1`, `"layerID":9`, `"inspectX":1`, `"inspectY":0`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("selected Tile URL did not seed view's keyboard cursor: missing %q in %s", want, got)
+		}
+	}
+}
+
+func TestRestoreMapViewAction_DoesNotOverwriteANewLayerWithMissingSavedState(t *testing.T) {
+	data := mapRegionFixture()
+	data.Canvas.Layers = []mapcanvas.Layer{{Index: 0, ID: 1}, {Index: 1, ID: 9}}
+	got := restoreMapViewAction(data)
+	for _, id := range []string{"hideID1", "hideID9"} {
+		if !strings.Contains(got, `hasOwnProperty.call(view,`+quoteJS(id)+`)`) {
+			t.Errorf("restoring a page that gained layer %s would overwrite its file visibility: %s", id, got)
+		}
+	}
+}
+
+func TestInspectKeyAction_PersistsViewBeforeKeyboardNavigation(t *testing.T) {
+	action := inspectKeyAction(mapRegionFixture())
+	if save, navigate := strings.Index(action, "sessionStorage.setItem("), strings.Index(action, "window.location.assign("); save < 0 || navigate < save {
+		t.Errorf("keyboard inspection discards the current view state: %s", action)
+	}
+}
+
+func TestMapInspector_PinsBrowserTileSelectionTestIDs(t *testing.T) {
+	data := mapRegionFixture()
+	data.MapView = MapView{Path: "level.tmx", LayerID: 1, CellX: 2, CellY: 1}
+	data.SelectedTile = &tilelinks.Inspection{LayerID: 1, X: 2, Y: 1, GID: 3, EntityType: "Wall"}
+	markup := render(t, mapToolbar(data)) + render(t, mapCanvas(data)) + render(t, MapInspectorRegion(data))
+	for _, id := range []string{"tool-inspect", "map-inspect-cursor", "tile-selected", "tile-template", "tile-close", "tile-linked-objects"} {
+		if n := strings.Count(markup, `data-testid="`+id+`"`); n != 1 {
+			t.Errorf("MAP browser test ID %s occurs %d times, want once", id, n)
+		}
+	}
+}
+
+func TestTileInspector_OffersOnlyUniqueUnlinkedObjects(t *testing.T) {
+	data := mapRegionFixture()
+	data.Schema = schema.DatabaseSchema{Components: map[string]schema.Component{
+		"Position":    {Type: "object", Properties: map[string]schema.Property{"x": {Type: "number"}, "y": {Type: "number"}}},
+		"Health":      {Type: "object", Properties: map[string]schema.Property{"hp": {Type: "integer"}}},
+		"TileVisual":  {Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}},
+		"Passability": {Type: "object", Properties: map[string]schema.Property{"kind": {Type: "string"}}},
+	}, EntityTypes: map[string]schema.EntityType{
+		"River": {RequiredComponents: []string{"Position", "Health"}, OptionalComponents: []string{"TileVisual", "Passability"}, ValidationLevel: "strict"},
+	}, Interactions: map[string]map[string]schema.InteractionRule{"Passability": {"liquid": {Open: true}}}}
+	data.MapView = MapView{Path: "level.tmx", LayerID: 1, CellX: 0, CellY: 0}
+	data.SelectedTile = &tilelinks.Inspection{GID: 1, EntityType: "Floor", ObjectIDs: []int{5}}
+	data.ObjectGroups = []tiled.ObjectGroup{{Objects: []tiled.Object{
+		{ID: 5, Type: "Wall"},
+		{ID: 6, Type: "River", Properties: tiled.Properties{
+			"Health.hp": {Type: "int", Value: "4"}, "TileVisual.image": {Value: "river.png"}, "Passability.kind": {Value: "liquid"},
+		}},
+		{ID: 7, Type: "Door"},
+		{ID: 7, Type: "Door"},
+		{ID: 8},
+		{ID: 9, Type: "River", Properties: tiled.Properties{"TileLink.layerID": {Type: "int", Value: "2"}}},
+		{ID: 10, Type: "River"},
+	}}}
+	markup := render(t, tileInspector(data))
+	for _, want := range []string{`data-testid="tile-link-target"`, `<option value="6"`, `River · object 6 · art river.png · movement liquid`, `data-testid="tile-linked-5"`, `data-testid="tile-unlink-5"`} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("Tile inspector missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{`<option value="5">`, `<option value="7">`, `<option value="8">`, `<option value="9">`, `<option value="10">`} {
+		if strings.Contains(markup, unwanted) {
+			t.Errorf("Tile inspector offered ambiguous or already-linked %q", unwanted)
+		}
+	}
+}
+
+func TestTileInspector_ShowsLinkedObjectsVisualAndInteractionOwnership(t *testing.T) {
+	data := mapRegionFixture()
+	data.MapView = MapView{Path: "level.tmx", LayerID: 1, CellX: 0, CellY: 0}
+	data.SelectedTile = &tilelinks.Inspection{GID: 1, EntityType: "Floor", ObjectIDs: []int{5}}
+	data.ObjectGroups = []tiled.ObjectGroup{{Objects: []tiled.Object{{ID: 5, Type: "River", Properties: tiled.Properties{
+		"Passability.kind": {Value: "liquid"}, "Visibility.kind": {Value: "clear"},
+		"TileVisual.image": {Value: "river.png"},
+	}}}}}
+	markup := render(t, tileInspector(data))
+	for _, want := range []string{"River", "liquid", "clear", "river.png"} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("linked River inspector does not name %s", want)
+		}
+	}
+}
+
+func TestTileInspector_DescribesCaseInsensitiveAuthoredComponents(t *testing.T) {
+	data := mapRegionFixture()
+	data.MapView = MapView{Path: "level.tmx", LayerID: 1, CellX: 0, CellY: 0}
+	data.SelectedTile = &tilelinks.Inspection{GID: 1, EntityType: "Floor", ObjectIDs: []int{5}}
+	data.ObjectGroups = []tiled.ObjectGroup{{Objects: []tiled.Object{{ID: 5, Type: "River", Properties: tiled.Properties{
+		"passability.kind": {Value: "liquid"}, "visibility.KIND": {Value: "clear"},
+		"tilevisual.image": {Value: "river.png"},
+	}}}}}
+	markup := render(t, tileInspector(data))
+	for _, want := range []string{"River", "liquid", "clear", "river.png"} {
+		if !strings.Contains(markup, want) {
+			t.Errorf("case-insensitive linked River component %q not described", want)
+		}
+	}
+}
+
+func TestTileInspector_ExplainsIncompatibleSharedArtBeforeLinking(t *testing.T) {
+	ts, err := tiled.ParseTileset([]byte(`<tileset name="river" tilewidth="16" tileheight="16" tilecount="2" columns="2"><image source="river.png" width="32" height="16"/><properties><property name="entityType" value="River"/></properties></tileset>`), "river.tsx", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := mapRegionFixture()
+	data.MapView = MapView{Path: "level.tmx", LayerID: 1, CellX: 1, CellY: 0}
+	data.SelectedTile = &tilelinks.Inspection{LayerID: 1, X: 1, Y: 0, GID: 2, EntityType: "River"}
+	data.Schema = schema.DatabaseSchema{Components: map[string]schema.Component{
+		"Position":   {Type: "object", Properties: map[string]schema.Property{"x": {Type: "number"}, "y": {Type: "number"}}},
+		"TileVisual": {Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}},
+	}, EntityTypes: map[string]schema.EntityType{
+		"River": {RequiredComponents: []string{"Position"}, OptionalComponents: []string{"TileVisual"}, ValidationLevel: "strict"},
+	}}
+	obj := tiled.Object{ID: 5, Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+		"TileLink.layerID": {Type: "int", Value: "1"}, "TileVisual.image": {Value: "river.png"},
+	}}
+	data.ObjectGroups = []tiled.ObjectGroup{{Objects: []tiled.Object{obj}}}
+	data.MapPreview = &tiled.Map{
+		Width: 2, Height: 1, TileWidth: 16, TileHeight: 16,
+		Layers:   []tiled.Layer{{ID: 1, Name: "ground", Width: 2, Height: 1, Visible: true, Opacity: 1, Data: []uint32{1, 2}}},
+		Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: ts}}, ObjectGroups: data.ObjectGroups,
+	}
+	markup := render(t, tileInspector(data))
+	if !strings.Contains(markup, `<option value="5" disabled`) || !strings.Contains(markup, "distinct artwork") {
+		t.Fatalf("shared visual mismatch not explained before selection: %s", markup)
 	}
 }
 

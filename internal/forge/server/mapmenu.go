@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/forge/mapcanvas"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
@@ -242,7 +244,17 @@ func (s *Server) handleMapLayer(w http.ResponseWriter, r *http.Request) {
 		case "down":
 			return d.MoveLayer(index, 1)
 		case "delete":
-			return d.DeleteLayer(index)
+			trial, err := tiled.ParseDocument(d.Bytes(), filepath.Base(path))
+			if err != nil {
+				return err
+			}
+			if err := tilelinks.DeleteLayer(trial, index); err != nil {
+				return err
+			}
+			if err := validateMapTileLinks(path, trial); err != nil {
+				return err
+			}
+			return tilelinks.DeleteLayer(d, index)
 		default:
 			return fmt.Errorf("unknown tile layer operation %q", q.Get("op"))
 		}

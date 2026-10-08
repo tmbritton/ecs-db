@@ -121,20 +121,8 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 				return nil, nil, fmt.Errorf("LoadMap: spatial object %d in %q: %s", object.ID, path, strings.Join(validation.Errors, "; "))
 			}
 			if linkedObjects[object.ID] {
-				components, err := spawnComponents(svc.Schema(), file.Source, object)
-				if err != nil {
+				if err := ValidateSpawnFields(svc.Schema(), file.Source, object); err != nil {
 					return nil, nil, fmt.Errorf("LoadMap: TileLink object %d: %w", object.ID, err)
-				}
-				for _, component := range components {
-					declared := svc.Schema().Components[component.Name]
-					if schema.StorageLayout(declared.Type) != schema.LayoutColumns {
-						continue
-					}
-					for name, property := range declared.Properties {
-						if _, present := component.Values[name]; !present && !schema.PropertyNullable(property.Type) {
-							return nil, nil, fmt.Errorf("LoadMap: TileLink object %d: %s.%s is required to spawn its entity", object.ID, component.Name, name)
-						}
-					}
 				}
 			}
 		}

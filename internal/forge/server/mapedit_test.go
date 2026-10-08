@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -103,6 +104,458 @@ func TestMapMode_SelectsTheMapTheURLNames(t *testing.T) {
 	body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(arena))
 	if !strings.Contains(body, `data-testid="map-title">arena.tmx`) {
 		t.Errorf("the URL's map was not opened:\n%s", body)
+	}
+}
+
+func TestMapMode_SelectedLayerCellInspectsItsEntityTemplate(t *testing.T) {
+	srv, _, _, configured := mapServer(t)
+	path := filepath.Join(filepath.Dir(configured), "fixture.tsx")
+	tsx := strings.ReplaceAll(mapTSX, `name="passable" type="bool" value="true"`, `name="entityType" value="Floor"`)
+	tsx = strings.ReplaceAll(tsx, `name="passable" type="bool" value="false"`, `name="entityType" value="Wall"`)
+	if err := os.WriteFile(path, []byte(tsx), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, query, want string
+	}{
+		{"painted wall", "layer=1&x=0&y=0", "Wall"},
+		{"painted floor", "layer=1&x=1&y=1", "Floor"},
+		{"missing cell", "layer=1&x=3&y=0", "outside"},
+		{"unknown layer", "layer=9&x=0&y=0", "layer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := mapPage(t, srv, "/forge/map?map="+url.QueryEscape(configured)+"&"+tt.query)
+			if !strings.Contains(body, `data-testid="tile-selected"`) || !strings.Contains(body, tt.want) {
+				t.Fatalf("cell inspector lacks %q: %s", tt.want, body)
+			}
+		})
+	}
+}
+
+func TestMapEdit_LinkAndUnlinkSharedObjectAcrossPaintedCells(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	var objectID int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		objectID, err = d.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 0})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&layer=1&id=" + strconv.Itoa(objectID)
+	for _, cell := range []string{"&x=0&y=0", "&x=1&y=1"} {
+		if status := post(t, srv, base+"&action=link"+cell); status != http.StatusNoContent {
+			t.Fatalf("linking cell %s: status %d", cell, status)
+		}
+	}
+	var linked string
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		linked = string(d.Bytes())
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(linked, `name="TileLink.layerID"`) || !strings.Contains(linked, `name="TileLink.cells"`) ||
+		!strings.Contains(linked, `x&quot;:1`) {
+		t.Fatalf("two Tile links not stored in working TMX: %s", linked)
+	}
+	if status := post(t, srv, base+"&action=link&x=1&y=1"); status != http.StatusNoContent {
+		t.Fatalf("repeating link: status %d", status)
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		if string(d.Bytes()) != linked {
+			t.Fatal("repeating a Tile link rewrote the map")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status := post(t, srv, base+"&action=unlink&x=0&y=0"); status != http.StatusNoContent {
+		t.Fatalf("unlinking only origin: status %d", status)
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		m, err := d.Map()
+		if err != nil {
+			return err
+		}
+		obj := m.ObjectGroups[0].Objects[0]
+		if obj.ID != objectID || obj.Properties.Get("TileLink.cells") != `[{"x":1,"y":1}]` {
+			t.Fatalf("shared object lost after unlinking one cell: %+v", obj)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status := post(t, srv, "/forge/map/discard?map="+url.QueryEscape(configured)); status != http.StatusNoContent {
+		t.Fatalf("discard = %d", status)
+	}
+}
+
+func TestMapEdit_EraseRemovesOnlyThatCellsAuthoredLink(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	var id int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		id, err = d.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 0})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&layer=1&id=" + strconv.Itoa(id) + "&action=link"
+	for _, cell := range []string{"&x=0&y=0", "&x=1&y=1"} {
+		if status := post(t, srv, base+cell); status != http.StatusNoContent {
+			t.Fatalf("linking %s: status %d", cell, status)
+		}
+	}
+	paintURL := "/forge/map/paint?map=" + url.QueryEscape(configured) + "&x=0&y=0"
+	if status := postSignals(t, srv, paintURL, held("erase", 0, `"layerID":1`)); status != http.StatusNoContent {
+		t.Fatalf("erasing a linked tile: status %d", status)
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		m, err := d.Map()
+		if err != nil {
+			return err
+		}
+		obj := m.ObjectGroups[0].Objects[0]
+		if m.Layers[0].TileAt(0, 0).GID != 0 || obj.Properties.Get("TileLink.cells") != `[{"x":1,"y":1}]` {
+			t.Fatalf("erase left a dangling link or removed other links: gid %d, object %+v", m.Layers[0].TileAt(0, 0).GID, obj)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapEdit_MovingLinkedObjectKeepsItsTilesFixed(t *testing.T) {
+	srv, _, sess, configured := mapServer(t)
+	var id int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		id, err = d.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 0})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&layer=1&id=" + strconv.Itoa(id) + "&action=link"
+	for _, cell := range []string{"&x=0&y=0", "&x=1&y=1"} {
+		if status := post(t, srv, base+cell); status != http.StatusNoContent {
+			t.Fatalf("linking %s: status %d", cell, status)
+		}
+	}
+	if status := post(t, srv, "/forge/map/spawn/move?map="+url.QueryEscape(configured)+"&id="+strconv.Itoa(id)+"&x=1&y=0"); status != http.StatusNoContent {
+		t.Fatalf("moving River anchor: status %d", status)
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		m, err := d.Map()
+		if err != nil {
+			return err
+		}
+		obj := m.ObjectGroups[0].Objects[0]
+		if obj.X != 16 || obj.Properties.Get("TileLink.cells") != `[{"x":-1,"y":0},{"x":0,"y":1}]` {
+			t.Fatalf("moving object moved its linked Tile positions: %+v", obj)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapEdit_LinkRefusalsLeaveWorkingMapUntouched(t *testing.T) {
+	for _, tt := range []struct {
+		name, query, want string
+	}{
+		{"empty cell", "&layer=1&x=1&y=0&id=1&action=link", "empty"},
+		{"unknown layer", "&layer=99&x=0&y=0&id=1&action=link", "layer"},
+		{"unknown object", "&layer=1&x=0&y=0&id=77&action=link", "object"},
+		{"outside", "&layer=1&x=2&y=0&id=1&action=link", "outside"},
+		{"unknown operation", "&layer=1&x=0&y=0&id=1&action=clone", "not link or unlink"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, s, sess, configured := mapServer(t)
+			if err := sess.Edit(configured, func(d *tiled.Document) error {
+				_, err := d.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 0})
+				if err != nil {
+					return err
+				}
+				return d.SetLayerData(0, []uint32{2, 0, 2, 1})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			before := ""
+			if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if status := post(t, srv, "/forge/map/tile/link?map="+url.QueryEscape(configured)+tt.query); status != http.StatusNoContent {
+				t.Fatalf("refusal = HTTP %d", status)
+			}
+			if err := sess.Read(configured, func(d *tiled.Document) error {
+				if string(d.Bytes()) != before {
+					t.Fatal("refused TileLink changed working TMX")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			problem := problemOf(s)
+			if !strings.Contains(problem, tt.want) {
+				t.Fatalf("refusal did not name %q: %q", tt.want, problem)
+			}
+		})
+	}
+}
+
+func TestMapEdit_RefusesSharedEntityThatWouldReplaceDistinctPaintedArtwork(t *testing.T) {
+	srv, s, sess, configured := mapServer(t)
+	tsPath := filepath.Join(filepath.Dir(configured), "fixture.tsx")
+	tsx := strings.ReplaceAll(mapTSX, `name="passable" type="bool" value="true"`, `name="entityType" value="River"`)
+	tsx = strings.ReplaceAll(tsx, `name="passable" type="bool" value="false"`, `name="entityType" value="River"`)
+	if err := os.WriteFile(tsPath, []byte(tsx), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.Session.Edit(func(sc *schema.DatabaseSchema) error {
+		sc.Components["TileVisual"] = schema.Component{Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}}
+		sc.EntityTypes["River"] = schema.EntityType{RequiredComponents: []string{"Position"}, OptionalComponents: []string{"TileVisual"}, ValidationLevel: "strict"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var id int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		id, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+			"TileVisual.image": {Value: "river.png"},
+		}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&id=" + strconv.Itoa(id) + "&layer=1&action=link"
+	if status := post(t, srv, base+"&x=0&y=0"); status != http.StatusNoContent || problemOf(s) != "" {
+		t.Fatalf("first River visual link refused: status %d, problem %s", status, problemOf(s))
+	}
+	var before string
+	if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if status := post(t, srv, base+"&x=1&y=1"); status != http.StatusNoContent || !strings.Contains(problemOf(s), "distinct artwork") {
+		t.Fatalf("second River visual link = status %d, problem %q; want distinct artwork refusal", status, problemOf(s))
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		if string(d.Bytes()) != before {
+			t.Fatal("rejected shared artwork edit mutated the map")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapEdit_PaintRefusesChangingOneCellUnderSharedVisual(t *testing.T) {
+	srv, s, sess, configured := mapServer(t)
+	tsPath := filepath.Join(filepath.Dir(configured), "fixture.tsx")
+	tsx := strings.ReplaceAll(mapTSX, `name="passable" type="bool" value="true"`, `name="entityType" value="River"`)
+	tsx = strings.ReplaceAll(tsx, `name="passable" type="bool" value="false"`, `name="entityType" value="River"`)
+	if err := os.WriteFile(tsPath, []byte(tsx), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.Session.Edit(func(sc *schema.DatabaseSchema) error {
+		sc.Components["TileVisual"] = schema.Component{Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}}
+		sc.EntityTypes["River"] = schema.EntityType{RequiredComponents: []string{"Position"}, OptionalComponents: []string{"TileVisual"}, ValidationLevel: "strict"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var id int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		id, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+			"TileVisual.image": {Value: "river.png"},
+		}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&id=" + strconv.Itoa(id) + "&layer=1&action=link"
+	for _, at := range []string{"&x=0&y=0", "&x=1&y=0"} {
+		if status := post(t, srv, base+at); status != http.StatusNoContent || problemOf(s) != "" {
+			t.Fatalf("authored shared visual link %s: status=%d problem=%s", at, status, problemOf(s))
+		}
+	}
+	var before string
+	if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	paintURL := "/forge/map/paint?map=" + url.QueryEscape(configured) + "&x=1&y=0"
+	if status := postSignals(t, srv, paintURL, held("stamp", 1, `"layerID":1`)); status != http.StatusNoContent || !strings.Contains(problemOf(s), "distinct artwork") {
+		t.Fatalf("painted a different slice beneath shared visual: status %d, problem %q", status, problemOf(s))
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		if string(d.Bytes()) != before {
+			t.Fatal("refused visual change modified the working map")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapEdit_LinkRejectsAnIncompleteSpawnComponentBeforeWriting(t *testing.T) {
+	srv, s, sess, configured := mapServer(t)
+	if err := s.cfg.Session.Edit(func(sc *schema.DatabaseSchema) error {
+		sc.Components["TileVisual"] = schema.Component{Type: "object", Properties: map[string]schema.Property{
+			"image": {Type: "string"}, "alpha": {Type: "number"},
+		}}
+		player := sc.EntityTypes["Player"]
+		player.OptionalComponents = append(player.OptionalComponents, "TileVisual")
+		sc.EntityTypes["Player"] = player
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var id int
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		id, err = d.AddObject(0, tiled.Object{Type: "Player", X: 0, Y: 0, Properties: tiled.Properties{
+			"TileVisual.image": {Value: "broken.png"},
+		}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	base := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&id=" + strconv.Itoa(id) + "&layer=1&action=link&x=0&y=0"
+	if status := post(t, srv, base); status != http.StatusNoContent || !strings.Contains(problemOf(s), "TileVisual.alpha") {
+		t.Fatalf("incomplete object linked: status %d, problem %q", status, problemOf(s))
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		if string(d.Bytes()) != before {
+			t.Fatal("rejected incomplete linked object changed working map")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapEdit_LinkWithoutSchemaRefusesInsteadOfPanicking(t *testing.T) {
+	srv, s, _, configured := mapServer(t)
+	s.cfg.Session = nil
+	q := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&action=link&layer=1&x=0&y=0&id=1"
+	if status := post(t, srv, q); status != http.StatusNoContent || !strings.Contains(problemOf(s), "schema") {
+		t.Fatalf("link with no schema = status %d, problem %q", status, problemOf(s))
+	}
+}
+
+func TestMapEdit_UnlinkCannotRemoveLastVisualOfSharedPaintedType(t *testing.T) {
+	srv, s, sess, configured := mapServer(t)
+	tsPath := filepath.Join(filepath.Dir(configured), "fixture.tsx")
+	tsx := strings.ReplaceAll(mapTSX, `name="passable" type="bool" value="true"`, `name="entityType" value="River"`)
+	tsx = strings.ReplaceAll(tsx, `name="passable" type="bool" value="false"`, `name="entityType" value="River"`)
+	if err := os.WriteFile(tsPath, []byte(tsx), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.Session.Edit(func(sc *schema.DatabaseSchema) error {
+		sc.Components["TileVisual"] = schema.Component{Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}}
+		sc.EntityTypes["River"] = schema.EntityType{RequiredComponents: []string{"Position"}, OptionalComponents: []string{"TileVisual"}, ValidationLevel: "strict"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	visualID := 0
+	if err := sess.Edit(configured, func(d *tiled.Document) error {
+		var err error
+		visualID, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+			"TileVisual.image": {Value: "river.png"}, "TileLink.layerID": {Type: "int", Value: "1"},
+		}})
+		if err != nil {
+			return err
+		}
+		_, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+			"TileLink.layerID": {Type: "int", Value: "1"},
+		}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	q := "/forge/map/tile/link?map=" + url.QueryEscape(configured) + "&layer=1&x=0&y=0&action=unlink&id=" + strconv.Itoa(visualID)
+	if status := post(t, srv, q); status != http.StatusNoContent || !strings.Contains(problemOf(s), "TileVisual") {
+		t.Fatalf("unlinking the only visual = status %d, problem %q", status, problemOf(s))
+	}
+	if err := sess.Read(configured, func(d *tiled.Document) error {
+		if string(d.Bytes()) != before {
+			t.Fatal("removing the last visual committed an unimportable map")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSpawnRoutes_CannotRemoveLastSharedVisualBeforeImport(t *testing.T) {
+	for _, tt := range []struct {
+		name, route string
+	}{
+		{"delete visual object", "/forge/map/spawn/delete"},
+		{"detach optional TileVisual", "/forge/map/spawn/component"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, s, sess, configured := mapServer(t)
+			tsPath := filepath.Join(filepath.Dir(configured), "fixture.tsx")
+			tsx := strings.ReplaceAll(mapTSX, `name="passable" type="bool" value="true"`, `name="entityType" value="River"`)
+			tsx = strings.ReplaceAll(tsx, `name="passable" type="bool" value="false"`, `name="entityType" value="River"`)
+			if err := os.WriteFile(tsPath, []byte(tsx), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.cfg.Session.Edit(func(sc *schema.DatabaseSchema) error {
+				sc.Components["TileVisual"] = schema.Component{Type: "object", Properties: map[string]schema.Property{"image": {Type: "string"}}}
+				sc.EntityTypes["River"] = schema.EntityType{RequiredComponents: []string{"Position"}, OptionalComponents: []string{"TileVisual"}, ValidationLevel: "strict"}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var artID int
+			if err := sess.Edit(configured, func(d *tiled.Document) error {
+				var err error
+				artID, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+					"TileVisual.image": {Value: "river.png"}, "TileLink.layerID": {Type: "int", Value: "1"},
+				}})
+				if err != nil {
+					return err
+				}
+				_, err = d.AddObject(0, tiled.Object{Type: "River", X: 0, Y: 0, Properties: tiled.Properties{
+					"TileLink.layerID": {Type: "int", Value: "1"},
+				}})
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var before string
+			if err := sess.Read(configured, func(d *tiled.Document) error { before = string(d.Bytes()); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			q := tt.route + "?map=" + url.QueryEscape(configured) + "&id=" + strconv.Itoa(artID)
+			if tt.route == "/forge/map/spawn/component" {
+				q += "&detach=TileVisual"
+			}
+			if status := post(t, srv, q); status != http.StatusNoContent || !strings.Contains(problemOf(s), "TileVisual") {
+				t.Fatalf("removing visual = status %d, problem %q", status, problemOf(s))
+			}
+			if err := sess.Read(configured, func(d *tiled.Document) error {
+				if string(d.Bytes()) != before {
+					t.Fatal("spawn edit removed the last visual provider")
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

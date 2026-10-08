@@ -385,6 +385,11 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 		if data.MapView.Spawn > 0 {
 			q.Set("spawn", strconv.Itoa(data.MapView.Spawn))
 		}
+		if data.MapView.LayerID > 0 {
+			q.Set("layer", strconv.Itoa(data.MapView.LayerID))
+			q.Set("x", strconv.Itoa(data.MapView.CellX))
+			q.Set("y", strconv.Itoa(data.MapView.CellY))
+		}
 	}
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)

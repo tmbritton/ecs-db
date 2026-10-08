@@ -1,0 +1,62 @@
+package modes
+
+// A selection is the authored cell, not the stamp in hand and not an entity
+// ID. The import supplies stable database IDs only when the map is loaded.
+templ tileInspector(data Data) {
+	if data.MapView.LayerID > 0 || data.TileProblem != "" {
+		<section class="spawn-inspector" data-testid="tile-selected" aria-label="Selected Tile">
+			<div class="spawn-inspector__head">
+				<h3>Tile · layer { itoa(data.MapView.LayerID) } · { itoa(data.MapView.CellX) },{ itoa(data.MapView.CellY) }</h3>
+				<a href={ URL(data.MapView.WithCell(0, 0, 0).Href()) } aria-label="Close Tile inspector" data-testid="tile-close">✕</a>
+			</div>
+			if data.TileProblem != "" {
+				<p class="schema__problem" role="alert" data-testid="tile-problem">{ data.TileProblem }</p>
+			} else if data.SelectedTile != nil {
+				if data.SelectedTile.Empty {
+					<p class="schema__hint" data-testid="tile-empty">This cell is empty in the selected layer. Paint a Tile before linking an entity.</p>
+				} else {
+					<p class="schema__hint" data-testid="tile-template">Painted gid { gidLabel(data.SelectedTile.GID) } creates a referenced { data.SelectedTile.EntityType } on the next ecs-db run.</p>
+					<div data-testid="tile-linked-objects">
+						for _, id := range data.SelectedTile.ObjectIDs {
+							{{ linked := tileLinkedObject(data, id) }}
+							<div data-testid={ "tile-linked-" + itoa(id) }>
+								<a href={ URL(data.MapView.WithSpawn(id).Href()) }>{ linked.Type } · object { itoa(id) }</a>
+								if linked.Visual != "" {
+									<span> · art { linked.Visual }</span>
+								}
+								if linked.Passability != "" {
+									<span> · movement { linked.Passability }</span>
+								}
+								if linked.Visibility != "" {
+									<span> · sight { linked.Visibility }</span>
+								}
+								<button type="button" data-testid={ "tile-unlink-" + itoa(id) } aria-label={ "Unlink object " + itoa(id) + " from this Tile" } data-on:click={ tileUnlinkAction(data, id) }>Unlink</button>
+							</div>
+						}
+					</div>
+					<p class="schema__hint">Unlinking the last cell keeps its object as an independent spawn at its anchor. Delete the object separately to remove it.</p>
+				{{ candidates := tileLinkCandidates(data) }}
+				if len(candidates) > 0 {
+				<label class="schema__row">
+					<span class="schema__label">Link an existing object</span>
+					<select class="schema__input" data-testid="tile-link-target" aria-label="Link an object to this Tile" data-on:change={ tileLinkAction(data) }>
+						<option value="">Choose an object</option>
+						for _, candidate := range candidates {
+							<option value={ itoa(candidate.ID) }
+								if candidate.Blocked != "" {
+									disabled
+								}
+							>{ candidate.Type } · object { itoa(candidate.ID) } · { candidate.Summary }
+								if candidate.Blocked != "" {
+									{ " · cannot link: " + candidate.Blocked }
+								}
+							</option>
+						}
+					</select>
+				</label>
+			}
+				}
+			}
+		</section>
+	}
+}

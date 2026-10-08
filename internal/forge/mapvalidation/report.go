@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 	"github.com/tmbritton/ecs-db/internal/tilemap"
@@ -180,6 +181,7 @@ func Build(s *schema.DatabaseSchema, path string, m *tiled.Map, identities []Ide
 				ownerName(owners[1].groupName, owners[1].group, owners[1].index, owners[1].name))
 		}
 	}
+	artValidator := tilelinks.NewArtValidator(m)
 	for g, group := range m.ObjectGroups {
 		for i, obj := range group.Objects {
 			if description := duplicates[obj.ID]; description != "" {
@@ -189,11 +191,39 @@ func Build(s *schema.DatabaseSchema, path string, m *tiled.Map, identities []Ide
 				})
 			}
 			if obj.Type == "" {
+				for name := range obj.Properties {
+					if strings.EqualFold(name, "TileLink.layerID") || strings.EqualFold(name, "TileLink.cells") {
+						add(Issue{
+							Kind: Spawn, Group: g, ObjectIndex: i, ObjectID: obj.ID,
+							Message: fmt.Sprintf("TileLink object %d has no entity type; give it a class before importing", obj.ID),
+						})
+						break
+					}
+				}
 				continue // an untyped Tiled object is not a spawn
 			}
-			for _, problem := range spawnIssues(s, m, obj) {
+			spawnFindings := spawnIssues(s, m, obj)
+			parseable := true
+			for _, problem := range spawnFindings {
+				if !problem.Warning {
+					parseable = false
+				}
 				problem.Kind, problem.Group, problem.ObjectIndex, problem.ObjectID = Spawn, g, i, obj.ID
 				add(problem)
+			}
+			for name := range obj.Properties {
+				if !strings.EqualFold(name, "TileLink.layerID") && !strings.EqualFold(name, "TileLink.cells") {
+					continue
+				}
+				if parseable {
+					if err := tilemap.ValidateSpawnFields(s, m, obj); err != nil {
+						add(Issue{Kind: Spawn, Group: g, ObjectIndex: i, ObjectID: obj.ID, Message: err.Error()})
+					}
+				}
+				if err := artValidator.Validate(obj.ID); err != nil {
+					add(Issue{Kind: Spawn, Group: g, ObjectIndex: i, ObjectID: obj.ID, Message: err.Error()})
+				}
+				break
 			}
 		}
 	}

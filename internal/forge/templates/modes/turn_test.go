@@ -90,11 +90,17 @@ func TestMapSignals_DeclareWhatTheToolbarReads(t *testing.T) {
 	}
 }
 
-// Every tool the toolbar offers has to be one paint will act on, or the button
-// renders and then refuses.
+// Painting tools must be accepted by paint; inspect selects a Tile without
+// posting a paint operation.
 func TestTools_AreKindsPaintKnows(t *testing.T) {
 	for _, tool := range Tools() {
 		t.Run(tool.Kind, func(t *testing.T) {
+			if tool.Kind == "inspect" {
+				if action := strokeAction(mapRegionFixture()); !strings.Contains(action, "$tool === 'inspect' ?") || !strings.Contains(action, "window.location.assign(") || !strings.Contains(action, "sessionStorage.setItem(") {
+					t.Fatal("inspect tool cannot select a Tile")
+				}
+				return
+			}
 			switch paint.Kind(tool.Kind) {
 			case paint.Stamp, paint.Fill, paint.Erase:
 			default:

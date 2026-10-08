@@ -170,7 +170,7 @@ templ MapListRegion(data Data) {
 // problems, which file is open, and the toolbar. All of it small, all of it
 // changing far more often than the three hundred cells below it.
 templ MapHeadRegion(data Data) {
-	<div id="map-head" class="map-head">
+	<div id="map-head" class="map-head" if data.SelectedMap != "" { data-init={ restoreMapViewAction(data) } }>
 		if !data.HasMaps {
 			@stub("MAP", "No project is open — see the log for why.", "")
 		} else {
@@ -204,9 +204,10 @@ templ MapCanvasRegion(data Data) {
 templ MapInspectorRegion(data Data) {
 	<div
 		id="map-inspector"
-		class={ "map-inspector", kv("map-inspector--open", data.SelectedSpawn != nil || data.MissingSpawn > 0 || data.AmbiguousSpawn > 0) }
+		class={ "map-inspector", kv("map-inspector--open", data.SelectedSpawn != nil || data.MissingSpawn > 0 || data.AmbiguousSpawn > 0 || data.MapView.LayerID > 0 || data.TileProblem != "") }
 	>
 		@spawnInspector(data)
+		@tileInspector(data)
 	</div>
 }
 

@@ -3,9 +3,11 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/spawn"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
@@ -19,7 +21,34 @@ func (s *Server) editSpawn(w http.ResponseWriter, r *http.Request, edit func(*ti
 	}
 	path, err := s.mapShown(sess, r.URL.Query().Get("map"))
 	if err == nil {
-		err = sess.Edit(path, edit)
+		err = sess.Edit(path, func(d *tiled.Document) error {
+			m, err := d.Map()
+			if err != nil {
+				return err
+			}
+			linked := false
+			for _, group := range m.ObjectGroups {
+				for _, obj := range group.Objects {
+					for name := range obj.Properties {
+						linked = linked || strings.EqualFold(name, "TileLink.layerID")
+					}
+				}
+			}
+			if !linked {
+				return edit(d)
+			}
+			trial, err := tiled.ParseDocument(d.Bytes(), filepath.Base(path))
+			if err != nil {
+				return err
+			}
+			if err := edit(trial); err != nil {
+				return err
+			}
+			if err := validateMapTileLinks(path, trial); err != nil {
+				return err
+			}
+			return edit(d)
+		})
 	}
 	if err != nil {
 		s.refuseMapEdit(w, r, err)
@@ -66,7 +95,7 @@ func (s *Server) handleSpawnMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.editSpawn(w, r, func(d *tiled.Document) error {
-		return spawn.Move(d, id, position.X, position.Y)
+		return tilelinks.Move(d, id, position.X, position.Y)
 	})
 }
 

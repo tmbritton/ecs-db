@@ -11,6 +11,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/forge/paint"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
@@ -140,7 +141,17 @@ func (s *Server) handlePaint(w http.ResponseWriter, r *http.Request) {
 			// everyone to ignore the footer.
 			return nil
 		}
-		return d.SetLayerData(result.Layer, result.Data)
+		trial, err := tiled.ParseDocument(d.Bytes(), "paint-preview.tmx")
+		if err != nil {
+			return err
+		}
+		if err := tilelinks.SetLayerData(trial, result.Layer, result.Data); err != nil {
+			return err
+		}
+		if err := validateMapTileLinks(path, trial); err != nil {
+			return err
+		}
+		return tilelinks.SetLayerData(d, result.Layer, result.Data)
 	}); err != nil {
 		s.refuseMapEdit(w, r, err)
 		return

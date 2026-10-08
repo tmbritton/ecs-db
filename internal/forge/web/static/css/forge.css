@@ -2783,6 +2783,20 @@ option:disabled {
   z-index: 4;
 }
 
+.map-inspect-cursor {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  width: calc(var(--tile-w) * var(--map-zoom) * 1px);
+  height: calc(var(--tile-h) * var(--map-zoom) * 1px);
+  outline: 2px solid var(--amber);
+  pointer-events: none;
+}
+
+.map-inspect-cursor--on {
+  display: block;
+}
+
 .map-spawn {
   position: absolute;
   left: calc(var(--spawn-x) * var(--map-zoom) * 1px);
@@ -2796,6 +2810,11 @@ option:disabled {
   pointer-events: auto;
   cursor: grab;
   font: 10px var(--font-mono);
+}
+
+/* Inspection and erasure target the Tile beneath a spawn marker. */
+.map-spawns--tile-tool .map-spawn {
+  pointer-events: none;
 }
 
 .map-spawn--invalid {

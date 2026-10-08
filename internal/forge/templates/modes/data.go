@@ -10,6 +10,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mapvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -60,11 +61,18 @@ type Data struct {
 	// findings, attributed to the thing that caused each of them.
 	MapID         string
 	MapValidation mapvalidation.Report
+	// MapPreview is the detached, tileset-resolved working map used to check a
+	// candidate Tile link before the inspector offers its action.
+	MapPreview *tiled.Map
 	// Objects are parsed from the same working map as Canvas, with their group
 	// and stable id. A selection is URL-addressed and never owns another copy.
 	ObjectGroups  []tiled.ObjectGroup
 	SelectedSpawn *tiled.Object
 	MissingSpawn  int
+	// SelectedTile describes one authored layer cell, distinct from the tile in
+	// hand in MapSignals. TileProblem explains a selected but invalid cell.
+	SelectedTile *tilelinks.Inspection
+	TileProblem  string
 	// A duplicated ID is not a selection: ID-addressed edit routes cannot
 	// distinguish its claimants. Keep their marks visible, but no inspector
 	// action may be wired to one arbitrarily.

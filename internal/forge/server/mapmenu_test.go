@@ -81,6 +81,39 @@ func TestMapLayerMenu_RenameMoveDeleteThroughSession(t *testing.T) {
 	}
 }
 
+func TestMapLayerMenu_DeletingLinkedLayerRemovesItsObjectsTileLinks(t *testing.T) {
+	srv, s, path := layeredMapServer(t)
+	if err := s.cfg.MapSession.Edit(path, func(d *tiled.Document) error {
+		_, err := d.AddObject(0, tiled.Object{Type: "Player", X: 16, Y: 0, Properties: tiled.Properties{
+			"TileLink.layerID": {Type: "int", Value: "3"},
+		}})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token := openLayerMenu(t, srv, s, path, 1)
+	q := "/forge/map/layer?map=" + url.QueryEscape(path) + "&id=3&layer=1&token=" + token + "&op=delete"
+	if code := postSignals(t, srv, q, `{}`); code != 204 || problemOf(s) != "" {
+		t.Fatalf("deleting linked layer: %d, %q", code, problemOf(s))
+	}
+	if err := s.cfg.MapSession.Read(path, func(d *tiled.Document) error {
+		m, err := d.Map()
+		if err != nil {
+			return err
+		}
+		if len(m.Layers) != 1 || len(m.ObjectGroups[0].Objects) != 1 {
+			t.Fatalf("layer deletion removed wrong authored data: %+v", m)
+		}
+		obj := m.ObjectGroups[0].Objects[0]
+		if _, linked := obj.Properties["TileLink.layerID"]; linked {
+			t.Fatalf("deleted layer 3 left dangling link on object %d: %+v", obj.ID, obj.Properties)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMapMenu_OpensOneTargetAndClosesOnRequest(t *testing.T) {
 	srv, s, _, path := mapServer(t)
 	base := "/forge/map/menu?map=" + url.QueryEscape(path)
