@@ -151,8 +151,11 @@ func clone(s schema.DatabaseSchema) schema.DatabaseSchema {
 	out := s
 	out.ComponentOrder = cloneStrings(s.ComponentOrder)
 	out.EntityTypeOrder = cloneStrings(s.EntityTypeOrder)
+	out.InteractionOrder = cloneStrings(s.InteractionOrder)
 	out.Components = nil
 	out.EntityTypes = nil
+	out.Interactions = nil
+	out.InteractionCategoryOrder = nil
 	if s.Components != nil {
 		out.Components = make(map[string]schema.Component, len(s.Components))
 		for name, c := range s.Components {
@@ -165,6 +168,23 @@ func clone(s schema.DatabaseSchema) schema.DatabaseSchema {
 			et.RequiredComponents = cloneStrings(et.RequiredComponents)
 			et.OptionalComponents = cloneStrings(et.OptionalComponents)
 			out.EntityTypes[name] = et
+		}
+	}
+	if s.Interactions != nil {
+		out.Interactions = make(map[string]map[string]schema.InteractionRule, len(s.Interactions))
+		for component, categories := range s.Interactions {
+			copyCategories := make(map[string]schema.InteractionRule, len(categories))
+			for category, rule := range categories {
+				rule.Allows = cloneStrings(rule.Allows)
+				copyCategories[category] = rule
+			}
+			out.Interactions[component] = copyCategories
+		}
+	}
+	if s.InteractionCategoryOrder != nil {
+		out.InteractionCategoryOrder = make(map[string][]string, len(s.InteractionCategoryOrder))
+		for component, order := range s.InteractionCategoryOrder {
+			out.InteractionCategoryOrder[component] = cloneStrings(order)
 		}
 	}
 	return out

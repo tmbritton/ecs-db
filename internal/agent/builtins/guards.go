@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"encoding/json"
+	"log"
 	"math"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
@@ -126,7 +127,27 @@ func (g *inLineOfSightGuard) Evaluate(ctx agent.GuardContext) bool {
 	start := tilemap.Point{X: int(toFloat(px)), Y: int(toFloat(py))}
 	end := tilemap.Point{X: int(toFloat(tx)), Y: int(toFloat(ty))}
 
-	return tilemap.LineOfSight(g.grid, start, end)
+	query, ok := ctx.World.(tilemap.SpaceQuerier)
+	if !ok {
+		log.Printf("inLineOfSight: world reader has no spatial transaction")
+		return false
+	}
+	space, err := g.grid.SpaceFromSnapshot(query)
+	if err != nil {
+		log.Printf("inLineOfSight: %v", err)
+		return false
+	}
+	observer, found := space.Entity(ctx.EntityID)
+	if !found {
+		return false
+	}
+	observer.Position = start
+	seen, err := space.CanSee(observer, end, targetID)
+	if err != nil {
+		log.Printf("inLineOfSight: %v", err)
+		return false
+	}
+	return seen
 }
 
 // ── pathComplete ──────────────────────────────────────────────────────────────

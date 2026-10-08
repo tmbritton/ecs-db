@@ -33,9 +33,10 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	}
 
 	var raw struct {
-		SchemaVersion json.RawMessage       `json:"schemaVersion"`
-		Components    map[string]Component  `json:"components"`
-		EntityTypes   map[string]EntityType `json:"entityTypes"`
+		SchemaVersion json.RawMessage                       `json:"schemaVersion"`
+		Components    map[string]Component                  `json:"components"`
+		EntityTypes   map[string]EntityType                 `json:"entityTypes"`
+		Interactions  map[string]map[string]InteractionRule `json:"interactions"`
 	}
 	if err := json.Unmarshal(jsonData, &raw); err != nil {
 		return DatabaseSchema{}, fmt.Errorf("failed to parse schema.json: %w", err)
@@ -44,8 +45,9 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	// The decoded maps have lost the authored key order, which Marshal needs to
 	// write the file back the way it was arranged. Read it from the raw bytes.
 	var rawSections struct {
-		Components  json.RawMessage `json:"components"`
-		EntityTypes json.RawMessage `json:"entityTypes"`
+		Components   json.RawMessage `json:"components"`
+		EntityTypes  json.RawMessage `json:"entityTypes"`
+		Interactions json.RawMessage `json:"interactions"`
 	}
 	if err := json.Unmarshal(jsonData, &rawSections); err != nil {
 		return DatabaseSchema{}, fmt.Errorf("failed to parse schema.json: %w", err)
@@ -57,6 +59,21 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	entityTypeOrder, err := keyOrder(rawSections.EntityTypes)
 	if err != nil {
 		return DatabaseSchema{}, fmt.Errorf("reading entity type order: %w", err)
+	}
+	interactionOrder, err := keyOrder(rawSections.Interactions)
+	if err != nil {
+		return DatabaseSchema{}, fmt.Errorf("reading interaction order: %w", err)
+	}
+	var rawInteractions map[string]json.RawMessage
+	if err := json.Unmarshal(rawSections.Interactions, &rawInteractions); err != nil && len(rawSections.Interactions) > 0 {
+		return DatabaseSchema{}, fmt.Errorf("reading interaction rules: %w", err)
+	}
+	categoryOrder := make(map[string][]string, len(rawInteractions))
+	for name, rules := range rawInteractions {
+		categoryOrder[name], err = keyOrder(rules)
+		if err != nil {
+			return DatabaseSchema{}, fmt.Errorf("reading categories for %q: %w", name, err)
+		}
 	}
 
 	// Property order, per component, from the same source.
@@ -102,11 +119,14 @@ func LoadSchema(jsonData []byte) (DatabaseSchema, error) {
 	}
 
 	return DatabaseSchema{
-		SchemaVersion:   int(version),
-		Components:      raw.Components,
-		EntityTypes:     raw.EntityTypes,
-		ComponentOrder:  componentOrder,
-		EntityTypeOrder: entityTypeOrder,
+		SchemaVersion:            int(version),
+		Components:               raw.Components,
+		EntityTypes:              raw.EntityTypes,
+		Interactions:             raw.Interactions,
+		ComponentOrder:           componentOrder,
+		EntityTypeOrder:          entityTypeOrder,
+		InteractionOrder:         interactionOrder,
+		InteractionCategoryOrder: categoryOrder,
 	}, nil
 }
 
@@ -132,7 +152,7 @@ func detectDuplicateKeys(jsonData []byte) error {
 		if !ok {
 			continue
 		}
-		if key != "components" && key != "entityTypes" {
+		if key != "components" && key != "entityTypes" && key != "interactions" {
 			// Not a map we care about — skip its value entirely.
 			if err := skipValue(dec); err != nil {
 				return fmt.Errorf("detectDuplicateKeys: %w", err)
@@ -167,6 +187,35 @@ func detectDuplicateKeys(jsonData []byte) error {
 				return fmt.Errorf("duplicate %s key %q", key, innerKey)
 			}
 			seen[innerKey] = true
+			if key == "interactions" {
+				categoryStart, err := dec.Token()
+				if err != nil {
+					return fmt.Errorf("detectDuplicateKeys: %w", err)
+				}
+				if categoryStart != json.Delim('{') {
+					return fmt.Errorf("interactions %q must contain category rules", innerKey)
+				}
+				categories := make(map[string]bool)
+				for dec.More() {
+					categoryToken, err := dec.Token()
+					if err != nil {
+						return fmt.Errorf("detectDuplicateKeys: %w", err)
+					}
+					category, ok := categoryToken.(string)
+					if !ok {
+						return fmt.Errorf("interactions %q has a non-string category", innerKey)
+					}
+					if categories[category] {
+						return fmt.Errorf("duplicate interaction category %q for %q", category, innerKey)
+					}
+					categories[category] = true
+					if err := skipValue(dec); err != nil {
+						return fmt.Errorf("detectDuplicateKeys: %w", err)
+					}
+				}
+				_, _ = dec.Token()
+				continue
+			}
 			// Skip the value (could be a complex nested object).
 			if err := skipValue(dec); err != nil {
 				return fmt.Errorf("detectDuplicateKeys: %w", err)
@@ -237,6 +286,9 @@ func ValidateSchema(s DatabaseSchema) error {
 	}
 	if err := validateCrossReference(s); err != nil {
 		return fmt.Errorf("cross-reference: %w", err)
+	}
+	if err := validateInteractions(s); err != nil {
+		return fmt.Errorf("interactions: %w", err)
 	}
 	if err := validateSQLCompatibility(s); err != nil {
 		return fmt.Errorf("SQL compatibility: %w", err)

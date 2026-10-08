@@ -61,6 +61,10 @@ func EnsureInterpreterTables(db *sql.DB) error {
 			components TEXT,
 			PRIMARY KEY (map, object_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS tile_art_components (
+			entity_id INTEGER PRIMARY KEY REFERENCES entities(id) ON DELETE CASCADE,
+			components TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS event_queue (
 			id          INTEGER PRIMARY KEY AUTOINCREMENT,
 			entity_id   INTEGER NOT NULL,

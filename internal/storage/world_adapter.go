@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"regexp"
@@ -102,10 +103,23 @@ func (w *txWorldWriter) SetComponentValue(entityID int64, compName, field string
 
 // txWorldReader implements agent.WorldReader using a live *sql.Tx.
 // Reads within the same transaction see uncommitted writes from the same tx.
-type txWorldReader struct{ tx *sql.Tx }
+type txWorldReader struct {
+	tx    *sql.Tx
+	mapID string
+}
 
 // NewTxWorldReader wraps tx to produce an agent.WorldReader.
 func NewTxWorldReader(tx *sql.Tx) agent.WorldReader { return &txWorldReader{tx: tx} }
+
+// NewTxWorldReaderForMap resolves authored entities within the active map.
+// Runtime-created entities without a spawn row remain eligible as a fallback.
+func NewTxWorldReaderForMap(tx *sql.Tx, mapID string) agent.WorldReader {
+	return &txWorldReader{tx: tx, mapID: mapID}
+}
+
+func (r *txWorldReader) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return r.tx.QueryContext(ctx, query, args...)
+}
 
 func (r *txWorldReader) GetComponentValue(entityID int64, compName, field string) (any, error) {
 	table := "comp_" + strings.ToLower(compName)
@@ -149,6 +163,16 @@ func (r *txWorldReader) HasComponent(entityID int64, compName string) (bool, err
 
 func (r *txWorldReader) FindEntityByType(entityType string) (int64, error) {
 	var id int64
+	if r.mapID != "" {
+		id, err := FindEntityByTypeInMap(context.Background(), r.tx, entityType, r.mapID)
+		if err == nil {
+			return id, nil
+		}
+		if err == sql.ErrNoRows {
+			return 0, fmt.Errorf("no entity of type %q in map %q", entityType, r.mapID)
+		}
+		return 0, fmt.Errorf("FindEntityByType %q in map %q: %w", entityType, r.mapID, err)
+	}
 	err := r.tx.QueryRow(
 		"SELECT id FROM entities WHERE entity_type = ? LIMIT 1", entityType,
 	).Scan(&id)

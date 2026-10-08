@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"math"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -54,6 +55,9 @@ type NewGameParams struct {
 func NewGame(p NewGameParams) *Game {
 	t := newTicker(p.DB, p.Loader, p.Registry)
 	t.SetInputHandler(p.Handler)
+	if p.Grid != nil {
+		t.SetMapID(p.Grid.MapID())
+	}
 
 	al := p.AnimLoader
 	if al == nil {
@@ -143,12 +147,95 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			log.Printf("tilemap: draw: %v", err)
 		}
 	}
+	g.drawSprites(screen)
+}
 
-	rows, err := g.db.Query(`
-		SELECT e.id, cp.x, cp.y, cs.sheet, cs.animation, cs.flip_x
-		FROM entities e
-		JOIN comp_position cp ON e.id = cp.entity_id
-		JOIN comp_sprite   cs ON e.id = cs.entity_id`)
+func (g *Game) drawSprites(dst imageDrawer) {
+	hasReferences := g.grid != nil && g.grid.MapID() != "" && g.grid.HasComponent("TileReferences")
+	linked := make(map[int64][]tilemap.Point)
+	if hasReferences {
+		rows, err := g.db.Query(`SELECT CAST(target.value AS INTEGER), p.x, p.y
+			FROM comp_tilelayer layer JOIN comp_position p ON p.entity_id=layer.entity_id
+			JOIN comp_tilereferences refs ON refs.entity_id=layer.entity_id
+			JOIN json_each(refs.value) target WHERE layer.map_id=?
+			ORDER BY layer.layer_order, layer.draw_order, layer.entity_id, CAST(target.key AS INTEGER)`, g.grid.MapID())
+		if err != nil {
+			log.Printf("reading linked sprite positions: %v", err)
+			return
+		}
+		for rows.Next() {
+			var id int64
+			var x, y float64
+			if err := rows.Scan(&id, &x, &y); err != nil {
+				log.Printf("reading linked sprite positions: %v", err)
+				_ = rows.Close()
+				return
+			}
+			linked[id] = append(linked[id], tilemap.Point{X: int(x), Y: int(y)})
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("reading linked sprite positions: %v", err)
+			_ = rows.Close()
+			return
+		}
+		_ = rows.Close()
+	}
+	query := `SELECT e.id, cp.x, cp.y, cs.sheet, cs.animation, cs.flip_x, NULL AS occupied
+		FROM entities e JOIN comp_position cp ON e.id = cp.entity_id
+		JOIN comp_sprite cs ON e.id = cs.entity_id`
+	if hasReferences {
+		query = `SELECT e.id, cp.x, cp.y, cs.sheet, cs.animation, cs.flip_x, NULL AS occupied
+			FROM entities e LEFT JOIN comp_position cp ON e.id = cp.entity_id
+			JOIN comp_sprite cs ON e.id = cs.entity_id`
+	}
+	if g.grid != nil && g.grid.HasComponent("OccupiedCells") {
+		positionJoin := "JOIN"
+		if hasReferences {
+			positionJoin = "LEFT JOIN"
+		}
+		query = `SELECT e.id, cp.x, cp.y, cs.sheet, cs.animation, cs.flip_x, occupied.value
+			FROM entities e ` + positionJoin + ` comp_position cp ON e.id = cp.entity_id
+			JOIN comp_sprite cs ON e.id = cs.entity_id
+			LEFT JOIN comp_occupiedcells occupied ON occupied.entity_id = e.id`
+	}
+	var args []any
+	if g.grid != nil && g.grid.MapID() != "" {
+		query += ` WHERE (EXISTS (SELECT 1 FROM comp_tilelayer tile WHERE tile.entity_id=e.id AND tile.map_id=?)
+			OR EXISTS (SELECT 1 FROM comp_tileentityowner owner
+				JOIN comp_tilelayer parent ON parent.entity_id=owner.target_entity_id
+				WHERE owner.entity_id=e.id AND parent.map_id=?)`
+		if hasReferences {
+			query += ` OR EXISTS (SELECT 1 FROM comp_tilelayer parent
+				JOIN comp_tilereferences refs ON refs.entity_id=parent.entity_id
+				JOIN json_each(refs.value) target WHERE CAST(target.value AS INTEGER)=e.id AND parent.map_id=?
+				AND (NOT EXISTS (SELECT 1 FROM spawns foreign_spawn WHERE foreign_spawn.entity_id=e.id)
+				OR EXISTS (SELECT 1 FROM spawns local_spawn WHERE local_spawn.entity_id=e.id AND local_spawn.map=?))
+				AND NOT EXISTS (SELECT 1 FROM comp_tileentityowner foreign_owner
+				JOIN comp_tilelayer foreign_tile ON foreign_tile.entity_id=foreign_owner.target_entity_id
+				WHERE foreign_owner.entity_id=e.id AND foreign_tile.map_id<>?))`
+		}
+		query += ` OR (NOT EXISTS (SELECT 1 FROM comp_tilelayer any_tile WHERE any_tile.entity_id=e.id)
+				AND NOT EXISTS (SELECT 1 FROM comp_tileentityowner any_owner WHERE any_owner.entity_id=e.id)`
+		if hasReferences {
+			query += ` AND NOT EXISTS (SELECT 1 FROM comp_tilereferences any_refs
+				JOIN comp_tilelayer linked_tile ON linked_tile.entity_id=any_refs.entity_id
+				JOIN json_each(any_refs.value) any_target
+				WHERE CAST(any_target.value AS INTEGER)=e.id AND linked_tile.map_id=?)
+				AND (NOT EXISTS (SELECT 1 FROM comp_tilereferences any_refs
+					JOIN json_each(any_refs.value) any_target WHERE CAST(any_target.value AS INTEGER)=e.id)
+					OR EXISTS (SELECT 1 FROM spawns local_spawn WHERE local_spawn.entity_id=e.id AND local_spawn.map=?))`
+		}
+		query += ` AND (NOT EXISTS (SELECT 1 FROM spawns other WHERE other.entity_id=e.id)
+				OR EXISTS (SELECT 1 FROM spawns current WHERE current.entity_id=e.id AND current.map=?))))`
+		args = append(args, g.grid.MapID(), g.grid.MapID())
+		if hasReferences {
+			args = append(args, g.grid.MapID(), g.grid.MapID(), g.grid.MapID())
+			args = append(args, g.grid.MapID(), g.grid.MapID())
+		}
+		args = append(args, g.grid.MapID())
+	}
+	query += " ORDER BY e.id"
+	rows, err := g.db.Query(query, args...)
 	if err != nil {
 		return
 	}
@@ -160,13 +247,27 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for rows.Next() {
 		var (
 			id        int64
-			px, py    float64
+			px, py    sql.NullFloat64
 			sheet     string
 			animation string
 			flipX     int
+			occupied  sql.NullString
 		)
-		if err := rows.Scan(&id, &px, &py, &sheet, &animation, &flipX); err != nil {
+		if err := rows.Scan(&id, &px, &py, &sheet, &animation, &flipX, &occupied); err != nil {
 			continue
+		}
+		cells := []tilemap.Point{{}}
+		if hasReferences && len(linked[id]) != 0 {
+			cells = linked[id]
+		} else if !px.Valid || !py.Valid {
+			continue
+		} else if occupied.Valid {
+			cells, err = tilemap.ParseOccupiedCells(occupied.String,
+				tilemap.Point{X: int(math.Floor(px.Float64)), Y: int(math.Floor(py.Float64))}, g.grid.Width, g.grid.Height)
+			if err != nil {
+				log.Printf("sprite %d: %v", id, err)
+				continue
+			}
 		}
 		seen[id] = true
 
@@ -181,8 +282,10 @@ func (g *Game) Draw(screen *ebiten.Image) {
 			st.Elapsed = 0
 		}
 
-		worldX := px * ts
-		worldY := py * ts
+		worldX, worldY := px.Float64*ts, py.Float64*ts
+		if hasReferences && len(linked[id]) != 0 {
+			worldX, worldY = 0, 0 // linked cells are absolute map positions
+		}
 
 		def, hasDef := g.animLoader.Get(animation)
 		sheetImg, hasImg := g.imageCache.Get(sheet)
@@ -190,9 +293,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if !hasDef || !hasImg {
 			// Fallback: solid colour rectangle.
 			if g.fallbackImg != nil {
-				var op ebiten.DrawImageOptions
-				op.GeoM.Translate(worldX, worldY)
-				screen.DrawImage(g.fallbackImg, &op)
+				drawSpriteFootprint(dst, g.fallbackImg, worldX, worldY, cells, false)
 			}
 			continue
 		}
@@ -205,13 +306,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		subRect := image.Rect(col*g.tileSize, 0, (col+1)*g.tileSize, g.tileSize)
 		subImg := sheetImg.SubImage(subRect).(*ebiten.Image)
 
-		var op ebiten.DrawImageOptions
-		if flipX != 0 {
-			op.GeoM.Scale(-1, 1)
-			op.GeoM.Translate(ts, 0)
-		}
-		op.GeoM.Translate(worldX, worldY)
-		screen.DrawImage(subImg, &op)
+		drawSpriteFootprint(dst, subImg, worldX, worldY, cells, flipX != 0)
 	}
 
 	// GC animStates for deleted entities.
@@ -219,6 +314,19 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		if !seen[id] {
 			delete(g.animStates, id)
 		}
+	}
+}
+
+func drawSpriteFootprint(dst imageDrawer, frame *ebiten.Image, worldX, worldY float64, cells []tilemap.Point, flipX bool) {
+	size := float64(frame.Bounds().Dx())
+	for _, cell := range cells {
+		var op ebiten.DrawImageOptions
+		if flipX {
+			op.GeoM.Scale(-1, 1)
+			op.GeoM.Translate(size, 0)
+		}
+		op.GeoM.Translate(worldX+float64(cell.X)*size, worldY+float64(cell.Y)*size)
+		dst.DrawImage(frame, &op)
 	}
 }
 

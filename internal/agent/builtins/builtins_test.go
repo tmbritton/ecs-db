@@ -8,6 +8,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/agent/builtins"
+	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/storage"
 	"github.com/tmbritton/ecs-db/internal/tilemap"
 	_ "modernc.org/sqlite"
@@ -29,6 +30,10 @@ func setupBuiltinsDB(t *testing.T) *sql.DB {
 		`CREATE TABLE comp_goblinstats (entity_id INTEGER PRIMARY KEY, speed REAL NOT NULL DEFAULT 2, aggrorange REAL NOT NULL DEFAULT 80, target_x REAL NOT NULL DEFAULT 0, target_y REAL NOT NULL DEFAULT 0, patience REAL NOT NULL DEFAULT 0)`,
 		`CREATE TABLE comp_path        (entity_id INTEGER PRIMARY KEY, waypoints TEXT NOT NULL DEFAULT '[]', current_index INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE comp_tile        (entity_id INTEGER PRIMARY KEY, x INTEGER NOT NULL DEFAULT 0, y INTEGER NOT NULL DEFAULT 0, passable INTEGER NOT NULL DEFAULT 1, tile_type TEXT NOT NULL DEFAULT 'floor')`,
+		`CREATE TABLE comp_passability (entity_id INTEGER PRIMARY KEY, kind TEXT NOT NULL)`,
+		`CREATE TABLE comp_visibility (entity_id INTEGER PRIMARY KEY, kind TEXT NOT NULL)`,
+		`CREATE TABLE comp_occupiedcells (entity_id INTEGER PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE comp_flying (entity_id INTEGER PRIMARY KEY, value INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("setup: %v", err)
@@ -535,14 +540,15 @@ func TestGuard_healthAbove_False(t *testing.T) {
 
 // ── Pathfinding actions and guard ─────────────────────────────────────────────
 
-func openGrid(w, h int) *tilemap.TileGrid {
-	g := tilemap.NewTileGrid(w, h)
-	for y := range h {
-		for x := range w {
-			g.SetPassable(x, y, true)
-		}
-	}
-	return g
+func openGrid(db *sql.DB, w, h int) *tilemap.TileGrid {
+	rules := schema.DatabaseSchema{Components: map[string]schema.Component{
+		"Passability": {Type: "object"}, "Visibility": {Type: "object"},
+		"OccupiedCells": {Type: "array"}, "Flying": {Type: "boolean"},
+	}, Interactions: map[string]map[string]schema.InteractionRule{
+		"Passability": {"solid": {Allows: []string{"Flying"}}},
+		"Visibility":  {"opaque": {}},
+	}}
+	return tilemap.NewTileGridForWorld(w, h, db, rules)
 }
 
 func TestAction_computePath_WritesWaypoints(t *testing.T) {
@@ -551,7 +557,7 @@ func TestAction_computePath_WritesWaypoints(t *testing.T) {
 	db.Exec("INSERT INTO comp_position    (entity_id, x, y)               VALUES (?, 0, 0)", entityID)
 	db.Exec("INSERT INTO comp_goblinstats (entity_id, target_x, target_y) VALUES (?, 2, 0)", entityID)
 
-	grid := openGrid(5, 5)
+	grid := openGrid(db, 5, 5)
 	r := builtins.NewRegistry()
 	builtins.RegisterPathfinding(r, grid)
 
@@ -581,7 +587,7 @@ func TestAction_stepAlongPath_AdvancesPosition(t *testing.T) {
 	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0},{"X":2,"Y":0}]', 0)`, entityID)
 
 	r := builtins.NewRegistry()
-	builtins.RegisterPathfinding(r, openGrid(5, 5))
+	builtins.RegisterPathfinding(r, openGrid(db, 5, 5))
 
 	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
 		ctx := actx(entityID, w, rd, nil)
@@ -604,6 +610,54 @@ func TestAction_stepAlongPath_AdvancesPosition(t *testing.T) {
 	}
 }
 
+func TestAction_stepAlongPath_RechecksNewlyArrivedBlocker(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	id := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_position (entity_id,x,y) VALUES (?,0,0)", id)
+	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0}]', 0)`, id)
+	wall := insertEntity(t, db, "Wall")
+	db.Exec("INSERT INTO comp_position (entity_id,x,y) VALUES (?,1,0)", wall)
+	db.Exec("INSERT INTO comp_passability (entity_id,kind) VALUES (?,'solid')", wall)
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(db, 3, 2))
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		handler, _ := r.GetAction("stepAlongPath")
+		if err := handler.Run(actx(id, w, rd, nil)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var x float64
+	var next int
+	db.QueryRow(`SELECT x FROM comp_position WHERE entity_id=?`, id).Scan(&x)
+	db.QueryRow(`SELECT current_index FROM comp_path WHERE entity_id=?`, id).Scan(&next)
+	if x != 0 || next != 0 {
+		t.Fatalf("stepped through newly arrived blocker: x=%v index=%d", x, next)
+	}
+}
+
+func TestAction_moveTowardTarget_GridAwareActionCannotLeapOverBlocker(t *testing.T) {
+	db := setupBuiltinsDB(t)
+	id := insertEntity(t, db, "Goblin")
+	db.Exec("INSERT INTO comp_position (entity_id,x,y) VALUES (?,0,0)", id)
+	db.Exec("INSERT INTO comp_goblinstats (entity_id,speed,target_x,target_y) VALUES (?,2,3,0)", id)
+	wall := insertEntity(t, db, "Wall")
+	db.Exec("INSERT INTO comp_position (entity_id,x,y) VALUES (?,1,0)", wall)
+	db.Exec("INSERT INTO comp_passability (entity_id,kind) VALUES (?,'solid')", wall)
+	r := builtins.NewRegistry()
+	builtins.RegisterPathfinding(r, openGrid(db, 4, 2))
+	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
+		handler, _ := r.GetAction("moveTowardTarget")
+		if err := handler.Run(actx(id, w, rd, nil)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var x float64
+	db.QueryRow(`SELECT x FROM comp_position WHERE entity_id=?`, id).Scan(&x)
+	if x != 0 {
+		t.Fatalf("moveTowardTarget leapt over wall: x=%v", x)
+	}
+}
+
 func TestAction_stepAlongPath_NoOpAtEnd(t *testing.T) {
 	db := setupBuiltinsDB(t)
 	entityID := insertEntity(t, db, "Goblin")
@@ -611,7 +665,7 @@ func TestAction_stepAlongPath_NoOpAtEnd(t *testing.T) {
 	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0}]', 1)`, entityID)
 
 	r := builtins.NewRegistry()
-	builtins.RegisterPathfinding(r, openGrid(5, 5))
+	builtins.RegisterPathfinding(r, openGrid(db, 5, 5))
 
 	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
 		ctx := actx(entityID, w, rd, nil)
@@ -632,7 +686,7 @@ func TestGuard_pathComplete_TrueWhenIndexAtEnd(t *testing.T) {
 	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0}]', 1)`, entityID)
 
 	r := builtins.NewRegistry()
-	builtins.RegisterPathfinding(r, openGrid(5, 5))
+	builtins.RegisterPathfinding(r, openGrid(db, 5, 5))
 
 	got := readGuard(t, db, func(rd agent.WorldReader) bool {
 		handler, _ := r.GetGuard("pathComplete")
@@ -649,7 +703,7 @@ func TestGuard_pathComplete_FalseWhenMidPath(t *testing.T) {
 	db.Exec(`INSERT INTO comp_path (entity_id, waypoints, current_index) VALUES (?, '[{"X":1,"Y":0},{"X":2,"Y":0}]', 0)`, entityID)
 
 	r := builtins.NewRegistry()
-	builtins.RegisterPathfinding(r, openGrid(5, 5))
+	builtins.RegisterPathfinding(r, openGrid(db, 5, 5))
 
 	got := readGuard(t, db, func(rd agent.WorldReader) bool {
 		handler, _ := r.GetGuard("pathComplete")
@@ -666,7 +720,7 @@ func TestGuard_pathComplete_TrueWhenNoPath(t *testing.T) {
 	// No comp_path row inserted.
 
 	r := builtins.NewRegistry()
-	builtins.RegisterPathfinding(r, openGrid(5, 5))
+	builtins.RegisterPathfinding(r, openGrid(db, 5, 5))
 
 	got := readGuard(t, db, func(rd agent.WorldReader) bool {
 		handler, _ := r.GetGuard("pathComplete")
@@ -686,7 +740,7 @@ func TestGuard_inLineOfSight_ClearPath(t *testing.T) {
 	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
 	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 4, 0)", playerID)
 
-	grid := openGrid(5, 1)
+	grid := openGrid(db, 5, 1)
 	r := builtins.NewRegistry()
 	builtins.RegisterLineOfSight(r, grid)
 
@@ -706,8 +760,10 @@ func TestGuard_inLineOfSight_Blocked(t *testing.T) {
 	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 0, 0)", goblinID)
 	db.Exec("INSERT INTO comp_position (entity_id, x, y) VALUES (?, 4, 0)", playerID)
 
-	grid := openGrid(5, 1)
-	grid.SetPassable(2, 0, false)
+	grid := openGrid(db, 5, 1)
+	wallID := insertEntity(t, db, "Wall")
+	db.Exec("INSERT INTO comp_position (entity_id,x,y) VALUES (?,2,0)", wallID)
+	db.Exec("INSERT INTO comp_visibility (entity_id,kind) VALUES (?,'opaque')", wallID)
 	r := builtins.NewRegistry()
 	builtins.RegisterLineOfSight(r, grid)
 
@@ -720,33 +776,12 @@ func TestGuard_inLineOfSight_Blocked(t *testing.T) {
 	}
 }
 
-func TestAction_setTilePassable_UpdatesGridAndDB(t *testing.T) {
+func TestRegisterLineOfSight_DoesNotOfferObsoleteTileBooleanAction(t *testing.T) {
 	db := setupBuiltinsDB(t)
-	tileID := insertEntity(t, db, "Tile")
-	db.Exec("INSERT INTO comp_tile (entity_id, x, y, passable) VALUES (?, 2, 0, 1)", tileID)
-
-	grid := openGrid(5, 1)
-	grid.SetEntityID(2, 0, tileID)
-
 	r := builtins.NewRegistry()
-	builtins.RegisterLineOfSight(r, grid)
-
-	goblinID := insertEntity(t, db, "Goblin")
-	runAction(t, db, func(w agent.WorldWriter, rd agent.WorldReader) {
-		ctx := actx(goblinID, w, rd, map[string]any{"x": float64(2), "y": float64(0), "passable": false})
-		handler, _ := r.GetAction("setTilePassable")
-		if err := handler.Run(ctx); err != nil {
-			t.Fatalf("setTilePassable: %v", err)
-		}
-	})
-
-	if grid.IsPassable(2, 0) {
-		t.Error("grid.IsPassable(2,0) = true after setTilePassable(false), want false")
-	}
-	var passable int
-	db.QueryRow("SELECT passable FROM comp_tile WHERE entity_id = ?", tileID).Scan(&passable)
-	if passable != 0 {
-		t.Errorf("comp_tile.passable = %d after setTilePassable(false), want 0", passable)
+	builtins.RegisterLineOfSight(r, openGrid(db, 5, 1))
+	if _, ok := r.GetAction("setTilePassable"); ok {
+		t.Fatal("registered legacy Tile.passable writer even though traversal uses occupants")
 	}
 }
 

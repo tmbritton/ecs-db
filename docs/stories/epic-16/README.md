@@ -19,8 +19,9 @@ three bullets are refined below before touching either asset mode.
 ## Contracts and boundaries
 
 **Movement decision (before TILES authoring):** The first map stays grid-based
-and has no collision polygons. Walls are **separate entities** occupying
-cells; water or a river is one entity occupying a **set** of cells. A mover's
+and has no collision polygons. Walls are **separate entities referenced by
+Tiles**; one water or River entity may be referenced by Tiles at an irregular
+set of cells. Each Tile owns Position and any number of entity references. A mover's
 ability to enter a cell depends on its components and the components of the
 entities occupying that cell, not on `Tile.passable` or a tile class string.
 Walking, swimming, flying and phasing therefore have different outcomes at a
@@ -35,40 +36,41 @@ not universal Boolean fields or hard-coded wall/water type switches. A mover's
 against the `Passability` taxonomy of **every** destination occupant. Every
 restricting occupant must allow that mover. A flyer crosses a wall and river;
 a swimmer crosses water; a phased walker crosses a wall. An in-bounds cell
-without art is enterable when no occupant denies it. A river's occupied cells
-are an explicit set of offsets relative to its Position, without a polygon.
+without art is enterable when no occupant denies it. Referencing Tile
+Positions define a linked River's occupied cells; an unreferenced runtime
+entity may use its own Position/OccupiedCells offsets.
 
 `Visibility` is evaluated separately against the observer's **independent
 components**, such as NightVision; those abilities are not values in a
 universal vision-mode enum. A person sees over water they cannot traverse. A
 phased Kitty Pryde crosses a wall but does **not** see through it merely by
 phasing.
-Today's `LineOfSight` instead reads `TileGrid.IsPassable`; Story 3 removes
-that coupling. Schema currently supports string/array component fields but
-**not enum constraints**; Story 3 must validate the taxonomy vocabulary so
-an unknown category never silently means passable or transparent. Visibility
+Story 3 removed `LineOfSight`'s dependency on `TileGrid.IsPassable`. Schema's
+`interactions` section now declares the taxonomy vocabulary and which boolean
+capability components permit each category; an unknown category is refused
+rather than silently becoming passable or transparent. Visibility
 controls sight occlusion here, not renderer drawing. DetectsMagic illustrates
 another independent observer capability, but revealing a hidden magical
 *target* is a **later detection feature**, not Story 3's occlusion rule. See
 [Story 3](03-occupant-traversal.md).
 
-**Rendering decision — implemented in Story 2:** the former importer created
+**Rendering decision — Story 2 foundation, corrected in Story 3:** the former importer created
 one Tile entity for the topmost nonempty tile per cell, while the renderer
 drew every visual layer directly from TMX/TSX. Lower visible tiles were not
 entities, and changing a Tile entity did not change the cached artwork. Now
 **every nonempty authored layer tile is a Tile entity**, including
-hidden layers whose visual component says not to draw. The game renderer
-reads component-backed per-instance artwork and order, with PNGs remaining
-file-backed assets. `mapId + layerID + cell` is the stable tile identity;
+hidden layers. The Tile owns Position, references and layer order; its
+**referenced entities own visual components**. The renderer resolves those
+visuals at Tile positions, with PNGs remaining file-backed assets.
+`mapId + layerID + cell` is the stable tile identity;
 reordering a layer does not replace its entities. Forge's unsaved working-map
 preview may still draw directly from the editor's TMX because that is an
 authoring view, not the game world's state.
 
-An occupant with its own visual component is likewise one entity even when
-its `OccupiedCells` covers several cells. The current Sprite renderer draws
-only once at Position; Story 3 must draw that one occupant across its
-footprint so a moving river does not leave its picture behind. Separate Tile
-entities can still supply background art.
+A linked River can supply a visual to several referencing Tiles without
+cloning its entity ID; moving or relinking those Tiles moves both art and
+occupancy. An unreferenced
+entity with Sprite and OccupiedCells still draws across its own footprint.
 
 - TSX editing is an external tileset's own file session, not a mutation of the
   TMX that references it. The engine may resolve one TSX from several maps;
@@ -80,9 +82,10 @@ entities can still supply background art.
   `passable` or `type` must leave those bytes intact, and the parser must read
   back the edited meaning. Do not convert a TSJ or rewrite an embedded tileset
   in the first story under a TSX-save label.
-- TILES shows tile pictures and type/class metadata. **MAP** authors walls,
-  rivers and other occupying entities and their movement components/footprints
-  after Stories 2–4. Do not offer a global `passable` toggle or polygon
+- TILES shows tile pictures, class and a tile's reference/type template.
+  **MAP** paints positioned Tile entities and authors their references to
+  separate Wall, River or other entity instances, including references shared
+  by several Tiles. Do not offer a global `passable` toggle or polygon
   collision authoring. Tiled tile animation does not control this game's sprite
   animator. Saving a TSX cannot hot-reload the running game's grid.
 - SPRT writes `animations.toml` in the first assets mod, with
@@ -101,8 +104,8 @@ entities can still supply background art.
 |---|---|---|
 | 1 | [Lossless TSX writer](01-tsx-writer.md) | Editable external TSX document with exact no-op round trip and surgical tile-property/class edits; unknown XML survives. |
 | 2 | [Entity-backed tile layers](02-entity-backed-tiles.md) | Import every authored layer tile as a stable entity and render tile instances from database components, not a static TMX snapshot. |
-| 3 | [Occupant-aware traversal](03-occupant-traversal.md) | Replace universal tile `passable` with a predicate over the mover and destination occupants, shared by player movement, A*, reachability and path steps; separate line of sight and render multi-cell occupants as one entity. |
-| 4 | MAP occupant authoring | Place a wall and an irregular, multi-cell water/river entity; inspect and edit their traversal components and occupied cells, without polygons. |
+| 3 | [Occupant-aware traversal](03-occupant-traversal.md) | Replace universal tile `passable` with a predicate over every entity referenced by the destination's positioned Tiles, shared by player movement, A*, reachability and path steps; separate line of sight. |
+| 4 | MAP occupant authoring | Painting a Tile instantiates or links its referenced entities; inspect/edit links and share one River instance among an irregular set of Tiles, without polygons. |
 | 5 | Tileset editing session | Discover referenced external TSX/TSJ, one working value per path, dirty/save/discard/reload/conflict and project-scoped asset serving. |
 | 6 | TILES read surface | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
 | 7 | TILES property editing | Per-tile class/type and supported art metadata through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |

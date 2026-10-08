@@ -22,13 +22,14 @@ func tileSchema() schema.DatabaseSchema {
 				Properties: map[string]schema.Property{
 					"x":         {Type: "integer"},
 					"y":         {Type: "integer"},
-					"passable":  {Type: "boolean"},
 					"tile_type": {Type: "string"},
 				},
 			},
 			"TileLayer": {Type: "object", Properties: map[string]schema.Property{
 				"map_id": {Type: "string"}, "layer_id": {Type: "integer"},
 				"layer_order": {Type: "integer"}, "draw_order": {Type: "integer"},
+				"cell_w": {Type: "integer"}, "cell_h": {Type: "integer"},
+				"visible": {Type: "boolean"}, "opacity": {Type: "number"},
 			}},
 			"TileVisual": {Type: "object", Properties: map[string]schema.Property{
 				"image": {Type: "string"}, "source_x": {Type: "integer"},
@@ -41,14 +42,35 @@ func tileSchema() schema.DatabaseSchema {
 			"RuntimeNote": {Type: "object", Properties: map[string]schema.Property{
 				"value": {Type: "string"},
 			}},
+			"Position": {Type: "object", Properties: map[string]schema.Property{
+				"x": {Type: "number"}, "y": {Type: "number"},
+			}},
+			"TileReferences":  {Type: "array", Items: &schema.Property{Type: "entity-ref"}},
+			"TileEntityOwner": {Type: "entity-ref"},
+			"Passability":     {Type: "object", Properties: map[string]schema.Property{"kind": {Type: "string"}}},
+			"Visibility":      {Type: "object", Properties: map[string]schema.Property{"kind": {Type: "string"}}},
 		},
 		EntityTypes: map[string]schema.EntityType{
 			"Tile": {
-				RequiredComponents:   []string{"Tile"},
-				OptionalComponents:   []string{"TileLayer", "TileVisual", "RuntimeNote"},
+				RequiredComponents:   []string{"Tile", "TileLayer", "Position", "TileReferences"},
+				OptionalComponents:   []string{"RuntimeNote"},
 				AllowExtraComponents: false,
 				ValidationLevel:      "strict",
 			},
+			"Floor": {
+				RequiredComponents: []string{"TileVisual", "Passability", "Visibility"},
+				OptionalComponents: []string{"TileEntityOwner", "Position"},
+				ValidationLevel:    "strict",
+			},
+			"Wall": {
+				RequiredComponents: []string{"TileVisual", "Passability", "Visibility"},
+				OptionalComponents: []string{"TileEntityOwner", "Position"},
+				ValidationLevel:    "strict",
+			},
+		},
+		Interactions: map[string]map[string]schema.InteractionRule{
+			"Passability": {"open": {Open: true}, "solid": {}},
+			"Visibility":  {"clear": {Open: true}, "opaque": {}},
 		},
 	}
 }
@@ -104,8 +126,8 @@ func TestLoadMap_ASecondLoadPicksUpAnEditedFile(t *testing.T) {
 	}
 	// Asserted before the edit, or "the middle cell is a wall now" is satisfied
 	// by a fixture where it always was.
-	if !first.IsPassable(1, 1) {
-		t.Fatal("the middle cell is not floor before the edit — the fixture proves nothing")
+	if _, ok := first.EntityAt(1, 1); !ok {
+		t.Fatal("the middle cell has no authored Tile before the edit")
 	}
 
 	// The author walls off the one open cell.
@@ -113,13 +135,13 @@ func TestLoadMap_ASecondLoadPicksUpAnEditedFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(walled), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	grid, _, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err = LoadMap(context.Background(), svc, db, path)
 	if err != nil {
 		t.Fatalf("second LoadMap: %v", err)
 	}
 
-	if grid.IsPassable(1, 1) {
-		t.Error("the edited map still loads as the old one — re-import did nothing")
+	if got := tileTypeAt(t, db, 1, 1); got != "wall" {
+		t.Errorf("the edited tile class is %q, want wall", got)
 	}
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM entities WHERE entity_type = 'Tile'`).Scan(&count); err != nil {

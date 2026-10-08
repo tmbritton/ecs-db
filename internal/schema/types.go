@@ -14,6 +14,9 @@ type DatabaseSchema struct {
 	SchemaVersion int                   `json:"schemaVersion"`
 	Components    map[string]Component  `json:"components"`
 	EntityTypes   map[string]EntityType `json:"entityTypes"`
+	// Interactions maps a restriction component and taxonomy category to the
+	// independent boolean capabilities that can overcome that restriction.
+	Interactions map[string]map[string]InteractionRule `json:"interactions,omitempty"`
 
 	// ComponentOrder and EntityTypeOrder record the order these keys appeared
 	// in when the schema was loaded, so Marshal can write the file back the way
@@ -26,8 +29,10 @@ type DatabaseSchema struct {
 	//
 	// json:"-" because they are not part of the file format. LoadSchema fills
 	// them from the raw bytes; the interpreter ignores them entirely.
-	ComponentOrder  []string `json:"-"`
-	EntityTypeOrder []string `json:"-"`
+	ComponentOrder           []string            `json:"-"`
+	EntityTypeOrder          []string            `json:"-"`
+	InteractionOrder         []string            `json:"-"`
+	InteractionCategoryOrder map[string][]string `json:"-"`
 }
 
 // EntityType is a named template declaring which components an entity of

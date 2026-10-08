@@ -13,7 +13,7 @@
  "Component.property" — Position is not among them, because the object's own
  coordinates are where the map shows the spawn.
 -->
-<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="20" height="15" tilewidth="32" tileheight="32" infinite="0" nextlayerid="3" nextobjectid="3">
+<map version="1.10" tiledversion="1.11.0" orientation="orthogonal" renderorder="right-down" width="20" height="15" tilewidth="32" tileheight="32" infinite="0" nextlayerid="3" nextobjectid="85">
  <properties>
   <property name="mapId" value="level1"/>
  </properties>
@@ -45,6 +45,7 @@
     <property name="Sprite.animation" value="player_idle"/>
     <property name="Sprite.flip_x" type="bool" value="false"/>
     <property name="Sprite.sheet" value=""/>
+    <property name="Walking.value" type="bool" value="true"/>
    </properties>
   </object>
   <object id="2" name="goblin" type="Goblin" x="480" y="384" width="32" height="32">
@@ -54,6 +55,7 @@
     <property name="Sprite.animation" value="goblin_idle"/>
     <property name="Sprite.flip_x" type="bool" value="false"/>
     <property name="Sprite.sheet" value=""/>
+    <property name="Walking.value" type="bool" value="true"/>
    </properties>
   </object>
  </objectgroup>

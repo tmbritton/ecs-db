@@ -41,7 +41,8 @@ func TestMapIssues_CoveredBadTileIsAnEngineRefusal(t *testing.T) {
 		Name: "stacked.tmx", Width: 1, Height: 1,
 		Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: &tiled.Tileset{
 			Name: "floor", TileWidth: 16, TileHeight: 16, TileCount: 1, Columns: 1,
-			Image: tiled.Image{Source: "floor.png", Path: "floor.png", Width: 16, Height: 16},
+			Properties: tiled.Properties{"entityType": {Value: "Floor"}},
+			Image:      tiled.Image{Source: "floor.png", Path: "floor.png", Width: 16, Height: 16},
 		}}},
 		Layers: []tiled.Layer{
 			{Name: "buried", Width: 1, Height: 1, Data: []uint32{99}},
@@ -82,7 +83,8 @@ func TestMapIssues_ReportsTileWhoseImageRectangleCannotBeDrawn(t *testing.T) {
 		Name: "bad-art.tmx", Width: 1, Height: 1, TileWidth: 16, TileHeight: 16,
 		Tilesets: []tiled.TilesetRef{{FirstGID: 1, Tileset: &tiled.Tileset{
 			Name: "small", TileWidth: 16, TileHeight: 16, TileCount: 1, Columns: 1,
-			Image: tiled.Image{Source: "tiny.png", Path: "tiny.png", Width: 8, Height: 8},
+			Properties: tiled.Properties{"entityType": {Value: "Floor"}},
+			Image:      tiled.Image{Source: "tiny.png", Path: "tiny.png", Width: 8, Height: 8},
 		}}},
 		Layers: []tiled.Layer{{
 			ID: 1, Name: "ground", Width: 1, Height: 1,

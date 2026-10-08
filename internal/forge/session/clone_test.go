@@ -88,6 +88,24 @@ func richSession(t *testing.T) (*Session, string) {
 	return s, path
 }
 
+func TestClone_InteractionPolicyIsNotAliased(t *testing.T) {
+	original := schema.DatabaseSchema{
+		Interactions: map[string]map[string]schema.InteractionRule{
+			"Passability": {"solid": {Allows: []string{"Flying"}}},
+		},
+		InteractionOrder:         []string{"Passability"},
+		InteractionCategoryOrder: map[string][]string{"Passability": {"solid"}},
+	}
+	copied := clone(original)
+	copied.InteractionOrder[0] = "changed"
+	copied.InteractionCategoryOrder["Passability"][0] = "changed"
+	copied.Interactions["Passability"]["solid"] = schema.InteractionRule{Allows: []string{"Burrowing"}}
+	if original.InteractionOrder[0] != "Passability" || original.InteractionCategoryOrder["Passability"][0] != "solid" ||
+		original.Interactions["Passability"]["solid"].Allows[0] != "Flying" {
+		t.Fatal("cloned interaction policy leaked an edit into the saved schema")
+	}
+}
+
 // Edit adopts the clone, so anything clone drops is erased from the user's
 // file. A no-op edit must therefore change nothing at all — not the value, and
 // not the bytes it serialises to.
@@ -219,7 +237,7 @@ func TestClone_PreservesEveryValue(t *testing.T) {
 // If this fails, add the field to clone and then to the list here.
 func TestClone_CoversEveryField(t *testing.T) {
 	known := map[string][]string{
-		"DatabaseSchema": {"SchemaVersion", "Components", "EntityTypes", "ComponentOrder", "EntityTypeOrder"},
+		"DatabaseSchema": {"SchemaVersion", "Components", "EntityTypes", "Interactions", "ComponentOrder", "EntityTypeOrder", "InteractionOrder", "InteractionCategoryOrder"},
 		"Component":      {"Type", "Behavior", "RenamedFrom", "Properties", "Items", "PropertyOrder"},
 		"Property":       {"Type", "RenamedFrom", "Properties", "Items", "PropertyOrder"},
 		"EntityType":     {"Behavior", "RenamedFrom", "RequiredComponents", "OptionalComponents", "AllowExtraComponents", "ValidationLevel"},

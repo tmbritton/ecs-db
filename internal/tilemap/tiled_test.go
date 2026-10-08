@@ -14,19 +14,21 @@ import (
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
-// A tileset of two tiles: 0 is floor and says it can be walked through, 1 is
-// wall and says it cannot. The properties are the point of the epic — the ASCII
-// format could only ever say "wall" or "not wall", and this is where
-// passability stops being a character.
+// Two pieces of artwork with classes but no movement rules. Occupants, not
+// tile artwork, decide whether a cell can be entered.
 const twoTileTSX = `<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" name="dungeon" tilewidth="8" tileheight="8" tilecount="2" columns="2">
  <image source="dungeon.png" width="16" height="8"/>
- <tile id="0" type="floor">
-  <properties><property name="passable" type="bool" value="true"/></properties>
- </tile>
- <tile id="1" type="wall">
-  <properties><property name="passable" type="bool" value="false"/></properties>
- </tile>
+ <tile id="0" type="floor"><properties>
+  <property name="entityType" value="Floor"/>
+  <property name="Passability.kind" value="open"/>
+  <property name="Visibility.kind" value="clear"/>
+ </properties></tile>
+ <tile id="1" type="wall"><properties>
+  <property name="entityType" value="Wall"/>
+  <property name="Passability.kind" value="solid"/>
+  <property name="Visibility.kind" value="opaque"/>
+ </properties></tile>
 </tileset>`
 
 // tiledMap writes a map and the tileset it names into a temp directory and
@@ -115,12 +117,6 @@ func TestLoadMap_ReadsATiledMap(t *testing.T) {
 	if grid.Width != 3 || grid.Height != 2 {
 		t.Fatalf("grid = %d×%d, want 3×2", grid.Width, grid.Height)
 	}
-	if !grid.IsPassable(1, 0) {
-		t.Error("(1,0) holds the floor tile and should be passable")
-	}
-	if grid.IsPassable(0, 0) {
-		t.Error("(0,0) holds the wall tile and should not be passable")
-	}
 	if got := tileTypeAt(t, db, 0, 0); got != "wall" {
 		t.Errorf("tile_type at (0,0) = %q, want %q", got, "wall")
 	}
@@ -138,13 +134,13 @@ func TestLoadMap_TiledRowsAreRowsAndColumnsAreColumns(t *testing.T) {
 	path := tiledMap(t, twoTileTSX, mapOf(3, 2,
 		layerOf("ground", 3, 2, "", "1,1,2,\n2,2,2")), "level.tmx")
 
-	grid, _ := loadTiledMap(t, path)
+	_, db := loadTiledMap(t, path)
 
-	if !grid.IsPassable(1, 0) {
-		t.Error("(1,0) is the second cell of the first row and is floor")
+	if got := tileTypeAt(t, db, 1, 0); got != "floor" {
+		t.Errorf("(1,0) class = %q, want floor", got)
 	}
-	if grid.IsPassable(0, 1) {
-		t.Error("(0,1) is the first cell of the second row and is wall")
+	if got := tileTypeAt(t, db, 0, 1); got != "wall" {
+		t.Errorf("(0,1) class = %q, want wall", got)
 	}
 }
 
@@ -155,52 +151,44 @@ func TestLoadMap_ReadsTMJAsWellAsTMX(t *testing.T) {
  "tilesets":[{"firstgid":1,"source":"dungeon.tsx"}],
  "layers":[{"id":1,"type":"tilelayer","name":"ground","width":3,"height":1,"data":[2,1,2]}]}`
 
-	grid, db := loadTiledMap(t, tiledMap(t, twoTileTSX, tmj, "level.tmj"))
+	_, db := loadTiledMap(t, tiledMap(t, twoTileTSX, tmj, "level.tmj"))
 
-	if grid.IsPassable(0, 0) || !grid.IsPassable(1, 0) || grid.IsPassable(2, 0) {
-		t.Error("the JSON map did not load as wall, floor, wall")
+	for x, kind := range []string{"wall", "floor", "wall"} {
+		if got := tileTypeAt(t, db, x, 0); got != kind {
+			t.Errorf("JSON tile %d class = %q, want %q", x, got, kind)
+		}
 	}
 	if n := tileCount(t, db); n != 3 {
 		t.Errorf("tile count = %d, want 3", n)
 	}
 }
 
-// Until Story 3, the topmost tile decides legacy movement; every authored tile
-// still has its own entity, including the floor below this wall.
-func TestLoadMap_TheTopmostNonEmptyTileDecidesTheCell(t *testing.T) {
+// Layer order decides appearance, never movement; both overlapping pieces of
+// artwork remain entities.
+func TestLoadMap_OverlappingLayerArtworkKeepsBothEntities(t *testing.T) {
 	// Floor everywhere; a wall drawn over the middle cell only.
 	path := tiledMap(t, twoTileTSX, mapOf(3, 1,
 		layerOf("floor", 3, 1, "", "1,1,1"),
 		layerOf("walls", 3, 1, "", "0,2,0")), "level.tmx")
 
-	grid, db := loadTiledMap(t, path)
-
-	if grid.IsPassable(1, 0) {
-		t.Error("the wall drawn on the upper layer did not win its cell")
-	}
-	if !grid.IsPassable(0, 0) || !grid.IsPassable(2, 0) {
-		t.Error("a cell the upper layer leaves empty should keep the floor beneath it")
-	}
+	_, db := loadTiledMap(t, path)
 	if got := tileTypeAt(t, db, 1, 0); got != "wall" {
-		t.Errorf("tile_type at (1,0) = %q — the type comes from the same tile the passability does", got)
+		t.Errorf("tile_type at (1,0) = %q, want upper layer's wall class", got)
 	}
 	if n := tileCount(t, db); n != 4 {
 		t.Errorf("tile count = %d, want 4 — every nonempty tile is an entity", n)
 	}
 }
 
-// Layer order is the file's order, so a wall under a floor is a floor. The
-// mirror of the test above, and the one that fails if the layers are walked the
-// wrong way round.
-func TestLoadMap_TheLowerLayerLosesTheCell(t *testing.T) {
+// Layer order affects drawing, not whether a lower tile entity exists.
+func TestLoadMap_LowerLayerStillHasAnEntity(t *testing.T) {
 	path := tiledMap(t, twoTileTSX, mapOf(1, 1,
 		layerOf("walls", 1, 1, "", "2"),
 		layerOf("floor", 1, 1, "", "1")), "level.tmx")
 
-	grid, _ := loadTiledMap(t, path)
-
-	if !grid.IsPassable(0, 0) {
-		t.Error("the floor is the upper layer here and should have won")
+	_, db := loadTiledMap(t, path)
+	if tileCount(t, db) != 2 || tileTypeAt(t, db, 0, 0) != "floor" {
+		t.Error("stacked artwork did not retain both entities in layer order")
 	}
 }
 
@@ -213,10 +201,9 @@ func TestLoadMap_ALayerInsideAFolderKeepsItsPlaceInTheStack(t *testing.T) {
 			` </group>`,
 		layerOf("floor", 1, 1, "", "1")), "level.tmx")
 
-	grid, _ := loadTiledMap(t, path)
-
-	if !grid.IsPassable(0, 0) {
-		t.Error("the floor is written below the folder and should be on top of it")
+	_, db := loadTiledMap(t, path)
+	if tileCount(t, db) != 2 || tileTypeAt(t, db, 0, 0) != "floor" {
+		t.Error("folder layer ordering lost its own tile entity")
 	}
 }
 
@@ -228,16 +215,14 @@ func TestLoadMap_AHiddenLayerStillCounts(t *testing.T) {
 		layerOf("floor", 1, 1, "", "1"),
 		layerOf("walls", 1, 1, `visible="0"`, "2")), "level.tmx")
 
-	grid, _ := loadTiledMap(t, path)
-
-	if grid.IsPassable(0, 0) {
-		t.Error("a hidden wall layer stopped being a wall")
+	_, db := loadTiledMap(t, path)
+	if tileCount(t, db) != 2 {
+		t.Error("hidden authored layer stopped having its own Tile entity")
 	}
 }
 
-// An empty cell is not a tile: no entity, and no row for the grid to index. It
-// is impassable all the same, because TileGrid has nothing there — which is a
-// different statement from a tile that says nothing.
+// An empty cell has no artwork entity, but occupant-free in-bounds space can
+// still be entered.
 func TestLoadMap_AnEmptyCellIsNotATile(t *testing.T) {
 	path := tiledMap(t, twoTileTSX, mapOf(3, 1,
 		layerOf("ground", 3, 1, "", "1,0,1")), "level.tmx")
@@ -247,8 +232,8 @@ func TestLoadMap_AnEmptyCellIsNotATile(t *testing.T) {
 	if _, ok := grid.EntityAt(1, 0); ok {
 		t.Error("gid 0 produced a tile entity")
 	}
-	if grid.IsPassable(1, 0) {
-		t.Error("a cell with nothing in it is not somewhere to stand")
+	if can, err := (Space{Width: 3, Height: 1}).CanEnter(SpatialEntity{ID: -1}, Point{X: 1}); err != nil || !can {
+		t.Errorf("empty-art cell was treated as blocked: %v,%v", can, err)
 	}
 	if n := tileCount(t, db); n != 2 {
 		t.Errorf("tile count = %d, want 2", n)
@@ -257,20 +242,15 @@ func TestLoadMap_AnEmptyCellIsNotATile(t *testing.T) {
 
 const undeclaredTSX = `<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" name="plain" tilewidth="8" tileheight="8" tilecount="2" columns="2">
+ <properties><property name="entityType" value="Floor"/><property name="Passability.kind" value="open"/><property name="Visibility.kind" value="clear"/></properties>
  <image source="dungeon.png" width="16" height="8"/>
  <tile id="0" type="rug"/>
 </tileset>`
 
-// A map is a floor with obstacles on it, so a tile that says nothing is floor.
-// The default a 200-tile decoration set can live with is the one that will not
-// be worked around with a script.
-func TestLoadMap_ATileWhoseTilesetSaysNothingIsPassable(t *testing.T) {
-	grid, db := loadTiledMap(t, tiledMap(t, undeclaredTSX, mapOf(2, 1,
+// An undeclared class is empty metadata; the artwork is still an entity.
+func TestLoadMap_AClasslessTileStillImports(t *testing.T) {
+	_, db := loadTiledMap(t, tiledMap(t, undeclaredTSX, mapOf(2, 1,
 		layerOf("ground", 2, 1, "", "1,2")), "level.tmx"))
-
-	if !grid.IsPassable(0, 0) || !grid.IsPassable(1, 0) {
-		t.Error("a tileset that declares no passability made an impassable map")
-	}
 	if got := tileTypeAt(t, db, 0, 0); got != "rug" {
 		t.Errorf("tile_type = %q, want the tile's own class", got)
 	}
@@ -289,20 +269,17 @@ const tilesetDefaultTSX = `<?xml version="1.0" encoding="UTF-8"?>
  </tile>
 </tileset>`
 
-// One line at the top of a tileset instead of a declaration on every tile in
-// it, and a tile that disagrees still wins.
-func TestLoadMap_ATilesetCanDeclareTheDefaultForItsTiles(t *testing.T) {
-	grid, db := loadTiledMap(t, tiledMap(t, tilesetDefaultTSX, mapOf(2, 1,
-		layerOf("ground", 2, 1, "", "1,2")), "level.tmx"))
-
-	if grid.IsPassable(0, 0) {
-		t.Error("the tileset said its tiles are solid and tile 0 did not disagree")
+// A former gameplay property left on art must fail visibly; silently ignoring
+// it would make an author's walls walkable after the schema change.
+func TestLoadMap_RefusesFormerTilesetPassabilityEvenWhenBoolean(t *testing.T) {
+	svc, db := syncFixture(t)
+	path := tiledMap(t, tilesetDefaultTSX, mapOf(2, 1,
+		layerOf("ground", 2, 1, "", "1,2")), "level.tmx")
+	if _, _, err := LoadMap(context.Background(), svc, db, path); err == nil || !strings.Contains(err.Error(), "passable") {
+		t.Fatalf("legacy tileset property silently accepted: %v", err)
 	}
-	if !grid.IsPassable(1, 0) {
-		t.Error("tile 1 declares itself passable and outranks its tileset")
-	}
-	if got := tileTypeAt(t, db, 0, 0); got != "rock" {
-		t.Errorf("tile_type = %q, want the tileset's class where the tile has none", got)
+	if tileCount(t, db) != 0 {
+		t.Fatal("legacy art collision property left a partially imported map")
 	}
 }
 
@@ -418,7 +395,7 @@ func TestLoadMap_AnUnparseableTiledFileLeavesTheDatabaseAlone(t *testing.T) {
 
 // Re-import is Story 3's, not a second copy of it: a second load of an
 // unchanged map writes nothing, and an edited one updates in place.
-func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
+func TestLoadMap_ATiledMapReImportsThroughSyncLayerTiles(t *testing.T) {
 	svc, db := syncFixture(t)
 	path := tiledMap(t, twoTileTSX, mapOf(2, 1, layerOf("ground", 2, 1, "", "1,2")), "level.tmx")
 	if _, _, err := LoadMap(context.Background(), svc, db, path); err != nil {
@@ -440,12 +417,12 @@ func TestLoadMap_ATiledMapReImportsThroughSyncTiles(t *testing.T) {
 	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
 		t.Fatalf("rewriting map: %v", err)
 	}
-	grid, _, err := LoadMap(context.Background(), svc, db, path)
+	_, _, err := LoadMap(context.Background(), svc, db, path)
 	if err != nil {
 		t.Fatalf("third LoadMap: %v", err)
 	}
-	if !grid.IsPassable(1, 0) {
-		t.Error("the edited map still loads as the old one")
+	if got := tileTypeAt(t, db, 1, 0); got != "floor" {
+		t.Errorf("the edited art class is %q, want floor", got)
 	}
 	after := tileRows(t, db)
 	if after[Point{X: 1}].ID != before[Point{X: 1}].ID {
@@ -500,10 +477,9 @@ func TestLoadMap_ALayerInsideAHiddenFolderStillCounts(t *testing.T) {
 			layerOf("walls", 1, 1, "", "2")+
 			` </group>`), "level.tmx")
 
-	grid, _ := loadTiledMap(t, path)
-
-	if grid.IsPassable(0, 0) {
-		t.Error("a wall inside a hidden folder stopped being a wall")
+	_, db := loadTiledMap(t, path)
+	if tileCount(t, db) != 2 {
+		t.Error("a hidden folder stopped importing its authored tile entity")
 	}
 }
 
@@ -518,9 +494,6 @@ func TestLoadMap_AMapThatDoesNotSayItsOrientationIsOrthogonal(t *testing.T) {
 
 	if _, ok := grid.EntityAt(0, 0); !ok {
 		t.Fatal("the map loaded with no tile in it")
-	}
-	if grid.IsPassable(0, 0) {
-		t.Error("the wall did not load as a wall")
 	}
 	if n := tileCount(t, db); n != 1 {
 		t.Errorf("tile count = %d, want 1", n)
@@ -555,13 +528,13 @@ func TestLoadMap_AFlippedTileIsStillItsTile(t *testing.T) {
 	path := tiledMap(t, twoTileTSX, mapOf(1, 1,
 		layerOf("ground", 1, 1, "", fmt.Sprint(uint32(flippedWall)))), "level.tmx")
 
-	grid, db := loadTiledMap(t, path)
-
-	if grid.IsPassable(0, 0) {
-		t.Error("a flipped wall stopped being a wall")
-	}
+	_, db := loadTiledMap(t, path)
 	if got := tileTypeAt(t, db, 0, 0); got != "wall" {
 		t.Errorf("tile_type = %q, want %q", got, "wall")
+	}
+	var flipped bool
+	if err := db.QueryRow(`SELECT flip_h FROM comp_tilevisual`).Scan(&flipped); err != nil || !flipped {
+		t.Fatalf("flip flag was not imported into visual state: %v,%v", flipped, err)
 	}
 }
 
@@ -604,10 +577,10 @@ func TestLoadMap_RefusesAMapThatNamesNoTilesetAtAll(t *testing.T) {
 
 const collectionTSX = `<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" name="props" tilewidth="8" tileheight="8" tilecount="3" columns="0">
+ <properties><property name="entityType" value="Floor"/><property name="Passability.kind" value="open"/><property name="Visibility.kind" value="clear"/></properties>
  <tile id="0"><image source="barrel.png" width="8" height="8"/></tile>
  <tile id="2" type="crate">
-  <image source="crate.png" width="8" height="8"/>
-  <properties><property name="passable" type="bool" value="false"/></properties>
+   <image source="crate.png" width="8" height="8"/>
  </tile>
  <tile id="3"><image source="rug.png" width="8" height="8"/></tile>
 </tileset>`
@@ -620,9 +593,6 @@ func TestLoadMap_ACollectionsLastTileIsNotPastItsEnd(t *testing.T) {
 
 	if _, ok := grid.EntityAt(1, 0); !ok {
 		t.Fatal("the last tile of a collection was refused")
-	}
-	if grid.IsPassable(0, 0) {
-		t.Error("the crate declares itself solid")
 	}
 	if got := tileTypeAt(t, db, 0, 0); got != "crate" {
 		t.Errorf("tile_type = %q, want %q", got, "crate")
@@ -694,8 +664,9 @@ func TestLoadMap_RefusesATilesetsPassableThatIsDeclaredAndUnreadable(t *testing.
 
 const bothClassesTSX = `<?xml version="1.0" encoding="UTF-8"?>
 <tileset version="1.10" name="both" class="rock" tilewidth="8" tileheight="8" tilecount="2" columns="2">
+ <properties><property name="entityType" value="Floor"/><property name="Passability.kind" value="open"/><property name="Visibility.kind" value="clear"/></properties>
  <image source="dungeon.png" width="16" height="8"/>
- <tile id="0" type="wall"/>
+ <tile id="0" type="wall"><properties><property name="entityType" value="Wall"/><property name="Passability.kind" value="solid"/><property name="Visibility.kind" value="opaque"/></properties></tile>
 </tileset>`
 
 // The tile's class outranks its tileset's. Only a tile carrying both can tell

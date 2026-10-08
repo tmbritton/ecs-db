@@ -7,13 +7,14 @@
 ## Confirmed product rule
 
 Every rendered tile in every layer is a Tile entity. A layer hidden in Tiled
-still has authored tiles and Tile entities; its visual component says not to
-draw them. A TMX/TSX is an **authoring source** for importing those entities,
+still has authored tiles and Tile entities; referenced entities' visual
+components determine what they draw. A TMX/TSX is an **authoring source** for importing those entities,
 not a second live model the renderer reads behind the database's back. Images
 remain files/assets; which image, source rectangle, transform and draw order
 an entity uses are database-backed component state.
 
-Wall and water entities are independent **occupants** placed on the grid. A
+Story 3 moved the interim Tile-owned visuals to referenced entities. Wall and
+water entities are independent **occupants** placed on the grid. A
 wall's movement restriction does not come from a tile's class or art. A single
 water/river entity can occupy many cell positions without becoming many water
 entities; that is Story 3. This story makes the tile/art side of the rule true.
@@ -32,7 +33,7 @@ unchanged. The game now imports and draws every layer's own Tile entities.
 - [x] Every nonempty tile on every authored layer imports as exactly one Tile
       entity. Identity includes map identity, stable positive layer ID and cell
       coordinate; a reorder changes draw order without replacing entity IDs.
-- [x] The schema-backed Tile/visual components contain the data the renderer
+- [x] The schema-backed Tile and referenced entities' visual components contain the data the renderer
       needs: source image/rectangle, position, transform, order, opacity and
       authored visibility. Unknown TMX/TSX XML stays preserved by the writers.
 - [x] A hidden layer's Tile entities exist but do not draw. Two nonempty tiles

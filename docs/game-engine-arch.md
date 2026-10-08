@@ -153,23 +153,29 @@ A `Weapon` exists in the world (has `Position`) when it's on the ground, or has 
 
 **Everything visible in the game world is an entity.** Each authored nonempty
 tile in each TMX layer has its own Tile entity, including tiles hidden by that
-layer's visual state. Its stable identity is `(mapId, layerId, cell)`. TMX and
-TSX files are import sources; tile instances and draw order are component
-state read by the game renderer. Image bytes remain file-backed assets. Epic
+layer's visual state. Its stable identity is `(mapId, layerId, cell)`. A Tile
+owns Position and an attachable collection of entity references. TMX and
+TSX files are import sources; Tiles own placement, references and draw order,
+while **referenced entities own artwork components**. The renderer follows
+each Tile's references and draws their visuals at the Tile's Position. Image
+bytes remain file-backed assets. Epic
 16 Story 2 replaced the shortcut that imported only the topmost Tile at a cell
 while drawing every layer directly from the map file.
 
-A wall is a separate entity placed at a cell. A river or water region is one
-entity whose `OccupiedCells` component lists grid-cell offsets relative to
-its `Position`; it is not copied into one entity per cell or authored as a
-polygon. Art Tile entities may occupy the same cells without becoming the
-wall or river's movement rule. A visual multi-cell occupant is drawn across
-its footprint under **one** entity ID (Epic 16 Story 3).
+A Wall is a separate entity **referenced by a Tile**. It may carry its own
+artwork component as well as Passability/Visibility, or a Tile may reference
+a separate art-only entity alongside its Wall. One River can be shared by
+Tiles in an irregular set of cells; the
+referencing Tiles' Positions establish its occupied cells. A Tile may reference
+several entities, all of whose restrictions apply. Unreferenced runtime
+entities can still use their own Position/OccupiedCells footprint. Moving or
+relinking a river's Tiles moves both its artwork and its occupancy without
+cloning the River entity (Epic 16 Stories 3–4).
 
 `Passability` and `Visibility` are independent, attachable components on
 **any** occupant. They carry schema-validated taxonomy values rather than
 universal Boolean flags. A mover's **independent capability components**
-(Walking, Swimming, Flying, Phased) are evaluated against each occupant's
+(for example, Walking, Swimming, Flying or Phased) are evaluated against each occupant's
 Passability category under a schema-validated interaction policy; **all**
 restrictions must permit the mover. Within map bounds, a cell with no art is
 enterable when no occupant denies it. Line of sight instead evaluates the
@@ -178,9 +184,9 @@ occupants' Visibility categories. A person can see across water they cannot
 cross; a phased entity can pass a wall it cannot see through. Visibility here
 means sight occlusion, not sprite drawing or detecting an invisible target.
 DetectsMagic is an example of an observer capability whose target-detection
-semantics belong to a later feature. The present `Tile.passable`
-column and `TileGrid.IsPassable` are transitional implementations, to be
-replaced before the TILES mode authors gameplay metadata (Epic 16 Story 3).
+semantics belong to a later feature. The capability names in this paragraph
+are examples declared by a game schema, **not hard-coded movement or vision
+modes**. Epic 16 Story 3 removed `Tile.passable` and `TileGrid.IsPassable`.
 
 ## The contract
 

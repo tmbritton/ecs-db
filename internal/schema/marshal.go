@@ -50,7 +50,46 @@ func Marshal(s DatabaseSchema) ([]byte, error) {
 			return nil, err
 		}
 	}
-	b.WriteString("  }\n")
+	b.WriteString("  }")
+	if len(s.Interactions) > 0 {
+		b.WriteString(",\n  \"interactions\": {\n")
+		components := orderedKeys(s.InteractionOrder, s.Interactions)
+		for i, name := range components {
+			component, err := jsonString(name)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Fprintf(&b, "    %s: {\n", component)
+			categories := orderedKeys(s.InteractionCategoryOrder[name], s.Interactions[name])
+			for j, category := range categories {
+				key, err := jsonString(category)
+				if err != nil {
+					return nil, err
+				}
+				rule := s.Interactions[name][category]
+				allows := rule.Allows
+				if allows == nil {
+					allows = []string{}
+				}
+				choices, err := json.Marshal(allows)
+				if err != nil {
+					return nil, err
+				}
+				fmt.Fprintf(&b, "      %s: { \"open\": %t, \"allows\": %s }", key, rule.Open, choices)
+				if j != len(categories)-1 {
+					b.WriteString(",")
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString("    }")
+			if i != len(components)-1 {
+				b.WriteString(",")
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("  }")
+	}
+	b.WriteString("\n")
 
 	b.WriteString("}\n")
 	return []byte(b.String()), nil

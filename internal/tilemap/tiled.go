@@ -148,21 +148,7 @@ func holds(ts *tiled.Tileset, local uint32) bool {
 	return int(local) < ts.TileCount
 }
 
-// stateOf reads a tile's properties as the two fields comp_tile keeps.
-//
-// Passability is the tile's own declaration, then its tileset's, then passable.
-// A map is a floor with obstacles on it: the overwhelming majority of tiles in
-// any map are floor, and a default that made a 200-tile decoration set
-// unwalkable until every tile in it was declared is a default that gets
-// scripted around. The tileset-level property is how a set that is mostly solid
-// says so once.
-//
-// A passable that is declared and will not read as a boolean is refused rather
-// than defaulted. Tiled makes you pick a type when you add a property, and an
-// int 0 or the string "no" means someone was trying to say something — falling
-// back to the default there draws a wall the player walks through, which is
-// invisible until somebody tests the geometry.
-//
+// stateOf reads a tile's class, not collision or visibility metadata.
 // tile_type is the tile's class, then its tileset's, then empty. Nothing draws
 // it any more — the renderer took its colours from it until Story 7 deleted
 // them, and appearance comes from the tileset image now. What is left reading
@@ -172,25 +158,22 @@ func holds(ts *tiled.Tileset, local uint32) bool {
 // nowhere else to ask — but it is a column with no consumer today, and the
 // story records that rather than leaving it to be discovered.
 func stateOf(ts *tiled.Tileset, local uint32, where string) (TileState, error) {
-	props := ts.Tiles[local].Properties
-	passable, declared := props.Bool(tiled.PropPassable)
-	switch {
-	case declared:
-	case props.Has(tiled.PropPassable):
-		return TileState{}, fmt.Errorf("%s, and its %s is %q rather than true or false",
-			where, tiled.PropPassable, props.Get(tiled.PropPassable))
-	default:
-		if passable, declared = ts.Properties.Bool(tiled.PropPassable); !declared {
-			if ts.Properties.Has(tiled.PropPassable) {
-				return TileState{}, fmt.Errorf("%s, and tileset %q says its tiles' %s is %q rather than true or false",
-					where, ts.Name, tiled.PropPassable, ts.Properties.Get(tiled.PropPassable))
-			}
-			passable = true
-		}
+	if props := ts.Tiles[local].Properties; props.Has(tiled.PropPassable) {
+		return TileState{}, fmt.Errorf("%s: deprecated tile artwork property passable=%q; author a Passability component on a separate occupant entity", where, props.Get(tiled.PropPassable))
+	}
+	if ts.Properties.Has(tiled.PropPassable) {
+		return TileState{}, fmt.Errorf("%s: tileset %q has deprecated tile artwork property passable=%q; author a Passability component on a separate occupant entity", where, ts.Name, ts.Properties.Get(tiled.PropPassable))
+	}
+	entityType := ts.Tiles[local].Properties.Get("entityType")
+	if entityType == "" {
+		entityType = ts.Properties.Get("entityType")
+	}
+	if entityType == "" {
+		return TileState{}, fmt.Errorf("%s: tileset tile has no entityType reference template", where)
 	}
 	kind := ts.Tiles[local].Type
 	if kind == "" {
 		kind = ts.Class
 	}
-	return TileState{Passable: passable, TileType: kind}, nil
+	return TileState{TileType: kind, EntityType: entityType}, nil
 }

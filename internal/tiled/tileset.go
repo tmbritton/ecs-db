@@ -65,23 +65,14 @@ type TilesetTile struct {
 	Properties Properties
 }
 
-// PropPassable is the property this epic reads to decide whether a tile can be
-// walked through.
-//
-// A convention this engine invents — Tiled knows nothing about it — and named
-// in one place so the tileset that declares it and the loader that reads it
-// cannot drift.
+// PropPassable names a former engine-specific Tiled property. The game
+// refuses it on tile artwork; the TSX document tests still use it to prove
+// lossless editing of an existing, otherwise arbitrary property.
 const PropPassable = "passable"
 
-// Passable is whether a tile can be walked through, and whether the tileset
-// says at all.
-//
-// The second result is the point. A tileset that says nothing is not a tileset
-// that says no, and Story 4 needs to tell them apart to know whether to fall
-// back to a default or to obey.
-// No "does this tile exist" check: a tile the tileset does not hold is the zero
-// value, whose nil properties answer false to everything — the same reason
-// Properties.Int and its siblings do not look either.
+// Passable reads the former property solely for TSX parse/write fidelity. It
+// does not answer whether any mover can enter a cell; occupant interaction
+// rules and the mover's components do that.
 func (t *Tileset) Passable(local uint32) (bool, bool) {
 	return t.Tiles[local].Properties.Bool(PropPassable)
 }

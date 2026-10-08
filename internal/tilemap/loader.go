@@ -7,7 +7,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/tmbritton/ecs-db/internal/schema"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 	"github.com/tmbritton/ecs-db/internal/world"
 )
@@ -41,8 +43,103 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 	if err != nil {
 		return nil, nil, err
 	}
-
 	mapID := MapID(path, file.Source)
+	links, err := tileLinksOfMap(file.Source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("LoadMap: Tile references in %q: %w", path, err)
+	}
+	linkedObjects := make(map[int]bool, len(links))
+	shared := make(map[layerKey]map[string]tileLink)
+	for _, link := range links {
+		linkedObjects[link.objectID] = true
+		for _, at := range link.cells {
+			key := layerKey{mapID: mapID, layerID: link.layerID, x: at.X, y: at.Y}
+			if shared[key] == nil {
+				shared[key] = make(map[string]tileLink)
+			}
+			combined := link
+			combined.providesVisual = link.providesVisual || shared[key][link.entityType].providesVisual
+			shared[key][link.entityType] = combined
+		}
+	}
+	for i := range file.LayerTiles {
+		tile := &file.LayerTiles[i]
+		if link, found := shared[tile.key()][tile.State.EntityType]; found {
+			if !link.providesVisual {
+				return nil, nil, fmt.Errorf("LoadMap: TileLink object %d replacing painted %s in layer %d at (%d,%d) needs TileVisual", link.objectID, link.entityType, tile.LayerID, tile.X, tile.Y)
+			}
+			tile.SharedReference = true
+		}
+	}
+	painted := make(map[layerKey]LayerTile, len(file.LayerTiles))
+	for _, tile := range file.LayerTiles {
+		painted[tile.key()] = tile
+	}
+	for _, link := range links {
+		var first *LayerTile
+		for _, at := range link.cells {
+			key := layerKey{mapID: mapID, layerID: link.layerID, x: at.X, y: at.Y}
+			tile, found := painted[key]
+			if !found || tile.State.EntityType != link.entityType || !link.providesVisual {
+				continue
+			}
+			if first != nil && first.Visual != tile.Visual {
+				return nil, nil, fmt.Errorf("LoadMap: TileLink object %d shares a single %s TileVisual across distinct artwork in layer %d; use separate per-cell art references with one shared restriction entity", link.objectID, link.entityType, link.layerID)
+			}
+			first = &tile
+		}
+	}
+	// A malformed spatial restriction must not commit the layer tiles and then
+	// leave a missing wall/river behind. Other spawn refusals keep their existing
+	// per-object reporting contract; these fields define the walkable world.
+	for _, group := range file.Source.ObjectGroups {
+		for _, object := range group.Objects {
+			spatial := false
+			for name := range object.Properties {
+				component, _, _ := strings.Cut(name, ".")
+				_, canonical := schema.ComponentByName(svc.Schema(), component)
+				if canonical == "OccupiedCells" || len(svc.Schema().Interactions[canonical]) > 0 ||
+					strings.EqualFold(component, "TileLink") {
+					spatial = true
+				}
+			}
+			if entityType, found := svc.Schema().EntityTypes[object.Type]; found {
+				for _, required := range entityType.RequiredComponents {
+					if required == "OccupiedCells" || len(svc.Schema().Interactions[required]) > 0 {
+						spatial = true
+					}
+				}
+			}
+			if !spatial {
+				continue
+			}
+			validation, err := ValidateSpawn(svc.Schema(), file.Source, object)
+			if err != nil {
+				return nil, nil, fmt.Errorf("LoadMap: spatial object %d in %q: %w", object.ID, path, err)
+			}
+			if !validation.Valid() {
+				return nil, nil, fmt.Errorf("LoadMap: spatial object %d in %q: %s", object.ID, path, strings.Join(validation.Errors, "; "))
+			}
+			if linkedObjects[object.ID] {
+				components, err := spawnComponents(svc.Schema(), file.Source, object)
+				if err != nil {
+					return nil, nil, fmt.Errorf("LoadMap: TileLink object %d: %w", object.ID, err)
+				}
+				for _, component := range components {
+					declared := svc.Schema().Components[component.Name]
+					if schema.StorageLayout(declared.Type) != schema.LayoutColumns {
+						continue
+					}
+					for name, property := range declared.Properties {
+						if _, present := component.Values[name]; !present && !schema.PropertyNullable(property.Type) {
+							return nil, nil, fmt.Errorf("LoadMap: TileLink object %d: %s.%s is required to spawn its entity", object.ID, component.Name, name)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if _, err := SyncLayerTiles(ctx, svc, db, mapID, filepath.Clean(path), file.LayerTiles); err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: importing %q: %w", path, err)
 	}
@@ -56,6 +153,9 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 	if err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: spawning from %q: %w", path, err)
 	}
+	if err := syncTileReferences(ctx, svc, db, mapID, links); err != nil {
+		return nil, nil, fmt.Errorf("LoadMap: linking Tiles in %q: %w", path, err)
+	}
 	for _, refused := range spawns.Refused {
 		log.Printf("tilemap: %s: %s", path, refused)
 	}
@@ -66,7 +166,7 @@ func LoadMap(ctx context.Context, svc *world.EntityService, db *sql.DB, path str
 		log.Printf("tilemap: %s: created anyway: %s", path, warning)
 	}
 
-	grid := NewTileGrid(file.Width, file.Height)
+	grid := NewTileGridForMap(file.Width, file.Height, db, *svc.Schema(), mapID)
 	if err := grid.RebuildMap(ctx, db, mapID); err != nil {
 		return nil, nil, fmt.Errorf("LoadMap: rebuilding grid: %w", err)
 	}

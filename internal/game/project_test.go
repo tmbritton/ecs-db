@@ -95,12 +95,51 @@ func loadShippedProject(t *testing.T) (*storage.SQLiteStore, schema.DatabaseSche
 	if src.Properties.Get("mapId") == "" {
 		t.Error("the shipped map declares no mapId, so renaming it would spawn its world twice")
 	}
-	// The layout the character format held, spot-checked at the corners of the
-	// two rooms: a map that loaded but drew a different level would pass every
-	// other assertion here.
+	// Art is not the collision source. Spot-check the authored Wall occupants at
+	// the corners and interior, as well as open cells with floor artwork.
+	space, err := grid.SpaceFrom(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("reading current occupants: %v", err)
+	}
+	wallCells, wallOccupants := 0, 0
+	for y := 0; y < src.Height; y++ {
+		for x := 0; x < src.Width; x++ {
+			if src.Layers[0].TileAt(x, y).GID != 2 {
+				continue
+			}
+			wallCells++
+			atCell := 0
+			for _, placed := range space.Entities {
+				if !placed.IsTile || placed.Position != (tilemap.Point{X: x, Y: y}) {
+					continue
+				}
+				for _, reference := range placed.References {
+					occupant, found := space.Entity(reference)
+					if !found {
+						t.Errorf("Tile at (%d,%d) has missing reference %d", x, y, reference)
+						continue
+					}
+					var entityType string
+					if err := store.DB().QueryRow(`SELECT entity_type FROM entities WHERE id=?`, reference).Scan(&entityType); err != nil {
+						t.Fatal(err)
+					}
+					if entityType == "Wall" && occupant.Passability == "solid" && occupant.Visibility == "opaque" {
+						atCell++
+						wallOccupants++
+					}
+				}
+			}
+			if atCell != 1 {
+				t.Errorf("wall art at (%d,%d) has %d separate Wall occupants, want one", x, y, atCell)
+			}
+		}
+	}
+	if wallOccupants != wallCells {
+		t.Errorf("%d wall artwork cells have only %d separate Wall occupants", wallCells, wallOccupants)
+	}
 	for _, c := range []struct {
-		x, y     int
-		passable bool
+		x, y      int
+		enterable bool
 	}{
 		{0, 0, false},   // the wall round the outside
 		{19, 14, false}, //
@@ -112,8 +151,9 @@ func loadShippedProject(t *testing.T) (*storage.SQLiteStore, schema.DatabaseSche
 		{4, 7, false},   // the long wall
 		{9, 10, false},  // the short one
 	} {
-		if got := grid.IsPassable(c.x, c.y); got != c.passable {
-			t.Errorf("(%d,%d) passable = %v, want %v", c.x, c.y, got, c.passable)
+		got, err := space.CanEnter(tilemap.SpatialEntity{ID: -1}, tilemap.Point{X: c.x, Y: c.y})
+		if err != nil || got != c.enterable {
+			t.Errorf("(%d,%d) enterable = %v,%v; want %v", c.x, c.y, got, err, c.enterable)
 		}
 	}
 	if grid.Width != 20 || grid.Height != 15 {
@@ -150,7 +190,8 @@ func loadShippedProject(t *testing.T) (*storage.SQLiteStore, schema.DatabaseSche
 	}
 	res, err := game.SyncBehaviors(context.Background(), game.BehaviorSync{
 		DB: store.DB(), Schema: ds, Loader: loader, Registry: registry,
-		Tick: tick, TickDurationMs: int64(1000 / renderer.TicksPerSecond),
+		MapID: grid.MapID(),
+		Tick:  tick, TickDurationMs: int64(1000 / renderer.TicksPerSecond),
 	})
 	if err != nil {
 		t.Fatalf("SyncBehaviors: %v", err)
@@ -206,6 +247,10 @@ func TestShippedProject_SpawnsThePlayerAndTheGoblinWhereTheMapPutsThem(t *testin
 			}
 			if x != want.x || y != want.y {
 				t.Errorf("at (%v,%v), want (%v,%v)", x, y, want.x, want.y)
+			}
+			var walking bool
+			if err := db.QueryRow(`SELECT value FROM comp_walking WHERE entity_id = ?`, id).Scan(&walking); err != nil || !walking {
+				t.Errorf("starter %s has no authored Walking ability: %v, %v", want.entityType, walking, err)
 			}
 
 			var hp, maxHP int
@@ -292,6 +337,7 @@ func TestShippedProject_ASecondLoadChangesNothing(t *testing.T) {
 	}
 	res, err := game.SyncBehaviors(context.Background(), game.BehaviorSync{
 		DB: db, Schema: ds, Loader: loader, Registry: registry,
+		MapID:          grid.MapID(),
 		TickDurationMs: int64(1000 / renderer.TicksPerSecond),
 	})
 	if err != nil {

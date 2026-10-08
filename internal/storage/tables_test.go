@@ -48,7 +48,7 @@ func TestEnsureInterpreterTables_CreatesEveryTableItClaimsTo(t *testing.T) {
 	if err := EnsureInterpreterTables(db); err != nil {
 		t.Fatalf("EnsureInterpreterTables: %v", err)
 	}
-	want := []string{"behavior_components", "event_queue", "spawns", "transitions"}
+	want := []string{"behavior_components", "event_queue", "spawns", "tile_art_components", "transitions"}
 	for _, table := range want {
 		if !tableExists(t, db, table) {
 			t.Errorf("table %q not created", table)

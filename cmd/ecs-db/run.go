@@ -157,11 +157,16 @@ func runGame(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("reading the current tick: %w", err)
 	}
+	activeMapID := ""
+	if grid != nil {
+		activeMapID = grid.MapID()
+	}
 	behaviors, err := game.SyncBehaviors(ctx, game.BehaviorSync{
 		DB:             store.DB(),
 		Schema:         dbSchema,
 		Loader:         loader,
 		Registry:       registry,
+		MapID:          activeMapID,
 		Tick:           tick,
 		TickDurationMs: tickDurationMs,
 	})
@@ -188,7 +193,12 @@ func runGame(cmd *cobra.Command, args []string) error {
 	// the player, because the input handler is bound to an entity and nothing
 	// in a map file says "this is the one the keyboard drives". That is the
 	// player-input story's to remove, not this one's.
-	playerID, err := findEntityOfType(ctx, store.DB(), "Player")
+	playerID := int64(0)
+	if grid != nil {
+		playerID, err = findEntityOfTypeInMap(ctx, store.DB(), "Player", grid.MapID())
+	} else {
+		playerID, err = findEntityOfType(ctx, store.DB(), "Player")
+	}
 	if err != nil {
 		return fmt.Errorf("looking up the player: %w", err)
 	}
@@ -280,4 +290,12 @@ func findEntityOfType(ctx context.Context, db *sql.DB, entityType string) (int64
 		return 0, err
 	}
 	return id, nil
+}
+
+func findEntityOfTypeInMap(ctx context.Context, db *sql.DB, entityType, mapID string) (int64, error) {
+	id, err := storage.FindEntityByTypeInMap(ctx, db, entityType, mapID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }

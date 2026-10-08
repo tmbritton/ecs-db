@@ -57,6 +57,10 @@ func (m *mockTx) SetSpawnComponents(ctx context.Context, mapPath string, objectI
 	return nil
 }
 
+func (m *mockTx) SetTileArtComponents(ctx context.Context, entityID int64, names []string) error {
+	return nil
+}
+
 func (m *mockTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
 	return nil
 }

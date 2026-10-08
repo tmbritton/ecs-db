@@ -75,7 +75,7 @@ func (a *setTimerAction) Run(ctx agent.ActionContext) error {
 
 // ── moveTowardTarget ──────────────────────────────────────────────────────────
 
-type moveTowardTargetAction struct{}
+type moveTowardTargetAction struct{ grid *tilemap.TileGrid }
 
 func (a *moveTowardTargetAction) Run(ctx agent.ActionContext) error {
 	if ctx.Reader == nil {
@@ -109,6 +109,31 @@ func (a *moveTowardTargetAction) Run(ctx agent.ActionContext) error {
 	step := math.Min(speed, dist)
 	newX := toFloat(px) + (dx/dist)*step
 	newY := toFloat(py) + (dy/dist)*step
+	if a.grid != nil {
+		space, mover, err := currentMover(a.grid, ctx.Reader, ctx.EntityID)
+		if err != nil {
+			return fmt.Errorf("moveTowardTarget: %w", err)
+		}
+		// Speed can exceed one cell. Check every crossed grid cell, not only the
+		// landing cell, so a fast entity cannot jump an obstructing wall.
+		samples := int(math.Ceil(math.Max(math.Abs(newX-toFloat(px)), math.Abs(newY-toFloat(py))) * 2))
+		if samples < 1 {
+			samples = 1
+		}
+		for i := 1; i <= samples; i++ {
+			at := tilemap.Point{
+				X: int(math.Floor(toFloat(px) + (newX-toFloat(px))*float64(i)/float64(samples))),
+				Y: int(math.Floor(toFloat(py) + (newY-toFloat(py))*float64(i)/float64(samples))),
+			}
+			allowed, err := space.CanEnter(mover, at)
+			if err != nil {
+				return fmt.Errorf("moveTowardTarget: %w", err)
+			}
+			if !allowed {
+				return nil
+			}
+		}
+	}
 
 	if err := ctx.World.SetComponentValue(ctx.EntityID, "Position", "x", newX); err != nil {
 		return err
@@ -263,6 +288,22 @@ func (a *setAnimationAction) Run(ctx agent.ActionContext) error {
 
 type computePathAction struct{ grid *tilemap.TileGrid }
 
+func currentMover(grid *tilemap.TileGrid, reader agent.WorldReader, entityID int64) (tilemap.Space, tilemap.SpatialEntity, error) {
+	query, ok := reader.(tilemap.SpaceQuerier)
+	if !ok {
+		return tilemap.Space{}, tilemap.SpatialEntity{}, fmt.Errorf("world reader does not expose the current spatial transaction")
+	}
+	space, err := grid.SpaceFromSnapshot(query)
+	if err != nil {
+		return tilemap.Space{}, tilemap.SpatialEntity{}, err
+	}
+	mover, found := space.Entity(entityID)
+	if !found {
+		return tilemap.Space{}, tilemap.SpatialEntity{}, fmt.Errorf("entity %d has no Position", entityID)
+	}
+	return space, mover, nil
+}
+
 func (a *computePathAction) Run(ctx agent.ActionContext) error {
 	if ctx.Reader == nil {
 		return nil
@@ -282,7 +323,14 @@ func (a *computePathAction) Run(ctx agent.ActionContext) error {
 	start := tilemap.Point{X: int(toFloat(px)), Y: int(toFloat(py))}
 	goal := tilemap.Point{X: int(toFloat(tx)), Y: int(toFloat(ty))}
 
-	path := tilemap.AStar(a.grid, start, goal)
+	space, mover, err := currentMover(a.grid, ctx.Reader, ctx.EntityID)
+	if err != nil {
+		return fmt.Errorf("computePath: %w", err)
+	}
+	path, err := tilemap.AStarFor(space, mover, start, goal)
+	if err != nil {
+		return fmt.Errorf("computePath: %w", err)
+	}
 	if path == nil {
 		return nil
 	}
@@ -306,26 +354,9 @@ func (a *computePathAction) Run(ctx agent.ActionContext) error {
 	return ctx.World.SetComponentValue(ctx.EntityID, "Path", "current_index", int64(0))
 }
 
-// ── setTilePassable ───────────────────────────────────────────────────────────
-
-type setTilePassableAction struct{ grid *tilemap.TileGrid }
-
-func (a *setTilePassableAction) Run(ctx agent.ActionContext) error {
-	x := int(toFloat(ctx.Params["x"]))
-	y := int(toFloat(ctx.Params["y"]))
-	passable, _ := ctx.Params["passable"].(bool)
-
-	id, ok := a.grid.EntityAt(x, y)
-	if !ok {
-		return nil
-	}
-	a.grid.SetPassable(x, y, passable)
-	return ctx.World.SetComponentValue(id, "Tile", "passable", passable)
-}
-
 // ── stepAlongPath ─────────────────────────────────────────────────────────────
 
-type stepAlongPathAction struct{}
+type stepAlongPathAction struct{ grid *tilemap.TileGrid }
 
 func (a *stepAlongPathAction) Run(ctx agent.ActionContext) error {
 	if ctx.Reader == nil {
@@ -351,6 +382,17 @@ func (a *stepAlongPathAction) Run(ctx agent.ActionContext) error {
 	}
 
 	next := waypoints[idx]
+	space, mover, err := currentMover(a.grid, ctx.Reader, ctx.EntityID)
+	if err != nil {
+		return fmt.Errorf("stepAlongPath: %w", err)
+	}
+	allowed, err := space.CanEnter(mover, next)
+	if err != nil {
+		return fmt.Errorf("stepAlongPath: %w", err)
+	}
+	if !allowed {
+		return nil
+	}
 	if err := ctx.World.SetComponentValue(ctx.EntityID, "Position", "x", float64(next.X)); err != nil {
 		return err
 	}

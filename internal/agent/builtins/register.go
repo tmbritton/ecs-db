@@ -103,6 +103,13 @@ func registerActions(r *agent.Registry) {
 // RegisterPathfinding registers computePath, stepAlongPath, and pathComplete into r.
 // Call after NewRegistry, before behaviors are loaded. grid must not be nil.
 func RegisterPathfinding(r *agent.Registry, grid *tilemap.TileGrid) {
+	// Without a map, moveTowardTarget remains an explicit free-space action.
+	// Once a map is wired, it must sweep occupants like every other mover.
+	if handler, ok := r.GetAction("moveTowardTarget"); ok {
+		if move, ok := handler.(*moveTowardTargetAction); ok {
+			move.grid = grid
+		}
+	}
 	r.RegisterAction(agent.ActionMeta{
 		Name:        "computePath",
 		Description: "Compute A* path from entity Position to target_x/target_y and write to Path component.",
@@ -111,7 +118,7 @@ func RegisterPathfinding(r *agent.Registry, grid *tilemap.TileGrid) {
 	r.RegisterAction(agent.ActionMeta{
 		Name:        "stepAlongPath",
 		Description: "Move entity Position to next Path waypoint and increment current_index.",
-	}, &stepAlongPathAction{})
+	}, &stepAlongPathAction{grid: grid})
 
 	r.RegisterGuard(agent.GuardMeta{
 		Name:        "pathComplete",
@@ -119,7 +126,7 @@ func RegisterPathfinding(r *agent.Registry, grid *tilemap.TileGrid) {
 	}, &pathCompleteGuard{})
 }
 
-// RegisterLineOfSight registers inLineOfSight and setTilePassable into r.
+// RegisterLineOfSight registers the occupant-aware sight guard into r.
 // Call after NewRegistry, before behaviors are loaded. grid must not be nil.
 func RegisterLineOfSight(r *agent.Registry, grid *tilemap.TileGrid) {
 	r.RegisterGuard(agent.GuardMeta{
@@ -129,16 +136,6 @@ func RegisterLineOfSight(r *agent.Registry, grid *tilemap.TileGrid) {
 			{Name: "target", Type: "string", Required: false, Default: "$player"},
 		},
 	}, &inLineOfSightGuard{grid: grid})
-
-	r.RegisterAction(agent.ActionMeta{
-		Name:        "setTilePassable",
-		Description: "Set comp_tile.passable at (x,y) and update TileGrid.",
-		Params: []agent.ParamSchema{
-			{Name: "x", Type: "number", Required: true},
-			{Name: "y", Type: "number", Required: true},
-			{Name: "passable", Type: "boolean", Required: true},
-		},
-	}, &setTilePassableAction{grid: grid})
 }
 
 func registerGuards(r *agent.Registry) {

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 7,
   "components": {
     "Position": {
       "type": "object",
@@ -28,7 +28,6 @@
       "properties": {
         "x":         { "type": "integer" },
         "y":         { "type": "integer" },
-        "passable":  { "type": "boolean" },
         "tile_type": { "type": "string" }
       }
     },
@@ -38,7 +37,11 @@
         "map_id":      { "type": "string" },
         "layer_id":    { "type": "integer" },
         "layer_order": { "type": "integer" },
-        "draw_order":  { "type": "integer" }
+        "draw_order":  { "type": "integer" },
+        "cell_w":      { "type": "integer" },
+        "cell_h":      { "type": "integer" },
+        "visible":     { "type": "boolean" },
+        "opacity":     { "type": "number" }
       }
     },
     "TileVisual": {
@@ -57,6 +60,50 @@
         "alpha":    { "type": "number" },
         "visible":  { "type": "boolean" }
       }
+    },
+    "TileEntityOwner": {
+      "type": "entity-ref"
+    },
+    "Passability": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" }
+      }
+    },
+    "Visibility": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string" }
+      }
+    },
+    "OccupiedCells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "x": { "type": "integer" },
+          "y": { "type": "integer" }
+        }
+      }
+    },
+    "TileReferences": {
+      "type": "array",
+      "items": { "type": "entity-ref" }
+    },
+    "Walking": {
+      "type": "boolean"
+    },
+    "Swimming": {
+      "type": "boolean"
+    },
+    "Flying": {
+      "type": "boolean"
+    },
+    "Phased": {
+      "type": "boolean"
+    },
+    "NightVision": {
+      "type": "boolean"
     },
     "Path": {
       "type": "object",
@@ -83,21 +130,52 @@
     "Goblin": {
       "behavior": "goblin",
       "requiredComponents": ["Position", "Health", "Sprite"],
-      "optionalComponents": ["Path", "Speed", "GoblinStats"],
+      "optionalComponents": ["Path", "Speed", "GoblinStats", "Walking", "Swimming", "Flying", "Phased", "NightVision", "Passability", "Visibility", "OccupiedCells"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
     "Player": {
       "requiredComponents": ["Position", "Health", "Sprite"],
-      "optionalComponents": [],
+      "optionalComponents": ["Walking", "Swimming", "Flying", "Phased", "NightVision", "Passability", "Visibility", "OccupiedCells"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
     },
     "Tile": {
-      "requiredComponents": ["Tile", "TileLayer", "TileVisual"],
-      "optionalComponents": [],
+      "requiredComponents": ["Tile", "TileLayer", "Position", "TileReferences"],
+      "optionalComponents": ["Passability", "Visibility", "OccupiedCells"],
       "allowExtraComponents": false,
       "validationLevel": "strict"
+    },
+    "Floor": {
+      "requiredComponents": ["TileVisual", "Passability", "Visibility"],
+      "optionalComponents": ["TileEntityOwner", "Position", "OccupiedCells"],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    },
+    "Wall": {
+      "requiredComponents": ["Passability", "Visibility"],
+      "optionalComponents": ["TileVisual", "TileEntityOwner", "Position", "OccupiedCells", "Sprite"],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    },
+    "River": {
+      "requiredComponents": ["Passability", "Visibility"],
+      "optionalComponents": ["TileVisual", "TileEntityOwner", "Position", "OccupiedCells", "Sprite"],
+      "allowExtraComponents": false,
+      "validationLevel": "strict"
+    }
+  },
+  "interactions": {
+    "Passability": {
+      "open": { "open": true, "allows": [] },
+      "solid": { "open": false, "allows": ["Flying","Phased"] },
+      "liquid": { "open": false, "allows": ["Swimming","Flying"] },
+      "sealed": { "open": false, "allows": [] }
+    },
+    "Visibility": {
+      "clear": { "open": true, "allows": [] },
+      "opaque": { "open": false, "allows": [] },
+      "darkness": { "open": false, "allows": ["NightVision"] }
     }
   }
 }

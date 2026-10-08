@@ -1258,32 +1258,11 @@ func TestSetActionParam_RefusesEveryJSONValueThatIsNotAnObject(t *testing.T) {
 	}
 }
 
-func TestSetActionParam_TakesTheTwoSpellingsOfABooleanAndNoOthers(t *testing.T) {
-	// setTilePassable is map-gated, so the catalogue only has it with a map.
+func TestAddAction_ObsoleteTileBooleanIsNotAuthorable(t *testing.T) {
 	s, dir := openWithMap(t, map[string]string{"nested.json": nestedMachine})
 	path := machinePath(t, dir)
-	if err := s.AddAction(path, "idle", "entry", "setTilePassable"); err != nil {
-		t.Fatalf("AddAction: %v", err)
-	}
-
-	if err := s.SetActionParam(path, "idle", "entry", 0, "passable", "true"); err != nil {
-		t.Fatalf("SetActionParam: %v", err)
-	}
-	got := actionsOf(t, working(t, s, path), "idle", "entry")[0]
-	if v, ok := got.Params["passable"].(bool); !ok || !v {
-		t.Errorf("passable = %#v, want the boolean true", got.Params["passable"])
-	}
-	if err := s.SetActionParam(path, "idle", "entry", 0, "passable", "false"); err != nil {
-		t.Fatal(err)
-	}
-	if v := actionsOf(t, working(t, s, path), "idle", "entry")[0].Params["passable"]; v != false {
-		t.Errorf("passable = %#v, want the boolean false", v)
-	}
-	// ParseBool takes seven other spellings; the file holds two.
-	for _, bad := range []string{"1", "t", "TRUE", "yes", "on"} {
-		if err := s.SetActionParam(path, "idle", "entry", 0, "passable", bad); err == nil {
-			t.Errorf("%q was accepted as a boolean", bad)
-		}
+	if err := s.AddAction(path, "idle", "entry", "setTilePassable"); err == nil {
+		t.Fatal("Forge offered a builtin that writes a Tile field the engine no longer reads")
 	}
 }
 
@@ -1301,13 +1280,16 @@ func TestActionCatalogue_OffersTheMapActionsWhenThereIsAMap(t *testing.T) {
 		}
 		return false
 	}
-	for _, name := range []string{"computePath", "stepAlongPath", "setTilePassable"} {
+	for _, name := range []string{"computePath", "stepAlongPath"} {
 		if has(without, name) {
 			t.Errorf("%s is offered to a project with no map", name)
 		}
 		if !has(with, name) {
 			t.Errorf("%s is not offered to a project that has one", name)
 		}
+	}
+	if has(with, "setTilePassable") {
+		t.Error("obsolete tile Boolean offered even when a map is present")
 	}
 	// And the ungated ones are there either way.
 	if !has(without, "dealDamage") || !has(with, "dealDamage") {

@@ -200,6 +200,49 @@ func TestSyncBehaviors_StartsTheMachineATypeDeclares(t *testing.T) {
 	}
 }
 
+func TestSyncBehaviors_OnlyStartsActiveMapAndRuntimeEntityMachines(t *testing.T) {
+	db := setupBehaviorDB(t)
+	for _, stmt := range []string{
+		`CREATE TABLE comp_tilelayer (entity_id INTEGER PRIMARY KEY, map_id TEXT NOT NULL)`,
+		`CREATE TABLE comp_tileentityowner (entity_id INTEGER PRIMARY KEY, target_entity_id INTEGER NOT NULL)`,
+		`CREATE TABLE comp_tilereferences (entity_id INTEGER PRIMARY KEY, value TEXT NOT NULL)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := behaviorSchema(map[string]string{"Actor": "actor"})
+	ran := 0
+	registry := behaviorRegistry(t, &ran)
+	loader := loadMachines(t, registry, s, map[string]string{"actor": machineJSON("actor", "noop")})
+	ids := make([]int64, 7)
+	for i, entityType := range []string{"Actor", "Actor", "Actor", "Tile", "Actor", "Tile", "Actor"} {
+		ids[i] = addEntity(t, db, entityType)
+	}
+	for _, stmt := range []string{
+		fmt.Sprintf(`INSERT INTO spawns(map,object_id,entity_id) VALUES ('map-a',1,%d),('map-b',1,%d)`, ids[0], ids[1]),
+		fmt.Sprintf(`INSERT INTO comp_tilelayer VALUES (%d,'map-a'),(%d,'map-b')`, ids[3], ids[5]),
+		fmt.Sprintf(`INSERT INTO comp_tileentityowner VALUES (%d,%d),(%d,%d)`, ids[4], ids[3], ids[6], ids[5]),
+		fmt.Sprintf(`INSERT INTO comp_tilereferences VALUES (%d,'[%d]'),(%d,'[]')`, ids[3], ids[2], ids[5]),
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := sync(t, game.BehaviorSync{
+		DB: db, Schema: s, Loader: loader, Registry: registry,
+		MapID: "map-b", TickDurationMs: 16,
+	})
+	if res.Started != 2 || ran != 2 || len(res.Problems) != 0 {
+		t.Fatalf("map-b startup = %+v, actions=%d; want authored and owned map-b only", res, ran)
+	}
+	for _, idx := range []int{0, 2, 4} {
+		if _, _, running := machineState(t, db, ids[idx], "actor"); running {
+			t.Errorf("foreign map entity %d started its machine", ids[idx])
+		}
+	}
+}
+
 func TestSyncBehaviors_SecondRunStartsNothing(t *testing.T) {
 	db := setupBehaviorDB(t)
 	s := behaviorSchema(map[string]string{"Goblin": "goblin"})

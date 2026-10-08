@@ -1,10 +1,16 @@
 package tilemap
 
-// ReachableTiles returns all passable grid cells reachable from start within
-// maxSteps 4-directional steps, excluding start itself.
-func ReachableTiles(grid *TileGrid, start Point, maxSteps int) []Point {
+// ReachableFor evaluates the same mover/occupant policy as AStarFor, excluding
+// the start cell and staying within maxSteps four-directional moves.
+func ReachableFor(space Space, mover SpatialEntity, start Point, maxSteps int) ([]Point, error) {
+	return reachableWithAllowed(start, maxSteps, func(at Point) (bool, error) {
+		return space.CanEnter(mover, at)
+	})
+}
+
+func reachableWithAllowed(start Point, maxSteps int, allowed func(Point) (bool, error)) ([]Point, error) {
 	if maxSteps <= 0 {
-		return nil
+		return nil, nil
 	}
 
 	type frontier struct {
@@ -24,7 +30,14 @@ func ReachableTiles(grid *TileGrid, start Point, maxSteps int) []Point {
 
 		for _, d := range dirs {
 			nb := Point{cur.pt.X + d.X, cur.pt.Y + d.Y}
-			if visited[nb] || !grid.IsPassable(nb.X, nb.Y) {
+			if visited[nb] {
+				continue
+			}
+			pass, err := allowed(nb)
+			if err != nil {
+				return nil, err
+			}
+			if !pass {
 				continue
 			}
 			visited[nb] = true
@@ -34,5 +47,5 @@ func ReachableTiles(grid *TileGrid, start Point, maxSteps int) []Point {
 			}
 		}
 	}
-	return result
+	return result, nil
 }

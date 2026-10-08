@@ -242,9 +242,8 @@ func (m *Map) TilesetFor(gid uint32) (TilesetRef, uint32, bool) {
 // PropMapID is the property a map uses to say which map it is, independently of
 // what its file is called.
 //
-// A convention this engine invents — Tiled has no stable map identity of its own
-// — and named here for the reason PropPassable is: the map that declares it and
-// the importer that reads it must not drift.
+// A convention this engine invents — Tiled has no stable map identity of its
+// own — and named in one place so maps and their importer do not drift.
 //
 // Without it a map is identified by its path, and renaming or moving the file
 // makes it a different map: its spawns are created again beside the ones already

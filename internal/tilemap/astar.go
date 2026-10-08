@@ -5,14 +5,24 @@ import "container/heap"
 // Point is a tile-grid coordinate.
 type Point struct{ X, Y int }
 
-// AStar returns the shortest path from start to goal on grid, exclusive of start
-// and inclusive of goal. Returns nil if no path exists or start == goal.
-func AStar(grid *TileGrid, start, goal Point) []Point {
+// AStarFor uses the same occupant decision as direct movement, with this
+// mover's actual schema-declared capabilities and destination footprint.
+func AStarFor(space Space, mover SpatialEntity, start, goal Point) ([]Point, error) {
+	return astarWithAllowed(start, goal, func(at Point) (bool, error) {
+		return space.CanEnter(mover, at)
+	})
+}
+
+func astarWithAllowed(start, goal Point, allowed func(Point) (bool, error)) ([]Point, error) {
 	if start == goal {
-		return nil
+		return nil, nil
 	}
-	if !grid.IsPassable(goal.X, goal.Y) {
-		return nil
+	canGoal, err := allowed(goal)
+	if err != nil {
+		return nil, err
+	}
+	if !canGoal {
+		return nil, nil
 	}
 
 	open := &pQueue{{pt: start, f: manhattan(start, goal)}}
@@ -28,7 +38,7 @@ func AStar(grid *TileGrid, start, goal Point) []Point {
 		cur := heap.Pop(open).(pqItem).pt
 
 		if cur == goal {
-			return reconstructPath(parent, start, goal)
+			return reconstructPath(parent, start, goal), nil
 		}
 		if closed[cur] {
 			continue
@@ -37,7 +47,14 @@ func AStar(grid *TileGrid, start, goal Point) []Point {
 
 		for _, d := range dirs {
 			nb := Point{cur.X + d.X, cur.Y + d.Y}
-			if !grid.IsPassable(nb.X, nb.Y) || closed[nb] {
+			if closed[nb] {
+				continue
+			}
+			pass, err := allowed(nb)
+			if err != nil {
+				return nil, err
+			}
+			if !pass {
 				continue
 			}
 			tentative := gScore[cur] + 1
@@ -48,7 +65,7 @@ func AStar(grid *TileGrid, start, goal Point) []Point {
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func reconstructPath(parent map[Point]Point, start, goal Point) []Point {

@@ -72,7 +72,23 @@ func (h *PlayerInputHandler) Handle(events []agent.InputEvent, world agent.World
 		cy := int(toFloat(yVal))
 		tx := cx + chosen.dx
 		ty := cy + chosen.dy
-		if h.grid.IsPassable(tx, ty) {
+		snapshotter, ok := reader.(tilemap.SpaceQuerier)
+		if !ok {
+			return fmt.Errorf("player input: reader cannot inspect live spatial entities")
+		}
+		space, err := h.grid.SpaceFromSnapshot(snapshotter)
+		if err != nil {
+			return fmt.Errorf("player input: read spatial entities: %w", err)
+		}
+		mover, found := space.Entity(h.playerID)
+		if !found {
+			return fmt.Errorf("player input: entity %d has no Position", h.playerID)
+		}
+		allowed, err := space.CanEnter(mover, tilemap.Point{X: tx, Y: ty})
+		if err != nil {
+			return fmt.Errorf("player input: traversal: %w", err)
+		}
+		if allowed {
 			if err := world.SetComponentValue(h.playerID, "Position", "x", float64(tx)); err != nil {
 				return fmt.Errorf("player input: set x: %w", err)
 			}

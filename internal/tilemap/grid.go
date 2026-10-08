@@ -4,20 +4,66 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 type TileGrid struct {
 	Width, Height int
-	passable      [][]bool
 	entityIDs     map[Point]int64
+	db            *sql.DB
+	rules         schema.DatabaseSchema
+	mapID         string
 }
 
-func NewTileGrid(width, height int) *TileGrid {
-	p := make([][]bool, height)
-	for i := range p {
-		p[i] = make([]bool, width)
+// SpaceFromSnapshot uses the current tick rather than a second database
+// connection, which cannot see an uncommitted wall move.
+func (g *TileGrid) SpaceFromSnapshot(reader SpaceQuerier) (Space, error) {
+	return ReadSpace(context.Background(), reader, g.rules, g.Width, g.Height, g.mapID)
+}
+
+// NewTileGridForWorld binds the map bounds to the current database and its
+// schema-declared interaction policy.
+func NewTileGridForWorld(width, height int, db *sql.DB, rules schema.DatabaseSchema) *TileGrid {
+	g := NewTileGrid(width, height)
+	g.db, g.rules = db, rules
+	return g
+}
+
+// NewTileGridForMap additionally scopes authored occupants and actor lookups
+// to this map. Runtime entities with no spawn owner remain in the snapshot.
+func NewTileGridForMap(width, height int, db *sql.DB, rules schema.DatabaseSchema, mapID string) *TileGrid {
+	g := NewTileGridForWorld(width, height, db, rules)
+	g.mapID = mapID
+	return g
+}
+
+// SpaceFrom reads the current world, using a tick transaction when provided
+// so movement sees walls placed earlier in the same tick. With nil source it
+// reads the committed database (outside an active tick transaction).
+func (g *TileGrid) SpaceFrom(ctx context.Context, source SpaceQuerier) (Space, error) {
+	if source == nil {
+		source = g.db
 	}
-	return &TileGrid{Width: width, Height: height, passable: p, entityIDs: make(map[Point]int64)}
+	if source == nil {
+		return Space{}, fmt.Errorf("TileGrid has no world database")
+	}
+	return ReadSpace(ctx, source, g.rules, g.Width, g.Height, g.mapID)
+}
+
+// HasComponent answers whether this map's schema declares a component table.
+// The renderer uses it to retain anchor-only sprites for projects that do not
+// declare multi-cell occupancy.
+func (g *TileGrid) HasComponent(name string) bool {
+	_, declared := g.rules.Components[name]
+	return declared
+}
+
+// MapID is the identity used to scope authored occupants and actor lookups.
+func (g *TileGrid) MapID() string { return g.mapID }
+
+func NewTileGrid(width, height int) *TileGrid {
+	return &TileGrid{Width: width, Height: height, entityIDs: make(map[Point]int64)}
 }
 
 // EntityAt returns the entity ID for the tile at (x, y), and whether it exists.
@@ -31,41 +77,14 @@ func (g *TileGrid) SetEntityID(x, y int, id int64) {
 	g.entityIDs[Point{X: x, Y: y}] = id
 }
 
-func (g *TileGrid) IsPassable(x, y int) bool {
-	if x < 0 || y < 0 || x >= g.Width || y >= g.Height {
-		return false
-	}
-	return g.passable[y][x]
-}
-
-func (g *TileGrid) SetPassable(x, y int, val bool) {
-	if x < 0 || y < 0 || x >= g.Width || y >= g.Height {
-		return
-	}
-	g.passable[y][x] = val
-}
-
-func (g *TileGrid) Rebuild(ctx context.Context, db *sql.DB) error {
-	rows, err := db.QueryContext(ctx,
-		`SELECT entities.id, comp_tile.x, comp_tile.y, comp_tile.passable
-		 FROM entities
-		 JOIN comp_tile ON entities.id = comp_tile.entity_id
-		 LEFT JOIN comp_tilelayer l ON l.entity_id = entities.id
-		 WHERE entities.entity_type = 'Tile'
-		 ORDER BY COALESCE(l.layer_order, 0), COALESCE(l.draw_order, 0), entities.id`)
-	return g.rebuildRows(rows, err)
-}
-
-// RebuildMap indexes the active map only. The topmost imported tile is the
-// transitional Boolean/EntityAt projection until Story 3 replaces it with
-// occupant-aware traversal; this does not determine which tiles exist or draw.
+// RebuildMap indexes the active map's art Tile IDs. This index never decides
+// traversal or sight; those query the current occupants through SpaceFrom.
 func (g *TileGrid) RebuildMap(ctx context.Context, db *sql.DB, mapID string) error {
-	rows, err := db.QueryContext(ctx,
-		`SELECT e.id, t.x, t.y, t.passable FROM entities e
-		 JOIN comp_tile t ON e.id = t.entity_id
-		 JOIN comp_tilelayer l ON l.entity_id = e.id
-		 WHERE e.entity_type = 'Tile' AND l.map_id = ?
-		 ORDER BY l.layer_order, l.draw_order, e.id`, mapID)
+	rows, err := db.QueryContext(ctx, `SELECT e.id, t.x, t.y FROM entities e
+			 JOIN comp_tile t ON e.id = t.entity_id
+			 JOIN comp_tilelayer l ON l.entity_id = e.id
+			 WHERE e.entity_type = 'Tile' AND l.map_id = ?
+			 ORDER BY l.layer_order, l.draw_order, e.id`, mapID)
 	return g.rebuildRows(rows, err)
 }
 
@@ -75,21 +94,15 @@ func (g *TileGrid) rebuildRows(rows *sql.Rows, err error) error {
 	}
 	defer rows.Close()
 
-	for row := range g.passable {
-		for col := range g.passable[row] {
-			g.passable[row][col] = false
-		}
-	}
 	for k := range g.entityIDs {
 		delete(g.entityIDs, k)
 	}
 	for rows.Next() {
 		var id int64
-		var x, y, p int
-		if err := rows.Scan(&id, &x, &y, &p); err != nil {
+		var x, y int
+		if err := rows.Scan(&id, &x, &y); err != nil {
 			return fmt.Errorf("TileGrid.Rebuild scan: %w", err)
 		}
-		g.SetPassable(x, y, p != 0)
 		g.entityIDs[Point{X: x, Y: y}] = id
 	}
 	return rows.Err()

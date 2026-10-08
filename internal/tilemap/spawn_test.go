@@ -145,6 +145,33 @@ func TestSyncSpawns_DetachesRemovedAuthoredComponentButKeepsRuntimeOne(t *testin
 	}
 }
 
+func TestSyncSpawns_RecordsNewlyAuthoredComponentEvenIfItsRuntimeValueMatches(t *testing.T) {
+	svc, db := spawnFixture(t)
+	obj := goblinAt(1, 16, 16)
+	if res := mustSpawn(t, svc, db, spawnMap(obj)); res.Created != 1 {
+		t.Fatal(res)
+	}
+	var id int64
+	if err := db.QueryRow(`SELECT entity_id FROM spawns WHERE object_id=1`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AttachComponent(context.Background(), id, "Speed", world.ComponentValues{"value": 4.0}); err != nil {
+		t.Fatal(err)
+	}
+	obj.Properties["Speed.value"] = tiled.Property{Type: "float", Value: "4"}
+	if res := mustSpawn(t, svc, db, spawnMap(obj)); res.Updated != 1 {
+		t.Fatalf("identical runtime value should acquire authored ownership: %+v", res)
+	}
+	delete(obj.Properties, "Speed.value")
+	if res := mustSpawn(t, svc, db, spawnMap(obj)); res.Updated != 1 {
+		t.Fatalf("removing previously authored value should update: %+v", res)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM comp_speed WHERE entity_id=?`, id).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("formerly authored Speed survived: %d, %v", n, err)
+	}
+}
+
 func TestSyncSpawns_OldSpawnRowBaselinesWithoutDeletingUnknownRuntimeComponents(t *testing.T) {
 	svc, db := spawnFixture(t)
 	obj := goblinAt(1, 16, 16)

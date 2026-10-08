@@ -463,6 +463,23 @@ func (t *sqliteTx) SetSpawnComponents(ctx context.Context, mapPath string, objec
 	return nil
 }
 
+// SetTileArtComponents stores the map-authored component set for a painted
+// entity in the same transaction as its creation or update.
+func (t *sqliteTx) SetTileArtComponents(ctx context.Context, entityID int64, names []string) error {
+	ordered := append([]string{}, names...)
+	sort.Strings(ordered)
+	raw, err := json.Marshal(ordered)
+	if err != nil {
+		return fmt.Errorf("encoding tile art %d components: %w", entityID, err)
+	}
+	_, err = t.tx.ExecContext(ctx, `INSERT INTO tile_art_components (entity_id, components) VALUES (?, ?)
+		ON CONFLICT(entity_id) DO UPDATE SET components=excluded.components`, entityID, string(raw))
+	if err != nil {
+		return fmt.Errorf("recording tile art %d components: %w", entityID, err)
+	}
+	return nil
+}
+
 // ForgetSpawn removes the record of an object having been spawned.
 func (t *sqliteTx) ForgetSpawn(ctx context.Context, mapPath string, objectID int) error {
 	if _, err := t.tx.ExecContext(ctx,
@@ -489,7 +506,7 @@ func (t *sqliteTx) DeleteEntity(ctx context.Context, entityID int64) error {
 	}
 	// Only if the interpreter has been set up at all: EnsureInterpreterTables is
 	// a separate call, and a store used purely for entities never made them.
-	for _, table := range []string{"behavior_components", "event_queue"} {
+	for _, table := range []string{"behavior_components", "event_queue", "tile_art_components"} {
 		exists, err := t.tableExists(ctx, table)
 		if err != nil {
 			return err

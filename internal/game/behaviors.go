@@ -21,6 +21,9 @@ type BehaviorSync struct {
 	DB     *sql.DB
 	Schema schema.DatabaseSchema
 	Loader *agent.Loader
+	// MapID scopes authored entities to the active map. Empty retains the
+	// no-map/global behavior for programs without a configured map.
+	MapID string
 	// Registry is the actions and guards a machine's states may name. It has to
 	// be the one the tick loop will use, and it has to already have the map's
 	// grid registered into it: without pathfinding in it the loader will not
@@ -179,7 +182,7 @@ func SyncBehaviors(ctx context.Context, p BehaviorSync) (BehaviorResult, error) 
 		}
 		res.Warnings = append(res.Warnings, warnings...)
 
-		entities, err := entitiesWithout(ctx, p.DB, typeName, machineID)
+		entities, err := entitiesWithout(ctx, p.DB, typeName, machineID, p.MapID)
 		if err != nil {
 			return res, err
 		}
@@ -261,15 +264,24 @@ type bound struct {
 // Both halves in one query rather than a count and a loop: the answer has to be
 // per entity, because behavior_components is keyed (entity_id, machine_id) and
 // an entity may already run a machine that has nothing to do with its type.
-func entitiesWithout(ctx context.Context, db *sql.DB, entityType, machineID string) ([]bound, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT entities.id,
+func entitiesWithout(ctx context.Context, db *sql.DB, entityType, machineID, mapID string) ([]bound, error) {
+	query := `SELECT entities.id,
 		        EXISTS (SELECT 1 FROM behavior_components
 		                 WHERE behavior_components.entity_id = entities.id
 		                   AND behavior_components.machine_id = ?)
 		   FROM entities
-		  WHERE entities.entity_type = ?
-		  ORDER BY entities.id`, machineID, entityType)
+		  WHERE entities.entity_type = ?`
+	args := []any{machineID, entityType}
+	if mapID != "" {
+		hasReferences, err := storage.HasTileReferences(ctx, db)
+		if err != nil {
+			return nil, err
+		}
+		query += " AND " + storage.ActiveMapEntityClause("entities.id", hasReferences)
+		args = append(args, storage.ActiveMapEntityArgs(mapID, hasReferences)...)
+	}
+	query += " ORDER BY entities.id"
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("game: reading entities of type %q: %w", entityType, err)
 	}
@@ -313,9 +325,13 @@ func startBehavior(ctx context.Context, p BehaviorSync, def *agent.MachineDefini
 	}()
 
 	a := agent.NewAgent(def, entityID, "", p.TickDurationMs)
+	reader := storage.NewTxWorldReader(tx)
+	if p.MapID != "" {
+		reader = storage.NewTxWorldReaderForMap(tx, p.MapID)
+	}
 	if err := agent.StartAgent(a, p.Registry, p.Tick,
 		storage.NewTxWorldWriter(tx),
-		storage.NewTxWorldReader(tx),
+		reader,
 		storage.NewMachineWriter(tx)); err != nil {
 		return err
 	}

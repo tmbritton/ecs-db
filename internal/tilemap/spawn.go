@@ -1,12 +1,14 @@
 package tilemap
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -65,10 +67,9 @@ type SpawnResult struct {
 // after a fight, a component attached at runtime, a machine mid-flight: all left
 // alone, because the update is partial.
 //
-// What it costs, and it is the same cost the tile rule carries: a goblin that
-// walked across the room returns to its spawn point when the map is re-imported,
-// exactly as a door opened by setTilePassable closes again. Re-import happens on
-// load, so this is a level load and not a per-tick correction.
+// What it costs: a goblin that walked across the room returns to its authored
+// spawn point on re-import. The same applies to a moved wall or river; this is
+// a level load and not a per-tick correction.
 //
 // Which map this is comes from the map's own tiled.PropMapID property, and falls
 // back to mapPath when it declares none — object ids are numbered per file, so
@@ -197,7 +198,7 @@ func SyncSpawns(
 				if err != nil {
 					return res, err
 				}
-				if !changed && existing.Known && len(removed) == 0 {
+				if !changed && existing.Known && len(removed) == 0 && slices.Equal(existing.Authored, authored) {
 					res.Unchanged++
 					continue
 				}
@@ -460,6 +461,8 @@ func formatValue(v any) string {
 		return ""
 	case []byte:
 		return string(t)
+	case json.RawMessage:
+		return string(t)
 	case bool:
 		// SQLite has no boolean: the column holds 1 or 0 and reads back as an
 		// int64, so a bool has to be compared as the number it becomes.
@@ -702,6 +705,11 @@ func spawnComponents(s *schema.DatabaseSchema, m *tiled.Map, obj tiled.Object) (
 	sort.Strings(names)
 
 	for _, name := range names {
+		if strings.EqualFold(name, "TileLink.layerID") || strings.EqualFold(name, "TileLink.cells") {
+			// Map authoring metadata creates TileReferences after the target has
+			// spawned. It is not a component on the referenced entity.
+			continue
+		}
 		comp, prop, ok := strings.Cut(name, ".")
 		if !ok {
 			// Refused rather than ignored. An author who writes "hp" meaning
@@ -770,6 +778,36 @@ func spawnComponents(s *schema.DatabaseSchema, m *tiled.Map, obj tiled.Object) (
 		// "maxhp" for a property called maxHp produced a row with no value for
 		// it and a NOT NULL failure naming a column nobody had typed.
 		values[canonical][canonicalProp] = v
+	}
+	for _, restriction := range []string{"Passability", "Visibility"} {
+		if fields := values[restriction]; fields != nil {
+			if raw, present := fields["kind"]; present {
+				kind, ok := raw.(string)
+				if !ok {
+					return nil, fmt.Errorf("property %s.kind must be a taxonomy label", restriction)
+				}
+				if _, err := s.AllowsInteraction(restriction, kind, nil); err != nil {
+					return nil, fmt.Errorf("property %s.kind: %w", restriction, err)
+				}
+			}
+		}
+	}
+	if cells := values["OccupiedCells"]; cells != nil {
+		raw, ok := cells["value"].(string)
+		if !ok {
+			return nil, fmt.Errorf("property OccupiedCells.value must be a JSON footprint")
+		}
+		if _, err := ParseOccupiedCells(raw, Point{X: x, Y: y}, m.Width, m.Height); err != nil {
+			return nil, fmt.Errorf("property OccupiedCells.value: %w", err)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, []byte(raw)); err != nil {
+			return nil, fmt.Errorf("property OccupiedCells.value: %w", err)
+		}
+		// Array component storage marshals values itself. A string would be
+		// double-encoded as a JSON string instead of an array; RawMessage lets
+		// storage write the verified JSON unchanged on create and re-import.
+		cells["value"] = json.RawMessage(compact.Bytes())
 	}
 
 	out := make([]world.EntityComponent, 0, len(values))

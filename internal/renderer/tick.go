@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ type Ticker struct {
 	loader       *agent.Loader
 	registry     *agent.Registry
 	inputHandler agent.InputHandler
+	mapID        string
 }
 
 func newTicker(db *sql.DB, loader *agent.Loader, registry *agent.Registry) *Ticker {
@@ -32,6 +34,9 @@ func newTicker(db *sql.DB, loader *agent.Loader, registry *agent.Registry) *Tick
 func (t *Ticker) SetInputHandler(h agent.InputHandler) {
 	t.inputHandler = h
 }
+
+// SetMapID scopes authored entity lookups to the active map during a tick.
+func (t *Ticker) SetMapID(id string) { t.mapID = id }
 
 // RunTick executes one interpreter tick in a single SQLite transaction:
 //  1. Read current_tick from world table.
@@ -44,6 +49,13 @@ func (t *Ticker) RunTick() error {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	hasReferences := false
+	if t.mapID != "" {
+		hasReferences, err = storage.HasTileReferences(context.Background(), tx)
+		if err != nil {
+			return err
+		}
+	}
 
 	// 1. Read current tick.
 	var currentTick int64
@@ -56,6 +68,9 @@ func (t *Ticker) RunTick() error {
 
 	world := storage.NewTxWorldWriter(tx)
 	reader := storage.NewTxWorldReader(tx)
+	if t.mapID != "" {
+		reader = storage.NewTxWorldReaderForMap(tx, t.mapID)
+	}
 	mw := storage.NewMachineWriter(tx)
 
 	// 1.5. Drain and dispatch input_events.
@@ -93,10 +108,13 @@ func (t *Ticker) RunTick() error {
 		machineID string
 		eventType string
 	}
-	dueRows, err := tx.Query(
-		`SELECT entity_id, machine_id, event_type FROM event_queue WHERE target_tick <= ?`,
-		currentTick,
-	)
+	dueQuery := `SELECT entity_id, machine_id, event_type FROM event_queue WHERE target_tick <= ?`
+	dueArgs := []any{currentTick}
+	if t.mapID != "" {
+		dueQuery += " AND " + storage.ActiveMapEntityClause("event_queue.entity_id", hasReferences)
+		dueArgs = append(dueArgs, storage.ActiveMapEntityArgs(t.mapID, hasReferences)...)
+	}
+	dueRows, err := tx.Query(dueQuery, dueArgs...)
 	if err != nil {
 		return fmt.Errorf("querying event_queue: %w", err)
 	}
@@ -113,7 +131,13 @@ func (t *Ticker) RunTick() error {
 	if err := dueRows.Err(); err != nil {
 		return fmt.Errorf("iterating event_queue: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM event_queue WHERE target_tick <= ?`, currentTick); err != nil {
+	deleteQuery := `DELETE FROM event_queue WHERE target_tick <= ?`
+	deleteArgs := []any{currentTick}
+	if t.mapID != "" {
+		deleteQuery += " AND " + storage.ActiveMapEntityClause("event_queue.entity_id", hasReferences)
+		deleteArgs = append(deleteArgs, storage.ActiveMapEntityArgs(t.mapID, hasReferences)...)
+	}
+	if _, err := tx.Exec(deleteQuery, deleteArgs...); err != nil {
 		return fmt.Errorf("deleting due events: %w", err)
 	}
 
@@ -129,7 +153,13 @@ func (t *Ticker) RunTick() error {
 	}
 
 	// 4. Deliver TICK to all active behavior_components.
-	bcRows, err := tx.Query(`SELECT entity_id, machine_id, current_states FROM behavior_components`)
+	behaviorQuery := `SELECT entity_id, machine_id, current_states FROM behavior_components`
+	var behaviorArgs []any
+	if t.mapID != "" {
+		behaviorQuery += " WHERE " + storage.ActiveMapEntityClause("behavior_components.entity_id", hasReferences)
+		behaviorArgs = append(behaviorArgs, storage.ActiveMapEntityArgs(t.mapID, hasReferences)...)
+	}
+	bcRows, err := tx.Query(behaviorQuery, behaviorArgs...)
 	if err != nil {
 		return fmt.Errorf("querying behavior_components: %w", err)
 	}

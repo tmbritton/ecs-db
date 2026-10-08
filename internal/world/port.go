@@ -80,6 +80,10 @@ type Tx interface {
 	// without touching one attached only at runtime. It commits in the same
 	// transaction as the entity's create or update.
 	SetSpawnComponents(ctx context.Context, mapPath string, objectID int, names []string) error
+	// SetTileArtComponents records the components authored by a painted tile's
+	// owned reference, so re-import can detach removed authoring without
+	// disturbing runtime-only components. It commits with the entity update.
+	SetTileArtComponents(ctx context.Context, entityID int64, names []string) error
 	// ForgetSpawn removes the record of a map's object having been spawned, for
 	// an object the map no longer has. The entity goes with it — separately,
 	// because a row may outlive nothing at all when the entity is already gone.

@@ -171,6 +171,20 @@ test("a tile whose image rectangle is outside its sheet reports the load refusal
     .toHaveAttribute("data-invalid", "true");
 });
 
+test("a former passable property on artwork names the occupant rule to author instead", async ({ page }) => {
+  const sheet = fs.readFileSync(path.join(MAPS, "e2e-tiles.tsx"), "utf8")
+    .replace('<tile id="0" type="wall"><properties>',
+      '<tile id="0" type="wall"><properties><property name="passable" type="bool" value="false"/>');
+  seed("e2e-legacy-tiles.tsx", sheet);
+  seed("e2e-legacy-tile-rule.tmx", level.replace('value="e2e-level"', 'value="legacy-tile-rule"')
+    .replace('source="e2e-tiles.tsx"', 'source="e2e-legacy-tiles.tsx"'));
+  await openSeeded(page, "e2e-legacy-tile-rule.tmx");
+  await expect(byTestId(page, "map-validation")).toContainText("deprecated tile artwork property passable");
+  await expect(byTestId(page, "map-validation")).toContainText("Passability component");
+  await expect(byTestId(page, "map-layer-0").locator('[data-cell="ground:0,0"]'))
+    .toHaveAttribute("data-invalid", "true");
+});
+
 test("an unloadable working map can still be saved with its validation visible", async ({ page }) => {
   seed("e2e-save-broken.tmx", level.replace('value="e2e-level"', 'value="save-broken"')
     .replace("1,1,1,1,1,1,", "99999,1,1,1,1,1,"));
