@@ -733,6 +733,8 @@ Two claims here were checked while planning Epic 15 and are false. **There was n
 - [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
   - Constrain the UI to what the renderer supports: 1×N horizontal strips of `tileSize` squares, frames as column indices. Multi-row grids are renderer work.
 
+- [x] **SPRT animation-file session (Story 9)** — The first assets mod owns one lossless `animations.toml` working value, with mod-aware source status, atomic Save/Discard/Reload/conflict and a watched sprite root. The renderer watches the parent directory so successive atomic saves hot-reload definitions and transactionally synchronize existing entity-sheet bindings, retrying failed removals without clearing independently changed sheets. `make test`, tagged/headless builds, both lint tag sets and 336 browser checks passed; `internal/forge/animations` coverage 82.7%, `internal/renderer` 75.2%. See [Epic 16 Story 9](stories/epic-16/09-animation-session.md).
+
 - [ ] **Import Sprite Sheet dialog** — Wired to the slicing flow.
 
 ---

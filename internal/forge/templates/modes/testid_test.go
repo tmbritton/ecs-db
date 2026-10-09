@@ -7,12 +7,14 @@ import (
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/agent"
+	"github.com/tmbritton/ecs-db/internal/forge/animations"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesetvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
+	"github.com/tmbritton/ecs-db/internal/renderer"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
@@ -23,8 +25,8 @@ var testIDRE = regexp.MustCompile(`data-testid="([^"]+)"`)
 // Playwright costs a timeout and a screenshot.
 func TestStubs_ExposeTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	for _, m := range mode.All {
-		if m.Slug == "tiles" {
-			continue // TILES now has a real file list and inspector.
+		if m.Slug == "tiles" || m.Slug == "sprites" {
+			continue // Both asset modes now have real file lists.
 		}
 		t.Run(m.Slug, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -135,6 +137,33 @@ func TestTilesMode_ValidationTestIDsArePinnedInBothRegions(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertModeTestIDs(t, buf.String(), []string{"tile-class-problem"})
+}
+
+func TestSpritesMode_ExposesTheTestIDsTheBrowserSuiteSelectsOn(t *testing.T) {
+	data := Data{
+		HasAnimations: true, AnimationPath: "assets/animations.toml",
+		AnimationActive:   animations.AssetMod{Name: "first", Assets: "assets"},
+		AnimationLater:    []animations.AssetMod{{Name: "later", Assets: "later-assets"}},
+		AnimationDefs:     []renderer.AnimDef{{Name: "idle"}},
+		AnimationBindings: []animations.Binding{{EntityType: "Player"}},
+	}
+	var buf bytes.Buffer
+	if err := Render("sprites", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{
+		"sprites-mode", "sprites-list", "sprites-panel", "sprites-title", "animation-file",
+		"sprites-active-mod", "sprites-later-later", "sprites-file-path", "sprites-animation-count",
+		"animation-idle", "entity-sheet-Player",
+	})
+	data.AnimationProblem = "a broken TOML"
+	data.AnimationMissing = true
+	data.Problem = "a refused animation edit"
+	buf.Reset()
+	if err := Render("sprites", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{"sprites-file-problem", "sprites-create-file", "sprites-edit-problem"})
 }
 
 // 12-inline-validation.spec.js selects on these, and unlike the ids above they

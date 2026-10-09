@@ -1,0 +1,7 @@
+# This later mod is not the engine's animation source.
+[[animation]]
+name = "not-loaded"
+sheet = "e2e/fixtures/project/overlay/assets/sprites/never.png"
+frames = [0]
+fps = 1
+loop = true

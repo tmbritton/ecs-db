@@ -1,0 +1,49 @@
+package modes
+
+import "path/filepath"
+
+templ SpritesListRegion(data Data) {
+	<nav id="mode-list" class="schema__list" aria-label="Animation asset sources" data-testid="sprites-list">
+		<div class="section-heading"><span>Sprite assets ◂ game.toml</span></div>
+		if data.AnimationPath != "" {
+			<a class="list-row list-row--active" data-testid="animation-file" aria-current="true" href={ URL("/forge/sprites?file=" + urlValue(data.AnimationPath)) }>
+				<span class="list-row__glyph" aria-hidden="true">▣</span>
+				<span class="list-row__label">{ filepath.Base(data.AnimationPath) }</span>
+			</a>
+			<p class="schema__hint mono" data-testid="sprites-active-mod">{ data.AnimationActive.Name } · loaded by the game</p>
+		}
+		for _, later := range data.AnimationLater {
+			<p class="schema__hint mono" data-testid={ "sprites-later-" + later.Name }>{ later.Name } · not loaded</p>
+		}
+	</nav>
+}
+
+templ SpritesMainRegion(data Data) {
+	<div id="mode-main" class="schema__main" data-testid="sprites-panel">
+		if data.AnimationPath == "" {
+			<p class="schema__hint" data-testid="sprites-no-assets">This project declares no assets mod for sprite animations.</p>
+		} else {
+			<header class="editor-header"><h2 data-testid="sprites-title">{ filepath.Base(data.AnimationPath) }</h2></header>
+			<p class="mono" data-testid="sprites-file-path">{ data.AnimationPath }</p>
+			<p class="schema__hint">Active source: { data.AnimationActive.Name } · sprites: { filepath.Join(data.AnimationActive.Assets, "sprites") }</p>
+			if data.AnimationProblem != "" {
+				<p class="badge-problem" data-testid="sprites-file-problem">{ data.AnimationProblem }</p>
+				if data.AnimationMissing {
+					<button type="button" data-testid="sprites-create-file" data-on:click={ action("/forge/sprites/create", "file", data.AnimationPath) }>Create animations.toml</button>
+				}
+			} else {
+				<p data-testid="sprites-animation-count">{ itoa(len(data.AnimationDefs)) } animations · { itoa(len(data.AnimationBindings)) } entity-sheet bindings</p>
+				for _, def := range data.AnimationDefs {
+					<div class="list-row mono" data-testid={ "animation-" + def.Name }>{ def.Name } · { def.Sheet } · { itoa(len(def.Frames)) } frames · { ftoa(def.FPS) } fps</div>
+				}
+				for _, binding := range data.AnimationBindings {
+					<div class="list-row mono" data-testid={ "entity-sheet-" + binding.EntityType }>{ binding.EntityType } → { binding.Sheet }</div>
+				}
+			}
+			<p class="schema__hint">The game watches this animations.toml and the selected sprites directory: animations.toml hot-reloads after Save.</p>
+			if data.Problem != "" {
+				<p class="badge-problem" role="alert" data-testid="sprites-edit-problem">{ data.Problem }</p>
+			}
+		}
+	</div>
+}

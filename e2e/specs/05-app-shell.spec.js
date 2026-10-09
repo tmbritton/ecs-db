@@ -41,27 +41,14 @@ test.describe("app shell", () => {
     }
   });
 
-  // Modes that are still stubbed say what they are and which epic fills them,
-  // so an unfinished build reads as unfinished rather than broken. Implemented
-  // modes are listed here so this test shrinks as they land rather than being
-  // quietly weakened.
-	const IMPLEMENTED = new Set(["schema", "ents", "agents", "map", "tiles"]);
-
-  test("each unimplemented mode names itself and the epic that fills it", async ({ page }) => {
-    for (const m of MODES.filter((m) => !IMPLEMENTED.has(m.slug))) {
-      await page.goto(`/forge/${m.slug}`);
-      await expect(byTestId(page, "mode-stub-caption")).toHaveText(m.caption);
-      await expect(byTestId(page, "mode-stub-epic")).toContainText("Epic");
-    }
-  });
-
-  test("an implemented mode renders its own content, not a stub", async ({ page }) => {
+  test("every mode renders its own content, not a stub", async ({ page }) => {
     for (const [slug, testid] of [
       ["schema", "schema-mode"],
       ["ents", "ents-mode"],
       ["agents", "agents-mode"],
       ["map", "map-mode"],
       ["tiles", "tiles-mode"],
+      ["sprites", "sprites-mode"],
     ]) {
       await page.goto(`/forge/${slug}`);
       await expect(byTestId(page, testid)).toBeVisible();
@@ -98,12 +85,10 @@ test.describe("navigation is navigation", () => {
   });
 
   test("a mode can be deep-linked", async ({ page }) => {
-    // Deliberately a mode that is still stubbed, so this stays about routing
-    // rather than about whatever the mode happens to render. It moves as modes
-    // land, which is the point of IMPLEMENTED above.
+    // SPRT is a useful non-default deep link: navigation must select its mode.
     await page.goto("/forge/sprites");
     await expect(byTestId(page, "rail-sprites")).toHaveAttribute("data-active", "true");
-    await expect(byTestId(page, "mode-stub-caption")).toHaveText("SPRT");
+    await expect(byTestId(page, "sprites-mode")).toBeVisible();
   });
 
   test("an unknown mode is a 404", async ({ page }) => {

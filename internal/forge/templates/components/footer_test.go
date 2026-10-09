@@ -41,6 +41,23 @@ func TestSaveFooter(t *testing.T) {
 			want:    []string{"✓ saved"},
 			notWant: []string{"·"},
 		},
+		{
+			name: "missing file keeps a named restore action without a generic Save",
+			props: SaveFooterProps{
+				Status: "missing on disk", StatusLabel: "Restore working file",
+				StatusAction: "@post('/forge/sprites/save/overwrite')",
+			},
+			want:    []string{`data-testid="save-footer-restore"`, "Restore working file", "missing on disk"},
+			notWant: []string{">Discard</button>", ">Save</button>"},
+		},
+		{
+			name: "invalid file offers Reload without implying it can be saved",
+			props: SaveFooterProps{
+				Status: "invalid on disk", ReloadAction: "@post('/forge/sprites/reload')",
+			},
+			want:    []string{`data-testid="save-footer-reload"`, "invalid on disk"},
+			notWant: []string{">Discard</button>", ">Save</button>"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

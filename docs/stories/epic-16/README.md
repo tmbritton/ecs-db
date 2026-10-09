@@ -110,7 +110,7 @@ entity with Sprite and OccupiedCells still draws across its own footprint.
 | 6 | [TILES read surface](06-tiles-read-surface.md) ✅ | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
 | 7 | [TILES property editing](07-tiles-editing.md) ✅ | Per-tile class/type and supported art metadata through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |
 | 8 | [TILES validation](08-tiles-validation.md) ✅ | Parser, image and metadata refusals on tiles/tilesets; no silently ignored edit or false polygon/animation promise. |
-| 9 | Animation-file session | Lossless `animations.toml` editing, first-assets-mod discovery, save/conflict and hot-reload behavior without exposing other mods as loaded. |
+| 9 | [Animation-file session](09-animation-session.md) ✅ | Lossless `animations.toml` editing, first-assets-mod discovery, save/conflict and hot-reload behavior without exposing other mods as loaded. |
 | 10 | SPRT mode | One-row sheet preview, column-index frame sequencing, `fps`, `loop` and entity-to-sheet binding, within the renderer's bounds. |
 | 11 | Import sprite sheet | Dialog inside SPRT that picks/copies a project-local image, verifies its dimensions and creates playable frames/binding. Epic 17's generic asset dialogs must not duplicate this flow. |
 

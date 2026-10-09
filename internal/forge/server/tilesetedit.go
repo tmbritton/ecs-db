@@ -126,7 +126,7 @@ func (s *Server) tilesetFooter(data modes.Data) templates.Component {
 			other--
 		}
 		elsewhere := templates.Elsewhere{
-			Schema: s.unsavedSchema(), Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: other,
+			Schema: s.unsavedSchema(), Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: other, Animations: s.unsavedAnimations(),
 		}
 		if entry.Writable {
 			return templates.TilesetFooter(entry.Path, filepath.Base(entry.Path), data.DirtyTilesets[entry.Path], elsewhere)
@@ -138,7 +138,7 @@ func (s *Server) tilesetFooter(data modes.Data) templates.Component {
 		return templates.TilesetStatusFooter(entry.Path, status, elsewhere)
 	}
 	return templates.TilesetStatusFooter("", "no external tilesets", templates.Elsewhere{
-		Schema: s.unsavedSchema(), Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets(),
+		Schema: s.unsavedSchema(), Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets(), Animations: s.unsavedAnimations(),
 	})
 }
 

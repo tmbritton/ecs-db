@@ -32,9 +32,9 @@ func TestRegistry_CoversEveryMode(t *testing.T) {
 				t.Fatalf("render %s: %v", m.Slug, err)
 			}
 			got := buf.String()
-			if m.Slug == "tiles" {
-				if !strings.Contains(got, `data-testid="tiles-mode"`) {
-					t.Error("implemented TILES mode did not render its project file surface")
+			if m.Slug == "tiles" || m.Slug == "sprites" {
+				if !strings.Contains(got, `data-testid="`+m.Slug+`-mode"`) {
+					t.Errorf("implemented %s mode did not render its project file surface", m.Slug)
 				}
 				return
 			}

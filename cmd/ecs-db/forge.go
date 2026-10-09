@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/animations"
 	"github.com/tmbritton/ecs-db/internal/forge/eventbus"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
@@ -68,6 +69,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	var machineSession *machines.Session
 	var mapSession *maps.Session
 	var tilesetSession *tilesets.Session
+	var animationSession *animations.Session
 	var resolved []project.Machine
 	var behaviorDirs []string
 	var problems []project.Problem
@@ -135,6 +137,11 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		})
 		tilesetSession = tilesets.Open(filepath.Dir(proj.ConfigPath), mapSession)
 		mapSession.SetTilesetOpener(tilesetSession.WorkingBytes)
+		assetMods := make([]animations.AssetMod, 0, len(cfg.Mods))
+		for _, mod := range cfg.Mods {
+			assetMods = append(assetMods, animations.AssetMod{Name: mod.Name, Assets: mod.Assets})
+		}
+		animationSession = animations.Open(animations.Config{Root: filepath.Dir(proj.ConfigPath), Mods: assetMods})
 	}
 
 	srv := server.New(server.Config{
@@ -143,16 +150,17 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		// the composition root and later epics have a second consumer: LIVE
 		// publishes world_version ticks from outside the HTTP handlers, and it
 		// has to reach the same bus the streams are listening on.
-		Bus:            eventbus.New(slog.Default()),
-		Session:        editing,
-		Engine:         engine,
-		PollInterval:   cfg.Forge.PollInterval(),
-		Machines:       resolved,
-		MachineSession: machineSession,
-		MapSession:     mapSession,
-		TilesetSession: tilesetSession,
-		BehaviorDirs:   behaviorDirs,
-		Problems:       problems,
+		Bus:              eventbus.New(slog.Default()),
+		Session:          editing,
+		Engine:           engine,
+		PollInterval:     cfg.Forge.PollInterval(),
+		Machines:         resolved,
+		MachineSession:   machineSession,
+		MapSession:       mapSession,
+		TilesetSession:   tilesetSession,
+		AnimationSession: animationSession,
+		BehaviorDirs:     behaviorDirs,
+		Problems:         problems,
 	}, web.Static)
 
 	// Bind before announcing anything: otherwise a bind failure prints

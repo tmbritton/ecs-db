@@ -236,7 +236,7 @@ func runGame(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Warning: syncing asset sheets: %v\n", err)
 		}
 		go func() {
-			if err := animLoader.Watch(ctx, animPath); err != nil {
+			if err := animLoader.WatchWithDatabase(ctx, animPath, store.DB()); err != nil {
 				fmt.Fprintf(os.Stderr, "anim watcher: %v\n", err)
 			}
 		}()

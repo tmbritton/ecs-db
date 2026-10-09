@@ -176,6 +176,47 @@ func TilesetStatusFooter(path, status string, elsewhere Elsewhere) templ.Compone
 	})
 }
 
+// AnimationFooter saves only the active first-assets-mod TOML. Its Reload
+// action picks up changes made in a text editor even when Forge is clean.
+func AnimationFooter(path, file string, dirty bool, elsewhere Elsewhere) templ.Component {
+	q := "?file=" + url.QueryEscape(path)
+	return components.SaveFooter(components.SaveFooterProps{
+		Dirty: dirty, File: file, Title: path, Elsewhere: elsewhere.describe(),
+		SaveAction: "@post('/forge/sprites/save" + q + "')",
+		ReloadAction: "confirm(" + tilesetJSString("Reload "+file+" from disk? Unsaved changes will be lost.") + ") && " +
+			"@post('/forge/sprites/reload" + q + "')",
+		DiscardAction: "confirm(" + tilesetJSString("Discard unsaved changes to "+file+"?") + ") && " +
+			"@post('/forge/sprites/discard" + q + "')",
+	})
+}
+
+func AnimationRestoreFooter(path string, dirty bool, elsewhere Elsewhere) templ.Component {
+	return components.SaveFooter(components.SaveFooterProps{
+		Dirty: dirty, Status: "missing on disk · working copy retained",
+		File: filepath.Base(path), Title: path, Elsewhere: elsewhere.describe(),
+		StatusLabel:  "Restore working file",
+		StatusAction: "@post('/forge/sprites/save/overwrite?file=" + url.QueryEscape(path) + "')",
+	})
+}
+
+// AnimationProblemFooter keeps the repaired-on-disk path reopenable even when
+// the current TOML would not parse. Save remains unavailable until it does.
+func AnimationProblemFooter(path string, dirty bool, elsewhere Elsewhere) templ.Component {
+	q := "?file=" + url.QueryEscape(path)
+	props := components.SaveFooterProps{
+		Dirty: dirty, Status: "invalid animation file", File: filepath.Base(path), Title: path,
+		Elsewhere: elsewhere.describe(),
+		ReloadAction: "confirm(" + tilesetJSString("Reload "+filepath.Base(path)+" from disk? Unsaved changes will be lost.") + ") && " +
+			"@post('/forge/sprites/reload" + q + "')",
+	}
+	if dirty {
+		props.Status += " · unsaved working copy retained"
+		props.StatusLabel = "Keep working copy"
+		props.StatusAction = "@post('/forge/sprites/save/overwrite" + q + "')"
+	}
+	return components.SaveFooter(props)
+}
+
 // Elsewhere is unsaved work the footer on screen cannot save.
 //
 // One Save button does one thing and the footer follows the mode, so without
@@ -187,10 +228,11 @@ func TilesetStatusFooter(path, status string, elsewhere Elsewhere) templ.Compone
 //
 // Each footer passes what it cannot save and leaves out what it can.
 type Elsewhere struct {
-	Schema   bool
-	Machines int
-	Maps     int
-	Tilesets int
+	Schema     bool
+	Machines   int
+	Maps       int
+	Tilesets   int
+	Animations int
 }
 
 // describe is the one line the footer shows, or "" when everything else is
@@ -218,6 +260,9 @@ func (e Elsewhere) describe() string {
 		parts = append(parts, "1 unsaved tileset in TILES")
 	case e.Tilesets > 1:
 		parts = append(parts, strconv.Itoa(e.Tilesets)+" unsaved tilesets in TILES")
+	}
+	if e.Animations > 0 {
+		parts = append(parts, "unsaved animations.toml in SPRT")
 	}
 	return strings.Join(parts, " · ")
 }

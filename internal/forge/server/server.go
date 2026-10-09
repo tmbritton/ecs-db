@@ -24,6 +24,7 @@ import (
 	"github.com/starfederation/datastar-go/datastar"
 
 	"github.com/tmbritton/ecs-db/internal/config"
+	"github.com/tmbritton/ecs-db/internal/forge/animations"
 	"github.com/tmbritton/ecs-db/internal/forge/chart"
 	"github.com/tmbritton/ecs-db/internal/forge/eventbus"
 	"github.com/tmbritton/ecs-db/internal/forge/machines"
@@ -97,6 +98,8 @@ type Config struct {
 	MapSession *maps.Session
 	// TilesetSession owns shared external TSX documents referenced by open maps.
 	TilesetSession *tilesets.Session
+	// AnimationSession holds the first game-loaded assets mod's animations.toml.
+	AnimationSession *animations.Session
 	// Problems are the project's loading failures. They are what turns "that
 	// machine did not resolve" into a sentence naming the file and the reason,
 	// instead of sending the user to the log to find out what the tool already
@@ -262,6 +265,7 @@ func (s *Server) routes() http.Handler {
 	s.registerEntsEditRoutes(mux)
 	s.registerMapEditRoutes(mux)
 	s.registerTilesetRoutes(mux)
+	s.registerAnimationRoutes(mux)
 	s.registerAssetRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
@@ -453,6 +457,7 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	slug := modeSlug(r)
 	s.addMapData(&data, r, slug)
 	s.addTilesetData(&data, r, slug)
+	s.addAnimationData(&data, slug)
 	if s.cfg.MachineSession != nil {
 		data.HasMachines = true
 		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
@@ -869,10 +874,13 @@ func (s *Server) footer(slug string, data modes.Data) templates.Component {
 	if slug == "tiles" && s.cfg.TilesetSession != nil {
 		return s.tilesetFooter(data)
 	}
+	if slug == "sprites" && s.cfg.AnimationSession != nil {
+		return s.animationFooter(data)
+	}
 	if s.cfg.Session == nil {
 		return templates.NoFooter()
 	}
-	elsewhere := templates.Elsewhere{Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets()}
+	elsewhere := templates.Elsewhere{Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets(), Animations: s.unsavedAnimations()}
 	dirty, err := s.cfg.Session.Dirty()
 	if err != nil {
 		// A schema that will not serialise cannot be saved, and saying "clean"
@@ -912,10 +920,11 @@ func (s *Server) mapFooter(data modes.Data) templates.Component {
 	}
 	return templates.MapFooter(data.SelectedMap, filepath.Base(data.SelectedMap),
 		data.DirtyMaps[data.SelectedMap], templates.Elsewhere{
-			Schema:   s.unsavedSchema(),
-			Machines: s.unsavedMachines(),
-			Maps:     s.unsavedMapsExcept(data.SelectedMap),
-			Tilesets: s.unsavedTilesets(),
+			Schema:     s.unsavedSchema(),
+			Machines:   s.unsavedMachines(),
+			Maps:       s.unsavedMapsExcept(data.SelectedMap),
+			Tilesets:   s.unsavedTilesets(),
+			Animations: s.unsavedAnimations(),
 		})
 }
 
@@ -990,7 +999,7 @@ func (s *Server) machinesFooter(data modes.Data) templates.Component {
 		machinesFooterFile(data.DirtyMachines, data.ReformatMachines),
 		len(data.DirtyMachines) > len(data.ReformatMachines),
 		dirtyNames(data.DirtyMachines),
-		templates.Elsewhere{Schema: s.unsavedSchema(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets()},
+		templates.Elsewhere{Schema: s.unsavedSchema(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets(), Animations: s.unsavedAnimations()},
 		invalid,
 	)
 }
@@ -1130,6 +1139,10 @@ func (s *Server) saveReports() []components.SaveReportView {
 	for _, r := range reports {
 		view := components.SaveReportView{Report: r}
 		switch {
+		case s.cfg.AnimationSession != nil && s.cfg.AnimationSession.Path() == r.Path:
+			q := "?file=" + url.QueryEscape(r.Path)
+			view.ReloadAction = "@post('/forge/sprites/reload" + q + "')"
+			view.OverwriteAction = "@post('/forge/sprites/save/overwrite" + q + "')"
 		case s.holdsTileset(r.Path):
 			q := "?file=" + url.QueryEscape(r.Path)
 			view.ReloadAction = "@post('/forge/tiles/reload" + q + "')"

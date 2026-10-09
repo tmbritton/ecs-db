@@ -92,23 +92,10 @@ var Registry = map[string]Content{
 	"ents":    {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},
 	"schema":  {Regions: twoPane(SchemaListRegion, SchemaMainRegion), Page: TwoPanePage("schema-mode")},
 	"agents":  {Regions: twoPane(AgentsListRegion, AgentsMainRegion), Page: TwoPanePage("agents-mode")},
-	"sprites": stubContent("SPRT", "Sprite-sheet slicing and named animations.", "Epic 16"),
+	"sprites": {Regions: twoPane(SpritesListRegion, SpritesMainRegion), Page: TwoPanePage("sprites-mode")},
 }
 
 // twoPane is the shape every mode but MAP has: a list rail and an editor panel.
 func twoPane(list, main func(Data) templ.Component) []Region {
 	return []Region{{"mode-list", list}, {"mode-main", main}}
-}
-
-// stubContent is a mode that is not built yet. It still has both regions, and
-// they are still rendered on every page, because a mode that gains its content
-// in a later epic must not have to change shape to be patchable.
-func stubContent(caption, summary, epic string) Content {
-	return Content{
-		Regions: twoPane(
-			func(Data) templ.Component { return EmptyListRegion() },
-			func(Data) templ.Component { return StubMainRegion(caption, summary, epic) },
-		),
-		Page: TwoPanePage("mode-stub-page"),
-	}
 }

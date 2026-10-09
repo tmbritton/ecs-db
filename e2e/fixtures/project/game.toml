@@ -39,6 +39,7 @@ assets    = "./assets/"
 [[mods]]
 name      = "e2e-overlay"
 behaviors = "./overlay/behaviors/"
+assets    = "./overlay/assets/"
 
 [window]
 title    = "ECS e2e"
