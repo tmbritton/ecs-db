@@ -999,6 +999,93 @@ option:disabled {
   overflow-y: auto;
 }
 
+/* TILES: local IDs come from the tileset, not from a MAP cell's gid. The same
+   art crop is rendered in the list and inspector at different integer scales. */
+.tileset-readout,
+.tileset-grid-panel,
+.tileset-inspector {
+  margin: 8px 20px;
+}
+
+.tileset-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.tileset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.tileset-tile {
+  display: flex;
+  min-height: 70px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--inset);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tileset-tile:hover,
+.tileset-tile:focus-visible,
+.tileset-tile--selected {
+  border-color: var(--amber);
+}
+
+.tileset-tile--selected {
+  background: var(--active);
+}
+
+.tileset-art {
+  display: inline-block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.tileset-art-missing {
+  display: inline-block;
+  padding: 8px;
+  color: var(--text-faint);
+  background: var(--inset);
+  font: 10px var(--font-mono);
+}
+
+.tileset-pages {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.tileset-inspector {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.tileset-inspector__art {
+  min-height: 100px;
+}
+
+.tileset-properties {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+}
+
+.tileset-properties dd {
+  margin: 0;
+}
+
 .schema__editor,
 .schema__empty {
   min-width: 0;

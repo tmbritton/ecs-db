@@ -3,6 +3,7 @@ package modes
 import "net/url"
 import "path/filepath"
 import "strings"
+import "github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 
 templ TilesListRegion(data Data) {
 	<nav id="mode-list" class="schema__list" aria-label="External tilesets" data-testid="tileset-list">
@@ -65,6 +66,26 @@ templ TilesMainRegion(data Data) {
 			}
 			if data.Tileset != nil {
 				<p data-testid="tileset-summary">{ data.Tileset.Name } · { itoa(data.Tileset.TileCount) } tiles</p>
+				<p class="schema__hint">Movement and sight come from referenced entities in MAP; artwork metadata alone does not set them.</p>
+				<div class="tileset-readout mono" data-testid="tileset-metadata">
+					<span>class/type: { data.Tileset.Class }</span>
+					<span>tile: { itoa(data.Tileset.TileWidth) }×{ itoa(data.Tileset.TileHeight) } px</span>
+					<span>columns: { itoa(data.Tileset.Columns) }</span>
+					<span>margin: { itoa(data.Tileset.Margin) } · spacing: { itoa(data.Tileset.Spacing) }</span>
+					<span>offset: { itoa(data.Tileset.TileOffsetX) },{ itoa(data.Tileset.TileOffsetY) }</span>
+					if data.Tileset.Image.Source != "" {
+						<span>sheet: { data.Tileset.Image.Source }</span>
+					}
+				</div>
+				if len(data.TileView.Properties) > 0 {
+					<div class="tileset-readout mono" data-testid="tileset-properties">
+						for _, prop := range data.TileView.Properties {
+							<span>{ prop.Name } ({ tilesetPropertyType(prop) }): { prop.Value }</span>
+						}
+					</div>
+				}
+				@tilesetGrid(data)
+				@tilesetInspector(data)
 			}
 			<p class="schema__hint">Saved TSX metadata takes effect on the next ecs-db run.</p>
 			if data.Problem != "" {
@@ -72,4 +93,84 @@ templ TilesMainRegion(data Data) {
 			}
 		}
 	</div>
+}
+
+templ tilesetGrid(data Data) {
+	<section class="tileset-grid-panel" aria-label="Tiles in the selected tileset" data-testid="tile-grid">
+		if data.TileView.PageProblem != "" {
+			<p class="badge-problem" data-testid="tile-page-problem">{ data.TileView.PageProblem }</p>
+		} else if data.TileView.TileCount == 0 {
+			<p class="schema__hint" data-testid="tileset-empty">This tileset declares no tiles.</p>
+		} else {
+			<div class="tileset-grid" role="list" aria-label="Local tile IDs">
+				for _, tile := range data.TileView.Tiles {
+					<div role="listitem">
+					<a
+						href={ URL(tilesetTileHref(data.SelectedTileset, tile.ID, data.TileView.Page)) }
+						class={ "tileset-tile", kv("tileset-tile--selected", data.TileView.Selected != nil && data.TileView.Selected.ID == tile.ID) }
+						data-testid={ "tile-" + gidLabel(tile.ID) }
+						if data.TileView.Selected != nil && data.TileView.Selected.ID == tile.ID {
+							aria-current="true"
+						}
+					>
+						@tilesetArt(tile, 48, "tile-grid-art-")
+						<span class="mono">{ gidLabel(tile.ID) }</span>
+					</a>
+					</div>
+				}
+			</div>
+			if data.TileView.Pages > 1 {
+				<nav class="tileset-pages" aria-label="Tileset pages">
+					if data.TileView.Page > 0 {
+						<a href={ URL(tilesetPageHref(data.SelectedTileset, data.TileView.Page - 1)) } data-testid="tile-page-previous">Previous tiles</a>
+					}
+					<span class="mono">page { itoa(data.TileView.Page + 1) } of { itoa(data.TileView.Pages) }</span>
+					if data.TileView.Page + 1 < data.TileView.Pages {
+						<a href={ URL(tilesetPageHref(data.SelectedTileset, data.TileView.Page + 1)) } data-testid="tile-page-next">Next tiles</a>
+					}
+				</nav>
+			}
+		}
+	</section>
+}
+
+templ tilesetArt(tile tilesurface.Tile, maxPixels int, idPrefix string) {
+	if tile.MissingArt {
+		<span class="tileset-art-missing" role="img" aria-label={ "Tile " + gidLabel(tile.ID) + " art unavailable" } data-testid={ idPrefix + gidLabel(tile.ID) }>art unavailable</span>
+	} else {
+		<span class="tileset-art" role="img" aria-label={ "Tile " + gidLabel(tile.ID) + " image" } style={ tileArtStyle(tile, maxPixels) } data-testid={ idPrefix + gidLabel(tile.ID) }></span>
+	}
+}
+
+templ tilesetInspector(data Data) {
+	<section class="tileset-inspector" aria-label="Selected tile" data-testid="tile-inspector">
+		if data.TileView.Problem != "" {
+			<p class="badge-problem" data-testid="tile-problem">{ data.TileView.Problem }</p>
+		} else if data.TileView.Selected != nil {
+			{{ tile := *data.TileView.Selected }}
+			<div data-testid="tile-selected">
+				<h3>Tile { gidLabel(tile.ID) }</h3>
+				<div class="tileset-inspector__art">@tilesetArt(tile, 192, "tile-inspector-art-")</div>
+				<p class="mono" data-testid="tile-class">
+					if tile.Class == "" {
+						No class/type authored
+					} else {
+						class/type: { tile.Class }
+					}
+				</p>
+				if !tile.Explicit {
+					<p class="schema__hint">Implicit sheet tile; no tile-level metadata authored.</p>
+				}
+				if len(tile.Properties) > 0 {
+					<dl class="tileset-properties mono" data-testid="tile-properties">
+						for _, prop := range tile.Properties {
+							<dt>{ prop.Name } ({ tilesetPropertyType(prop) })</dt><dd>{ prop.Value }</dd>
+						}
+					</dl>
+				} else {
+					<p class="schema__hint" data-testid="tile-no-properties">No tile-level properties authored.</p>
+				}
+			</div>
+		}
+	</section>
 }

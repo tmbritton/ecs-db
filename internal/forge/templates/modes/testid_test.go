@@ -9,7 +9,9 @@ import (
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
 var testIDRE = regexp.MustCompile(`data-testid="([^"]+)"`)
@@ -62,6 +64,33 @@ func TestTilesMode_DistinctPathsWithSameBasenameHaveUniqueRowTestIDs(t *testing.
 		t.Fatal(err)
 	}
 	assertModeTestIDs(t, buf.String(), []string{"tileset-shared.tsx", "tileset-shared.tsx-2"})
+}
+
+func TestTilesMode_ReadSurfaceIDsAreUniqueAndBrowserPinned(t *testing.T) {
+	tile := tilesurface.Tile{
+		ID: 13, ImageURL: "/forge/asset?path=art.png", SW: 16, SH: 16, SheetW: 32, SheetH: 32,
+		Properties: []tilesurface.Property{{Name: "kind", Type: "class", PropertyType: "Terrain", Value: "water"}},
+	}
+	data := Data{
+		Tilesets: []tilesets.Entry{{Path: "tiles.tsx", Writable: true}}, SelectedTileset: "tiles.tsx",
+		Tileset:  &tiled.Tileset{Name: "sheet", TileCount: 1, TileWidth: 16, TileHeight: 16},
+		TileView: tilesurface.View{Tiles: []tilesurface.Tile{tile}, Selected: &tile, TileCount: 1, Pages: 3, Page: 1},
+	}
+	var buf bytes.Buffer
+	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{
+		"tile-grid", "tile-inspector", "tile-selected", "tile-13", "tile-grid-art-13",
+		"tile-inspector-art-13", "tile-class", "tile-properties", "tileset-metadata",
+		"tile-page-next", "tile-page-previous",
+	})
+	if !bytes.Contains(buf.Bytes(), []byte("Terrain")) {
+		t.Error("selected tile's authored custom property type was omitted")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`role="listitem"`)) {
+		t.Error("the tile grid advertised a list without accessible list items")
+	}
 }
 
 // 12-inline-validation.spec.js selects on these, and unlike the ids above they

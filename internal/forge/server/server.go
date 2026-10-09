@@ -400,6 +400,12 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	}
 	if slug == "tiles" && data.SelectedTileset != "" {
 		q.Set("file", data.SelectedTileset)
+		if data.TileSelection != "" {
+			q.Set("tile", data.TileSelection)
+		}
+		if data.TilePage != "" {
+			q.Set("tilepage", data.TilePage)
+		}
 	}
 	// The statechart's selection is *not* here, and must not be. It is the
 	// page's, recorded against the page's id, which streamSubscription adds

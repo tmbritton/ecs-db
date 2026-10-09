@@ -473,17 +473,37 @@ func (s *Session) resolve(path string, doc *tiled.Document) (*tiled.Map, error) 
 // s.mu.
 func (s *Session) recordImages(m *tiled.Map) {
 	for _, ref := range m.Tilesets {
-		if ref.Tileset == nil {
-			continue
+		s.recordTilesetImages(ref.Tileset)
+	}
+}
+
+// TrackTilesetImages registers art from a project-held tileset that TILES has
+// just described. A TSJ can change on disk without a map changing; its new
+// image must not require visiting MAP first. The caller vets the selected
+// tileset; Serves still checks root containment on every asset request.
+func (s *Session) TrackTilesetImages(ts *tiled.Tileset) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recordTilesetImages(ts)
+}
+
+// recordTilesetImages runs under the map session lock.
+func (s *Session) recordTilesetImages(ts *tiled.Tileset) {
+	if ts == nil {
+		return
+	}
+	add := func(path string) {
+		if path == "" {
+			return
 		}
-		if p := ref.Tileset.Image.Path; p != "" {
-			s.images[p] = true
+		s.images[path] = true
+		if abs, err := filepath.Abs(path); err == nil {
+			s.images[abs] = true // TILES holds canonical paths; MAP may be relative
 		}
-		for _, tile := range ref.Tileset.Tiles {
-			if p := tile.Image.Path; p != "" {
-				s.images[p] = true
-			}
-		}
+	}
+	add(ts.Image.Path)
+	for _, tile := range ts.Tiles {
+		add(tile.Image.Path)
 	}
 }
 
@@ -535,6 +555,14 @@ func (s *Session) contained(path string) bool {
 		return false
 	}
 	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	target, err = filepath.Abs(target)
 	if err != nil {
 		return false
 	}

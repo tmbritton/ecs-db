@@ -43,6 +43,7 @@ test("listed JSON tileset is read-only; guessed file never becomes selectable", 
     await expect(page).toHaveURL(/file=.*e2e-story5-legacy\.tsj/);
     await expect(byTestId(page, "tileset-readonly")).toBeVisible();
     await expect(byTestId(page, "tileset-summary")).toContainText("legacy");
+    await expect(byTestId(page, "tile-0")).toBeVisible();
     await expect(byTestId(page, "save-footer")).toContainText("read-only");
     await expect(byTestId(page, "save-footer").locator("button")).toHaveCount(0);
     await expect(byTestId(page, "save-footer-reload")).toHaveCount(0);

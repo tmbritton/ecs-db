@@ -48,6 +48,40 @@ func TestTilesMode_EmptyProjectStillReportsOtherUnsavedWork(t *testing.T) {
 	}
 }
 
+func TestTilesMode_URLSelectsARealTileAndReportsUnknownWithoutDirtyingTSX(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	for _, tt := range []struct {
+		name, tile, want, absent string
+	}{
+		{"default", "", `data-testid="tile-selected"`, `data-testid="tile-problem"`},
+		{"last implicit tile", "1", `data-testid="tile-1"`, `data-testid="tile-problem"`},
+		{"unknown tile", "40", `data-testid="tile-problem"`, `data-testid="tile-selected"`},
+		{"invalid syntax", "nope", `data-testid="tile-problem"`, `data-testid="tile-selected"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			uri := "/forge/tiles?file=" + url.QueryEscape(tsx)
+			if tt.tile != "" {
+				uri += "&tile=" + url.QueryEscape(tt.tile)
+			}
+			body := mapPage(t, srv, uri)
+			if !strings.Contains(body, tt.want) || strings.Contains(body, tt.absent) {
+				t.Errorf("tile selection %q: missing %s or incorrectly rendered %s", tt.tile, tt.want, tt.absent)
+			}
+			if dirty, err := s.cfg.TilesetSession.Dirty(); err != nil || len(dirty) != 0 {
+				t.Errorf("reading tile selection made TSX dirty: %v, %v", dirty, err)
+			}
+		})
+	}
+}
+
+func TestTilesMode_PageIdentityIsNotATileGridPage(t *testing.T) {
+	srv, _, tsx := tilesetServer(t)
+	body := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsx)+"&page=forge-browser-tab")
+	if !strings.Contains(body, `data-testid="tile-1"`) || strings.Contains(body, `data-testid="tile-page-problem"`) {
+		t.Error("Forge page identity was mistaken for a tile-grid page")
+	}
+}
+
 func TestTilesMode_DirtySharedFileConflictAndReloadFollowSelectedFile(t *testing.T) {
 	srv, s, tsx := tilesetServer(t)
 	if err := s.cfg.TilesetSession.Edit(tsx, func(d *tiled.TilesetDocument) error { return d.SetTileClass(0, "changed") }); err != nil {
@@ -181,5 +215,42 @@ func TestTilesMode_ReadOnlySelectionStillReportsOtherUnsavedWork(t *testing.T) {
 	}
 	if strings.Contains(body, `/forge/tiles/save?file=`) {
 		t.Error("read-only TSJ offered a Save action")
+	}
+}
+
+func TestTilesMode_ExternallyChangedTSJImageCanBeReadWithoutVisitingMAP(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	root := filepath.Dir(tsx)
+	tsj := filepath.Join(root, "legacy.tsj")
+	for _, image := range []string{"old.png", "new.png"} {
+		if err := os.WriteFile(filepath.Join(root, image), []byte("image"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	content := func(image string) string {
+		return `{"name":"legacy","tilewidth":16,"tileheight":16,"tilecount":1,"columns":1,"image":"` + image + `","imagewidth":16,"imageheight":16}`
+	}
+	if err := os.WriteFile(tsj, []byte(content("old.png")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "legacy.tmx"), []byte(strings.ReplaceAll(mapBody("legacy", "1,1,\n1,1"), "fixture.tsx", "legacy.tsj")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.TilesetSession.Refresh()
+	if err := os.WriteFile(tsj, []byte(content("new.png")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsj))
+	if !strings.Contains(body, `data-testid="tile-inspector-art-0"`) || !strings.Contains(body, "new.png") || strings.Contains(body, "art unavailable") {
+		t.Error("newly authored TSJ art was not usable on TILES without a MAP preview")
+	}
+	imagePath := filepath.Join(root, "new.png")
+	resp, err := http.Get(srv.URL + "/forge/asset?path=" + url.QueryEscape(imagePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("new TSJ image is not allow-listed: %s", resp.Status)
 	}
 }

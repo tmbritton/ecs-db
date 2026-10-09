@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/forge/maps"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
@@ -70,6 +71,32 @@ func openOne(t *testing.T) (*maps.Session, string) {
 	path := filepath.Join(dir, "level1.tmx")
 	s := maps.Open(maps.Config{MapPath: path})
 	return s, path
+}
+
+func TestServes_RelativeProjectMapsAndCanonicalTilesetShareTheImage(t *testing.T) {
+	dir := project(t, map[string]string{
+		"fixture.tsx": twoTileTSX,
+		"fixture.png": "png fixture",
+		"level1.tmx":  mapWith("level1", "1,1,\n1,1"),
+	})
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(wd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := maps.Open(maps.Config{Root: rel, MapPath: filepath.Join(rel, "level1.tmx")})
+	ts := tilesets.Open(rel, ms)
+	ms.SetTilesetOpener(ts.WorkingBytes)
+	set, err := ts.Describe(filepath.Join(dir, "fixture.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ms.Serves(set.Image.Path) {
+		t.Fatalf("image %q from held TSX is not allowed beside a relative-root MAP session", set.Image.Path)
+	}
 }
 
 func TestOpen_AProjectWithNoMapIsNotAFailure(t *testing.T) {

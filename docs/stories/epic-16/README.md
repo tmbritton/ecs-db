@@ -107,7 +107,7 @@ entity with Sprite and OccupiedCells still draws across its own footprint.
 | 3 | [Occupant-aware traversal](03-occupant-traversal.md) | Replace universal tile `passable` with a predicate over every entity referenced by the destination's positioned Tiles, shared by player movement, A*, reachability and path steps; separate line of sight. |
 | 4 | [MAP occupant authoring](04-map-occupant-authoring.md) | Painting a Tile instantiates or links its referenced entities; inspect/edit links and share one River instance among an irregular set of Tiles, without polygons. |
 | 5 | [Tileset editing session](05-tileset-session.md) ✅ | Discover referenced external TSX/TSJ, one working value per path, dirty/save/discard/reload/conflict and project-scoped path checks. |
-| 6 | TILES read surface | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
+| 6 | [TILES read surface](06-tiles-read-surface.md) ✅ | Sheet grid or sparse collection, enlarged selected tile, truthful authored metadata and source file; no collision promise. |
 | 7 | TILES property editing | Per-tile class/type and supported art metadata through the TSX session; independently patchable grid and inspector; save takes effect on the next run. |
 | 8 | TILES validation | Parser, image and metadata refusals on tiles/tilesets; no silently ignored edit or false polygon/animation promise. |
 | 9 | Animation-file session | Lossless `animations.toml` editing, first-assets-mod discovery, save/conflict and hot-reload behavior without exposing other mods as loaded. |

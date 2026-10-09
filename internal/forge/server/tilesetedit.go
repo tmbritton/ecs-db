@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 )
 
 func (s *Server) addTilesetData(data *modes.Data, r *http.Request, slug string) {
@@ -37,6 +39,29 @@ func (s *Server) addTilesetData(data *modes.Data, r *http.Request, slug string) 
 			data.Tileset, err = sess.Describe(data.SelectedTileset)
 			if err != nil {
 				data.TilesetProblem = err.Error()
+			} else {
+				if s.cfg.MapSession != nil {
+					s.cfg.MapSession.TrackTilesetImages(data.Tileset)
+				}
+				data.TileSelection, data.TilePage = r.URL.Query().Get("tile"), r.URL.Query().Get("tilepage")
+				data.TileView = tilesurface.Build(data.Tileset, data.TileSelection, data.TilePage, func(path string) bool {
+					if s.cfg.MapSession == nil || !s.cfg.MapSession.Serves(path) {
+						return false
+					}
+					if _, ok := assetTypes[strings.ToLower(filepath.Ext(path))]; !ok {
+						return false
+					}
+					info, err := os.Stat(path)
+					return err == nil && info.Mode().IsRegular()
+				})
+				for i := range data.TileView.Tiles {
+					if image := data.TileView.Tiles[i].Image; image != "" {
+						data.TileView.Tiles[i].ImageURL = assetURL(image)
+					}
+				}
+				if selected := data.TileView.Selected; selected != nil && selected.Image != "" {
+					selected.ImageURL = assetURL(selected.Image)
+				}
 			}
 		}
 	}

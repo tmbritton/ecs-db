@@ -722,6 +722,8 @@ Two claims here were checked while planning Epic 15 and are false. **There was n
 
 - [x] **TILES project session (Story 5)** — Shared referenced TSX files have one lossless working document, selected-file footer, atomic save/conflict/reload/discard, project-scoped path checks and MAP preview integration. JSON `.tsj` remains read-only. `make test`, both builds and lint tag sets, and 315 browser checks passed; `internal/forge/tilesets` coverage 86.4%, `internal/forge/maps` 87.1%, `internal/forge/server` 86.7%. See [Epic 16 Story 5](stories/epic-16/05-tileset-session.md).
 
+- [x] **TILES read surface (Story 6)** — Working TSX and readable TSJ show a paged sheet grid or sparse collection, local IDs, enlarged cropped artwork and authored tile/tileset metadata. Selection is URL-addressed; missing/unsafe art is explicit and never bypasses the project asset allow-list. `make test`, both builds/lint tag sets and 321 browser checks passed; `internal/forge/tilesurface` coverage 97.0%, `internal/forge/maps` 87.0%, `internal/forge/server` 86.7%. See [Epic 16 Story 6](stories/epic-16/06-tiles-read-surface.md).
+
 - [ ] **TILES mode** — Tileset grid and enlarged tile with class/type and art metadata. The TSX writer is ready; movement restrictions are authored on occupant entities in MAP, not on tile artwork. No polygon collision authoring or global `passable` toggle. Tiled tile animation and collision polygons have no engine consumer yet.
 
 - [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
