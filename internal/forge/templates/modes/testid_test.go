@@ -142,10 +142,13 @@ func TestTilesMode_ValidationTestIDsArePinnedInBothRegions(t *testing.T) {
 func TestSpritesMode_ExposesTheTestIDsTheBrowserSuiteSelectsOn(t *testing.T) {
 	data := Data{
 		HasAnimations: true, AnimationPath: "assets/animations.toml",
-		AnimationActive:   animations.AssetMod{Name: "first", Assets: "assets"},
-		AnimationLater:    []animations.AssetMod{{Name: "later", Assets: "later-assets"}},
-		AnimationDefs:     []renderer.AnimDef{{Name: "idle"}},
-		AnimationBindings: []animations.Binding{{EntityType: "Player"}},
+		AnimationActive:          animations.AssetMod{Name: "first", Assets: "assets"},
+		AnimationLater:           []animations.AssetMod{{Name: "later", Assets: "later-assets"}},
+		AnimationDefs:            []renderer.AnimDef{{Name: "idle"}},
+		AnimationSelected:        "idle",
+		AnimationPreview:         animations.Preview{Name: "idle", Sheet: "sprites/a.png", Frames: []int{0}, TileSize: 16, Columns: 1, FPS: 8, Loop: true},
+		AnimationBindings:        []animations.Binding{{EntityType: "Player"}},
+		AnimationBindingWarnings: map[string]string{"Player": "frame column 1 is outside bound sheet"},
 	}
 	var buf bytes.Buffer
 	if err := Render("sprites", data).Render(context.Background(), &buf); err != nil {
@@ -154,7 +157,10 @@ func TestSpritesMode_ExposesTheTestIDsTheBrowserSuiteSelectsOn(t *testing.T) {
 	assertModeTestIDs(t, buf.String(), []string{
 		"sprites-mode", "sprites-list", "sprites-panel", "sprites-title", "animation-file",
 		"sprites-active-mod", "sprites-later-later", "sprites-file-path", "sprites-animation-count",
-		"animation-idle", "entity-sheet-Player",
+		"animation-idle", "entity-sheet-Player", "sprite-binding-warning-Player", "sprites-selected-animation", "sprite-frames",
+		"sprite-name", "sprite-sheet", "sprite-sheet-boundary", "sprite-fps", "sprite-loop", "sprite-frame-input", "sprite-playback",
+		"sprite-create-name", "sprite-create-sheet", "sprite-create-submit",
+		"sprite-binding-name", "sprite-binding-sheet", "sprite-binding-create-submit",
 	})
 	data.AnimationProblem = "a broken TOML"
 	data.AnimationMissing = true

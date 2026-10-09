@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,9 +38,12 @@ type animFile struct {
 
 // AnimLoader loads and hot-reloads animation definitions from a TOML file.
 type AnimLoader struct {
-	mu           sync.RWMutex
-	defs         map[string]*AnimDef
-	entitySheets map[string]string // entity type → sheet path
+	mu             sync.RWMutex
+	defs           map[string]*AnimDef
+	entitySheets   map[string]string // entity type → sheet path
+	sourceDir      string            // assets root containing the loaded animations.toml
+	projectRoot    string            // directory containing game.toml
+	resolvedSheets map[string]string // resolved once per sheet, reset on TOML reload
 	// The last successfully applied binding set, not the latest parsed file.
 	// A failed sync must retain removed types for retry on the next save.
 	syncedSheets map[string]string
@@ -46,9 +51,10 @@ type AnimLoader struct {
 
 func NewAnimLoader() *AnimLoader {
 	return &AnimLoader{
-		defs:         make(map[string]*AnimDef),
-		entitySheets: make(map[string]string),
-		syncedSheets: make(map[string]string),
+		defs:           make(map[string]*AnimDef),
+		entitySheets:   make(map[string]string),
+		resolvedSheets: make(map[string]string),
+		syncedSheets:   make(map[string]string),
 	}
 }
 
@@ -58,6 +64,10 @@ func (al *AnimLoader) Load(path string) error {
 	var f animFile
 	if _, err := toml.DecodeFile(path, &f); err != nil {
 		return fmt.Errorf("anim: parse %q: %w", path, err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("anim: resolve %q: %w", path, err)
 	}
 	defs := make(map[string]*AnimDef, len(f.Animation))
 	for i := range f.Animation {
@@ -71,6 +81,8 @@ func (al *AnimLoader) Load(path string) error {
 	al.mu.Lock()
 	al.defs = defs
 	al.entitySheets = sheets
+	al.sourceDir = filepath.Dir(absPath)
+	al.resolvedSheets = make(map[string]string)
 	al.mu.Unlock()
 	return nil
 }
@@ -89,6 +101,70 @@ func (al *AnimLoader) SheetForEntityType(entityType string) (string, bool) {
 	s, ok := al.entitySheets[entityType]
 	al.mu.RUnlock()
 	return s, ok
+}
+
+// SetProjectRoot gives project-relative sheet names the same interpretation as
+// Forge. Call before the first Load/Draw; changing it invalidates resolved paths.
+func (al *AnimLoader) SetProjectRoot(root string) error {
+	if root == "" {
+		return fmt.Errorf("anim: project root is required")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	al.mu.Lock()
+	al.projectRoot = abs
+	al.resolvedSheets = make(map[string]string)
+	al.mu.Unlock()
+	return nil
+}
+
+// ResolveSheet returns a path the game can open. Names beginning with sprites/
+// belong to the selected assets mod even when a competing cwd-relative file
+// exists. Other existing cwd-relative paths retain their historical meaning.
+// Resolution is cached until the next TOML load, not repeated on every draw.
+func (al *AnimLoader) ResolveSheet(sheet string) string {
+	if sheet == "" || filepath.IsAbs(sheet) {
+		return sheet
+	}
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	if resolved, ok := al.resolvedSheets[sheet]; ok {
+		return resolved
+	}
+	clean := filepath.Clean(sheet)
+	resolved := sheet
+	if al.sourceDir != "" {
+		if strings.HasPrefix(clean, "sprites"+string(filepath.Separator)) {
+			resolved = filepath.Join(al.sourceDir, clean)
+		} else if path, ok := al.projectSheet(clean); ok {
+			resolved = path
+		} else if info, err := os.Stat(sheet); err != nil || !info.Mode().IsRegular() {
+			resolved = filepath.Join(al.sourceDir, sheet)
+		}
+	}
+	if al.resolvedSheets == nil {
+		al.resolvedSheets = make(map[string]string)
+	}
+	al.resolvedSheets[sheet] = resolved
+	return resolved
+}
+
+// projectSheet is called under al.mu. An assets path written relative to
+// game.toml takes priority over a similarly named file in the process cwd.
+func (al *AnimLoader) projectSheet(sheet string) (string, bool) {
+	if al.projectRoot == "" {
+		return "", false
+	}
+	relAssets, err := filepath.Rel(al.projectRoot, al.sourceDir)
+	if err != nil || relAssets == "." || relAssets == ".." || strings.HasPrefix(relAssets, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if sheet == relAssets || strings.HasPrefix(sheet, relAssets+string(filepath.Separator)) {
+		return filepath.Join(al.projectRoot, sheet), true
+	}
+	return "", false
 }
 
 // AllSheets returns a deduplicated sorted list of all sheet paths from [[entity_asset]] entries.

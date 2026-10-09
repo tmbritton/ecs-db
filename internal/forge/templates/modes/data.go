@@ -53,28 +53,32 @@ type Data struct {
 	// Computed for every mode, not only MAP: the save footer is in the shell
 	// and is on screen everywhere, so a footer that only knew about unsaved
 	// maps while MAP happened to be open is a way to lose work.
-	DirtyMaps         map[string]bool
-	Tilesets          []tilesets.Entry
-	SelectedTileset   string
-	Tileset           *tiled.Tileset
-	TilesetProblem    string
-	DirtyTilesets     map[string]bool
-	HasTilesets       bool
-	TileView          tilesurface.View
-	TileValidation    tilesetvalidation.Report
-	TiledOnly         []string
-	HasAnimations     bool
-	AnimationPath     string
-	AnimationProblem  string
-	AnimationMissing  bool
-	AnimationStranded bool
-	AnimationActive   animations.AssetMod
-	AnimationLater    []animations.AssetMod
-	AnimationDefs     []renderer.AnimDef
-	AnimationBindings []animations.Binding
-	AnimationDirty    bool
-	TileSelection     string
-	TilePage          string
+	DirtyMaps                map[string]bool
+	Tilesets                 []tilesets.Entry
+	SelectedTileset          string
+	Tileset                  *tiled.Tileset
+	TilesetProblem           string
+	DirtyTilesets            map[string]bool
+	HasTilesets              bool
+	TileView                 tilesurface.View
+	TileValidation           tilesetvalidation.Report
+	TiledOnly                []string
+	HasAnimations            bool
+	AnimationPath            string
+	AnimationProblem         string
+	AnimationMissing         bool
+	AnimationStranded        bool
+	AnimationActive          animations.AssetMod
+	AnimationLater           []animations.AssetMod
+	AnimationDefs            []renderer.AnimDef
+	AnimationBindings        []animations.Binding
+	AnimationBindingWarnings map[string]string
+	AnimationSelected        string
+	AnimationPreview         animations.Preview
+	AnimationTileSize        int
+	AnimationDirty           bool
+	TileSelection            string
+	TilePage                 string
 	// MapProblems is why a map the project has is not open, or is open and
 	// incomplete — a file that will not parse, a .tmj, a tileset that will not
 	// resolve. Shown rather than hidden, for the reason project.Problem exists:

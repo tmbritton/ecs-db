@@ -229,6 +229,9 @@ func runGame(cmd *cobra.Command, args []string) error {
 		}
 	}
 	animLoader := renderer.NewAnimLoader()
+	if err := animLoader.SetProjectRoot(filepath.Dir(cfgPath)); err != nil {
+		return fmt.Errorf("setting animation project root: %w", err)
+	}
 	if animPath != "" {
 		if err := animLoader.Load(animPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: loading animations: %v\n", err)

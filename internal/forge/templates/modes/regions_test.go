@@ -310,9 +310,18 @@ func TestSignals_SeedLayerVisibilityFromTheFile(t *testing.T) {
 // A mode with no view state of its own declares none, rather than an empty
 // object that would still have to be parsed on every page load.
 func TestSignals_AreAbsentWhereAModeHasNoViewState(t *testing.T) {
-	for _, slug := range []string{"schema", "ents", "agents", "sprites"} {
+	for _, slug := range []string{"schema", "ents", "agents"} {
 		if s := Registry[slug].Signals; s != nil && s(Data{}) != "" {
 			t.Errorf("%s declares signals it has no use for: %s", slug, s(Data{}))
+		}
+	}
+}
+
+func TestSignals_SpritesCreationFormsKeepDraftInputsAcrossStreamPatches(t *testing.T) {
+	got := Registry["sprites"].Signals(Data{})
+	for _, key := range []string{"spriteCreateName", "spriteCreateSheet", "spriteCreateFrames", "spriteCreateFPS", "spriteBindingName", "spriteBindingSheet"} {
+		if !strings.Contains(got, `"`+key+`"`) {
+			t.Errorf("sprite form loses %s on the next stream patch: %s", key, got)
 		}
 	}
 }

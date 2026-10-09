@@ -1056,6 +1056,27 @@ option:disabled {
   image-rendering: pixelated;
 }
 
+/* SPRT: each frame is one square crop from the first row of a sprite strip. */
+.sprite-frame {
+  display: inline-block;
+  flex: none;
+  background-repeat: no-repeat;
+  border: 1px solid var(--border);
+}
+
+[data-testid="sprite-frames"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+[data-testid="sprite-frames"] [role="listitem"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .tileset-art-missing {
   display: inline-block;
   padding: 8px;

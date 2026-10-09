@@ -304,6 +304,37 @@ func TestSession_RejectsSpriteRootSymlinkIntoAnotherMod(t *testing.T) {
 	}
 }
 
+func TestSession_ValidateSheetRefusesOutsidePathsEvenWhenArtIsMissing(t *testing.T) {
+	cfg, _ := animationProject(t)
+	s := Open(cfg)
+	for _, tt := range []struct {
+		name, source string
+		ok           bool
+	}{
+		{"future file in first sprites directory", "sprites/future.png", true},
+		{"outside root", "../b/sprites/later.png", false},
+		{"later absolute path", filepath.Join(cfg.Root, "b", "sprites", "later.png"), false},
+		{"not an image", "sprites/secret.txt", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := s.ValidateSheet(tt.source)
+			if (err == nil) != tt.ok {
+				t.Errorf("ValidateSheet(%q) = %v; want allowed %v", tt.source, err, tt.ok)
+			}
+		})
+	}
+	sprites := filepath.Join(cfg.Root, "a", "sprites")
+	if err := os.Mkdir(sprites, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(cfg.Root, filepath.Join(sprites, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidateSheet("sprites/escape/private.png"); err == nil {
+		t.Fatal("symlinked sprite path escaped the selected sprites directory")
+	}
+}
+
 func TestSession_SymlinkedProjectRootStillServesItsOwnSprites(t *testing.T) {
 	cfg, _ := animationProject(t)
 	sprites := filepath.Join(cfg.Root, "a", "sprites")

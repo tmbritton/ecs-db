@@ -2,6 +2,8 @@ package server
 
 import (
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -51,7 +53,7 @@ func animationServer(t *testing.T) (*httptest.Server, *Server, string) {
 		{Name: "main", Assets: filepath.Join(root, "main")},
 		{Name: "later", Assets: filepath.Join(root, "later")},
 	}})
-	s := New(Config{Addr: "127.0.0.1:0", Session: schemaSession, AnimationSession: anim}, testFS())
+	s := New(Config{Addr: "127.0.0.1:0", Session: schemaSession, AnimationSession: anim, TileSize: 16}, testFS())
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
 	return srv, s, path
@@ -209,5 +211,367 @@ func TestSpritesMode_DirtyWorkingCopyIsReachableAfterMalformedExternalReload(t *
 	disk, err := os.ReadFile(path)
 	if err != nil || !strings.Contains(string(disk), "fps = 24") || s.cfg.AnimationSession.Problem() != "" {
 		t.Errorf("Keep my copy did not write the held valid TOML: %s, %v", disk, err)
+	}
+}
+
+func TestSpritesMode_AnimationAndBindingEditsRemainDraftsUntilSave(t *testing.T) {
+	srv, s, path := animationServer(t)
+	for _, tt := range []struct {
+		op, name, value, want string
+	}{
+		{"fps", "idle", "12.5", "fps = 12.5"},
+		{"frames", "idle", "2,0,2", "frames = [2, 0, 2]"},
+		{"loop", "idle", "false", "loop = false"},
+		{"sheet", "idle", "sprites/alternate.png", `sheet = "sprites/alternate.png"`},
+		{"binding-sheet", "Player", "sprites/other.png", `sheet = "sprites/other.png"`},
+		{"binding-name", "Player", "Hero", `entity_type = "Hero"`},
+	} {
+		t.Run(tt.op, func(t *testing.T) {
+			q := url.Values{"file": {path}, "name": {tt.name}, "value": {tt.value}}
+			response, err := http.Post(srv.URL+"/forge/sprites/edit/"+tt.op+"?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNoContent {
+				t.Errorf("edit status = %s", response.Status)
+			}
+			if err := s.cfg.AnimationSession.Read(func(doc *animations.Document) error {
+				if !strings.Contains(string(doc.Bytes()), tt.want) {
+					t.Errorf("edit did not reach working TOML: %s", doc.Bytes())
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if disk, err := os.ReadFile(path); err != nil || string(disk) != serverAnimations {
+				t.Errorf("edit wrote disk before Save: %s, %v", disk, err)
+			}
+		})
+	}
+}
+
+func TestSpritesMode_InvalidEditAndGuessedFileDoNotChangeWorkingTOML(t *testing.T) {
+	srv, s, path := animationServer(t)
+	for _, tt := range []struct{ name, file, op, value string }{
+		{"bad fps", path, "fps", "-1"},
+		{"bad frames", path, "frames", "0,nope"},
+		{"bad loop", path, "loop", "maybe"},
+		{"later file", filepath.Join(filepath.Dir(filepath.Dir(path)), "later", "animations.toml"), "fps", "5"},
+		{"later mod sheet", path, "sheet", filepath.Join(filepath.Dir(filepath.Dir(path)), "later", "sprites", "later.png")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			q := url.Values{"file": {tt.file}, "name": {"idle"}, "value": {tt.value}}
+			response, err := http.Post(srv.URL+"/forge/sprites/edit/"+tt.op+"?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if problem, _ := s.lastEditProblem(); problem == "" {
+				t.Error("invalid edit was not reported")
+			}
+			if err := s.cfg.AnimationSession.Read(func(doc *animations.Document) error {
+				if string(doc.Bytes()) != serverAnimations {
+					t.Errorf("invalid edit changed working file: %s", doc.Bytes())
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSpritesMode_CreatesAnimationAndBindingAsIndependentDrafts(t *testing.T) {
+	srv, s, path := animationServer(t)
+	for _, tt := range []struct {
+		op, name, sheet, want string
+	}{
+		{"animation", "walk", "sprites/player.png", `name = "walk"`},
+		{"binding", "Goblin", "sprites/goblin.png", `entity_type = "Goblin"`},
+	} {
+		t.Run(tt.op, func(t *testing.T) {
+			q := url.Values{"file": {path}, "name": {tt.name}, "sheet": {tt.sheet}, "frames": {"0,1"}, "fps": {"8"}, "loop": {"true"}}
+			response, err := http.Post(srv.URL+"/forge/sprites/create/"+tt.op+"?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if err := s.cfg.AnimationSession.Read(func(doc *animations.Document) error {
+				if !strings.Contains(string(doc.Bytes()), tt.want) {
+					t.Errorf("new %s missing from draft: %s", tt.op, doc.Bytes())
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	if disk, err := os.ReadFile(path); err != nil || string(disk) != serverAnimations {
+		t.Errorf("creation wrote disk before Save: %s, %v", disk, err)
+	}
+}
+
+func TestSpritesImage_OnlyServesNamedArtInTheFirstAssetsMod(t *testing.T) {
+	srv, _, path := animationServer(t)
+	for _, folder := range []string{filepath.Dir(path), filepath.Join(filepath.Dir(filepath.Dir(path)), "later")} {
+		if err := os.Mkdir(filepath.Join(folder, "sprites"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(filepath.Join(folder, "sprites", "player.png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(file, image.NewRGBA(image.Rect(0, 0, 32, 16))); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range []struct {
+		name, sheet string
+		want        int
+	}{
+		{"named", "sprites/player.png", http.StatusOK},
+		{"guessed", "sprites/guess.png", http.StatusNotFound},
+		{"later mod", filepath.Join(filepath.Dir(filepath.Dir(path)), "later", "sprites", "player.png"), http.StatusNotFound},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Get(srv.URL + "/forge/sprites/image?sheet=" + url.QueryEscape(tt.sheet))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != tt.want {
+				t.Errorf("image status = %s; want %d", resp.Status, tt.want)
+			}
+			if tt.want == http.StatusOK && (resp.Header.Get("Content-Type") != "image/png" || resp.Header.Get("X-Content-Type-Options") != "nosniff") {
+				t.Errorf("image response headers: %v", resp.Header)
+			}
+		})
+	}
+	page := mapPage(t, srv, "/forge/sprites?file="+url.QueryEscape(path))
+	if !strings.Contains(page, `data-testid="sprite-strip"`) || strings.Contains(page, `data-testid="sprite-preview-problem"`) {
+		t.Errorf("active sheet not previewed despite image route working: %s", page)
+	}
+}
+
+func TestSpritesMode_SelectedAnimationSurvivesItsStreamQuery(t *testing.T) {
+	srv, s, path := animationServer(t)
+	if err := s.cfg.AnimationSession.Edit(func(d *animations.Document) error {
+		return d.AddAnimation("walk", "sprites/player.png", []int{1, 0}, 4, true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page := mapPage(t, srv, "/forge/sprites?file="+url.QueryEscape(path)+"&animation=walk")
+	if !strings.Contains(page, `data-testid="sprites-selected-animation"`) || !strings.Contains(page, `data-testid="sprite-frames"`) || !strings.Contains(page, "animation=walk") {
+		t.Fatalf("selected sprite and its stream query were lost: %s", page)
+	}
+}
+
+func TestSpritesMode_RenamedAnimationKeepsItsSelectionUntilReload(t *testing.T) {
+	srv, _, path := animationServer(t)
+	q := url.Values{"file": {path}, "name": {"idle"}, "value": {"stand"}}
+	resp, err := http.Post(srv.URL+"/forge/sprites/edit/name?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	page := mapPage(t, srv, "/forge/sprites?animation=idle")
+	if !strings.Contains(page, `data-testid="animation-stand" aria-current="true"`) || !strings.Contains(page, `data-testid="sprite-name" value="stand"`) {
+		t.Errorf("rename stranded selection on the old name: %s", page)
+	}
+	resp, err = http.Post(srv.URL+"/forge/sprites/discard?file="+url.QueryEscape(path), "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	page = mapPage(t, srv, "/forge/sprites?animation=idle")
+	if !strings.Contains(page, `data-testid="animation-idle" aria-current="true"`) {
+		t.Error("discard left the selection following an abandoned rename")
+	}
+}
+
+func TestSpritesMode_AReusedOldNameCanBeSelected(t *testing.T) {
+	srv, s, path := animationServer(t)
+	if err := s.cfg.AnimationSession.Edit(func(d *animations.Document) error {
+		if err := d.RenameAnimation("idle", "stand"); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	s.recordRename(renameAnimationKind, "idle", "stand")
+	q := url.Values{"file": {path}, "name": {"idle"}, "sheet": {"sprites/player.png"}, "frames": {"0"}, "fps": {"4"}, "loop": {"true"}}
+	resp, err := http.Post(srv.URL+"/forge/sprites/create/animation?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	page := mapPage(t, srv, "/forge/sprites?animation=idle")
+	if !strings.Contains(page, `data-testid="animation-idle" aria-current="true"`) || !strings.Contains(page, `data-testid="sprite-fps" value="4"`) {
+		t.Errorf("a new animation with the old name was redirected to stand: %s", page)
+	}
+}
+
+func TestSpritesMode_RenamingBackDoesNotLoopTheSelection(t *testing.T) {
+	srv, _, path := animationServer(t)
+	for _, tt := range []struct{ from, to string }{{"idle", "stand"}, {"stand", "idle"}} {
+		q := url.Values{"file": {path}, "name": {tt.from}, "value": {tt.to}}
+		resp, err := http.Post(srv.URL+"/forge/sprites/edit/name?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	page := mapPage(t, srv, "/forge/sprites?animation=idle")
+	if !strings.Contains(page, `data-testid="animation-idle" aria-current="true"`) || !strings.Contains(page, `data-testid="sprite-name" value="idle"`) {
+		t.Errorf("renaming back to idle stranded the selected animation: %s", page)
+	}
+}
+
+func TestSpritesMode_ReusedIntermediateNameDoesNotRetargetTheOriginalEditor(t *testing.T) {
+	srv, _, path := animationServer(t)
+	for _, tt := range []struct{ from, to string }{{"idle", "stand"}, {"stand", "walk"}} {
+		q := url.Values{"file": {path}, "name": {tt.from}, "value": {tt.to}}
+		resp, err := http.Post(srv.URL+"/forge/sprites/edit/name?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	q := url.Values{"file": {path}, "name": {"stand"}, "sheet": {"sprites/player.png"}, "frames": {"0"}, "fps": {"4"}, "loop": {"true"}}
+	resp, err := http.Post(srv.URL+"/forge/sprites/create/animation?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	page := mapPage(t, srv, "/forge/sprites?animation=idle")
+	if !strings.Contains(page, `data-testid="animation-walk" aria-current="true"`) || !strings.Contains(page, `data-testid="sprite-name" value="walk"`) {
+		t.Errorf("original editor switched to newly created stand: %s", page)
+	}
+	page = mapPage(t, srv, "/forge/sprites?animation=stand")
+	if !strings.Contains(page, `data-testid="animation-stand" aria-current="true"`) {
+		t.Error("new stand is not selectable")
+	}
+}
+
+func TestSpritesMode_RefusesOutOfRangeFramesWhenSheetIsAvailable(t *testing.T) {
+	srv, s, path := animationServer(t)
+	folder := filepath.Join(filepath.Dir(path), "sprites")
+	if err := os.Mkdir(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(folder, "player.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 32, 16))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name, endpoint, value string
+	}{
+		{"existing frames", "/forge/sprites/edit/frames", "99"},
+		{"new animation", "/forge/sprites/create/animation", "99"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			name := "idle"
+			if tt.endpoint == "/forge/sprites/create/animation" {
+				name = "new"
+			}
+			q := url.Values{"file": {path}, "name": {name}, "value": {tt.value}, "sheet": {"sprites/player.png"}, "frames": {tt.value}, "fps": {"8"}, "loop": {"true"}}
+			resp, err := http.Post(srv.URL+tt.endpoint+"?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if problem, _ := s.lastEditProblem(); !strings.Contains(problem, "column 99") {
+				t.Errorf("out-of-bounds frame was not refused: %s", problem)
+			}
+			if err := s.cfg.AnimationSession.Read(func(d *animations.Document) error {
+				if string(d.Bytes()) != serverAnimations {
+					t.Errorf("out-of-bounds edit reached the draft: %s", d.Bytes())
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestSpritesMode_RejectsNonPNGEvenInsideSelectedSprites(t *testing.T) {
+	srv, s, path := animationServer(t)
+	q := url.Values{"file": {path}, "name": {"idle"}, "value": {"sprites/player.gif"}}
+	resp, err := http.Post(srv.URL+"/forge/sprites/edit/sheet?"+q.Encode(), "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if problem, _ := s.lastEditProblem(); !strings.Contains(problem, "PNG") {
+		t.Errorf("game-incompatible format was not refused: %s", problem)
+	}
+}
+
+func TestSpritesMode_WarnsWhenAnEntityBindingCannotPlayTheSelectedColumns(t *testing.T) {
+	srv, s, path := animationServer(t)
+	folder := filepath.Join(filepath.Dir(path), "sprites")
+	if err := os.Mkdir(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name  string
+		width int
+	}{{"player.png", 32}, {"short.png", 16}} {
+		file, err := os.Create(filepath.Join(folder, tt.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(file, image.NewRGBA(image.Rect(0, 0, tt.width, 16))); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		if err := file.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.cfg.AnimationSession.Edit(func(d *animations.Document) error {
+		if err := d.SetFrames("idle", []int{1}); err != nil {
+			return err
+		}
+		return d.SetBindingSheet("Player", "sprites/short.png")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page := mapPage(t, srv, "/forge/sprites?animation=idle")
+	for _, want := range []string{`data-testid="sprite-binding-warning-Player"`, "If Player uses this animation", "column 1"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("bound sheet mismatch was not explained (missing %s)", want)
+		}
+	}
+	// The renderer crops row zero of a taller sheet. Such a binding is not an
+	// editor-authored one-row strip, but it can play the selected columns.
+	f, err := os.Create(filepath.Join(folder, "short.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 32, 32))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	page = mapPage(t, srv, "/forge/sprites?animation=idle")
+	if strings.Contains(page, `data-testid="sprite-binding-warning-Player"`) {
+		t.Error("a playable first row in a taller bound sheet was wrongly rejected")
 	}
 }

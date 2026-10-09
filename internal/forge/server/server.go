@@ -100,6 +100,7 @@ type Config struct {
 	TilesetSession *tilesets.Session
 	// AnimationSession holds the first game-loaded assets mod's animations.toml.
 	AnimationSession *animations.Session
+	TileSize         int // game window.tileSize, the renderer's square-frame crop
 	// Problems are the project's loading failures. They are what turns "that
 	// machine did not resolve" into a sentence naming the file and the reason,
 	// instead of sending the user to the log to find out what the tool already
@@ -191,9 +192,10 @@ type Server struct {
 	// ECS idiom — and a single map cannot tell them apart, so renaming the
 	// component silently retargeted the ENTS editor onto whatever entity type
 	// sorted first, delete button included.
-	renamedTo        map[string]string
-	renamedTypeTo    map[string]string
-	renamedMachineTo map[string]string
+	renamedTo          map[string]string
+	renamedTypeTo      map[string]string
+	renamedMachineTo   map[string]string
+	renamedAnimationTo map[string]string
 
 	// held is the save that was stopped to ask first, or saveNone. It records
 	// which save was asked for, not the plan it would run: the modal re-reads
@@ -415,6 +417,12 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 			q.Set("tilepage", data.TilePage)
 		}
 	}
+	if slug == "sprites" && data.AnimationPath != "" {
+		q.Set("file", data.AnimationPath)
+		if data.AnimationSelected != "" {
+			q.Set("animation", data.AnimationSelected)
+		}
+	}
 	// The statechart's selection is *not* here, and must not be. It is the
 	// page's, recorded against the page's id, which streamSubscription adds
 	// alongside this. A selection frozen into this URL is what made selecting a
@@ -457,7 +465,7 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	slug := modeSlug(r)
 	s.addMapData(&data, r, slug)
 	s.addTilesetData(&data, r, slug)
-	s.addAnimationData(&data, slug)
+	s.addAnimationData(&data, r, slug)
 	if s.cfg.MachineSession != nil {
 		data.HasMachines = true
 		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
@@ -1051,6 +1059,7 @@ const (
 	// the first machine, and the editor silently swaps to a different one — the
 	// same failure component renames had, in a third namespace.
 	renameMachineKind
+	renameAnimationKind
 )
 
 // renames returns the map for one namespace. Caller holds s.mu.
@@ -1060,6 +1069,8 @@ func (s *Server) renames(kind renameKind) map[string]string {
 		return s.renamedTypeTo
 	case renameMachineKind:
 		return s.renamedMachineTo
+	case renameAnimationKind:
+		return s.renamedAnimationTo
 	default:
 		return s.renamedTo
 	}
@@ -1104,6 +1115,17 @@ func (s *Server) recordRename(kind renameKind, from, to string) {
 			s.renamedMachineTo = map[string]string{}
 		}
 		s.renamedMachineTo[from] = to
+	case renameAnimationKind:
+		if s.renamedAnimationTo == nil {
+			s.renamedAnimationTo = map[string]string{}
+		}
+		delete(s.renamedAnimationTo, to)
+		for earlier, next := range s.renamedAnimationTo {
+			if next == from {
+				s.renamedAnimationTo[earlier] = to
+			}
+		}
+		s.renamedAnimationTo[from] = to
 	default:
 		if s.renamedTo == nil {
 			s.renamedTo = map[string]string{}
@@ -1123,6 +1145,7 @@ func (s *Server) forgetRenames() {
 	s.renamedTo = nil
 	s.renamedTypeTo = nil
 	s.renamedMachineTo = nil
+	s.renamedAnimationTo = nil
 }
 
 // saveReports pairs each save outcome with the two ways out of a conflict *for

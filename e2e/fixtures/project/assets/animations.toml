@@ -1,11 +1,11 @@
 # The e2e project's first assets mod. SPRT edits this file, not later mods.
 [[animation]]
 name = "e2e-idle"
-sheet = "e2e/fixtures/project/assets/sprites/e2e-player.png"
+sheet = "sprites/e2e-player.png"
 frames = [0]
 fps = 1
 loop = true
 
 [[entity_asset]]
 entity_type = "TestGoblin"
-sheet = "e2e/fixtures/project/assets/sprites/e2e-player.png"
+sheet = "sprites/e2e-player.png"

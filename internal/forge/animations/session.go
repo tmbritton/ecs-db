@@ -170,6 +170,62 @@ func within(root, path string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
+// ValidateSheet permits a not-yet-created sprite inside the selected mod, but
+// never a later mod, traversal, unsupported image or symlink escape.
+func (s *Session) ValidateSheet(source string) error {
+	if source == "" {
+		return fmt.Errorf("a sprite sheet path is required")
+	}
+	if !strings.EqualFold(filepath.Ext(source), ".png") {
+		return fmt.Errorf("sprite sheets must be PNG files; %q is not playable by the game", source)
+	}
+	if err := s.safe(); err != nil {
+		return err
+	}
+	assets, err := filepath.EvalSymlinks(s.active.Assets)
+	if err != nil {
+		return err
+	}
+	spriteRoot := filepath.Join(s.active.Assets, "sprites")
+	resolvedRoot, err := filepath.EvalSymlinks(spriteRoot)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err == nil && !within(assets, resolvedRoot) {
+		return fmt.Errorf("sprites directory is outside the selected assets mod")
+	}
+	paths := []string{source}
+	if !filepath.IsAbs(source) {
+		paths = []string{filepath.Join(s.active.Assets, source), filepath.Join(s.root, source)}
+	}
+	for _, path := range paths {
+		if !within(spriteRoot, path) {
+			continue
+		}
+		parent := path
+		for {
+			resolved, err := filepath.EvalSymlinks(parent)
+			if err == nil {
+				if resolvedRoot != "" && parent != s.active.Assets && !within(resolvedRoot, resolved) {
+					return fmt.Errorf("sprite image %q escapes the selected sprites directory", source)
+				}
+				if parent == s.active.Assets && !within(assets, resolved) {
+					return fmt.Errorf("sprite image %q escapes the selected assets mod", source)
+				}
+				return nil
+			}
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if parent == s.active.Assets {
+				break
+			}
+			parent = filepath.Dir(parent)
+		}
+	}
+	return fmt.Errorf("sprite sheet %q is outside the selected sprites directory", source)
+}
+
 // AssetImage resolves a sprite sheet against the selected mod's sprites tree.
 // File names written in animations.toml may be project-relative or assets-
 // relative; neither form grants access to a later mod or a symlink outside.

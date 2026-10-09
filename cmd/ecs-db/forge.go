@@ -159,6 +159,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		MapSession:       mapSession,
 		TilesetSession:   tilesetSession,
 		AnimationSession: animationSession,
+		TileSize:         cfg.Window.TileSize,
 		BehaviorDirs:     behaviorDirs,
 		Problems:         problems,
 	}, web.Static)

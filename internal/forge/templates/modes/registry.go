@@ -89,10 +89,15 @@ var Registry = map[string]Content{
 			return `{"tilePropertyName":"","tilePropertyType":"string","tilePropertyValue":""}`
 		},
 	},
-	"ents":    {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},
-	"schema":  {Regions: twoPane(SchemaListRegion, SchemaMainRegion), Page: TwoPanePage("schema-mode")},
-	"agents":  {Regions: twoPane(AgentsListRegion, AgentsMainRegion), Page: TwoPanePage("agents-mode")},
-	"sprites": {Regions: twoPane(SpritesListRegion, SpritesMainRegion), Page: TwoPanePage("sprites-mode")},
+	"ents":   {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},
+	"schema": {Regions: twoPane(SchemaListRegion, SchemaMainRegion), Page: TwoPanePage("schema-mode")},
+	"agents": {Regions: twoPane(AgentsListRegion, AgentsMainRegion), Page: TwoPanePage("agents-mode")},
+	"sprites": {
+		Regions: twoPane(SpritesListRegion, SpritesMainRegion), Page: TwoPanePage("sprites-mode"),
+		Signals: func(Data) string {
+			return `{"spriteCreateName":"","spriteCreateSheet":"","spriteCreateFrames":"0","spriteCreateFPS":"8","spriteCreateLoop":"true","spriteBindingName":"","spriteBindingSheet":""}`
+		},
+	},
 }
 
 // twoPane is the shape every mode but MAP has: a list rail and an editor panel.

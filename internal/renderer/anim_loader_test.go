@@ -3,6 +3,8 @@ package renderer
 import (
 	"context"
 	"database/sql"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -290,6 +292,162 @@ func TestAnimLoader_RemovingBindingPreservesAnIndependentlyChangedSheet(t *testi
 		if err := db.QueryRow(`SELECT sheet FROM comp_sprite WHERE entity_id = ?`, tt.id).Scan(&got); err != nil || got != tt.want {
 			t.Errorf("sprite %d sheet = %q, %v; want %q", tt.id, got, err, tt.want)
 		}
+	}
+}
+
+func TestAnimLoader_ResolvesAssetsRelativeSheetForTheGame(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sprites"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	art, err := os.Create(filepath.Join(root, "sprites", "goblin.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(art, image.NewRGBA(image.Rect(0, 0, 16, 16))); err != nil {
+		art.Close()
+		t.Fatal(err)
+	}
+	if err := art.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "animations.toml")
+	if err := os.WriteFile(path, []byte("[[entity_asset]]\nentity_type = 'Goblin'\nsheet = 'sprites/goblin.png'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	for _, stmt := range []string{
+		`CREATE TABLE entities (id INTEGER PRIMARY KEY, entity_type TEXT)`,
+		`CREATE TABLE comp_sprite (entity_id INTEGER, sheet TEXT)`,
+		`INSERT INTO entities VALUES (1, 'Goblin')`,
+		`INSERT INTO comp_sprite VALUES (1, '')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loader := NewAnimLoader()
+	if err := loader.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := loader.SyncToDatabase(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var sheet string
+	if err := db.QueryRow(`SELECT sheet FROM comp_sprite WHERE entity_id = 1`).Scan(&sheet); err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "sprites", "goblin.png"); loader.ResolveSheet(sheet) != want {
+		t.Errorf("game opens sheet %q, want selected assets-mod path %q", loader.ResolveSheet(sheet), want)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectRelative, err := filepath.Rel(cwd, filepath.Join(root, "sprites", "goblin.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loader.ResolveSheet(projectRelative); got != projectRelative {
+		t.Errorf("existing cwd-relative sheet path changed from %q to %q", projectRelative, got)
+	}
+	f, err := os.Open(loader.ResolveSheet(sheet))
+	if err != nil {
+		t.Fatalf("the game cannot open the authored sheet: %v", err)
+	}
+	defer f.Close()
+	if _, err := png.Decode(f); err != nil {
+		t.Fatalf("the game's PNG decoder cannot read the authored sheet: %v", err)
+	}
+}
+
+func TestAnimLoader_AssetsRelativeSpriteTakesPriorityOverCWD(t *testing.T) {
+	root := t.TempDir()
+	cwd, assets := filepath.Join(root, "game-cwd"), filepath.Join(root, "first-assets")
+	for _, dir := range []string{filepath.Join(cwd, "sprites"), filepath.Join(assets, "sprites")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{cwd, assets} {
+		if err := os.WriteFile(filepath.Join(dir, "sprites", "same.png"), []byte("image"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(assets, "animations.toml")
+	if err := os.WriteFile(path, []byte("[[entity_asset]]\nentity_type = 'Goblin'\nsheet = 'sprites/same.png'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	loader := NewAnimLoader()
+	if err := loader.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sprites/same.png", "./sprites/same.png"} {
+		if got, want := loader.ResolveSheet(name), filepath.Join(assets, "sprites", "same.png"); got != want {
+			t.Errorf("game chose cwd's image over Forge's selected mod for %q: %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestAnimLoader_SheetResolutionCacheIsInvalidatedOnReload(t *testing.T) {
+	root := t.TempDir()
+	loader := NewAnimLoader()
+	for _, mod := range []string{"a", "b"} {
+		dir := filepath.Join(root, mod)
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "animations.toml")
+		if err := os.WriteFile(path, []byte("[[entity_asset]]\nentity_type = 'Goblin'\nsheet = 'sprites/hero.png'\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := loader.Load(path); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := loader.ResolveSheet("sprites/hero.png"), filepath.Join(dir, "sprites", "hero.png"); got != want {
+			t.Errorf("resolved using an earlier loaded assets mod: %q, want %q", got, want)
+		}
+	}
+}
+
+func TestAnimLoader_ProjectRelativeSpriteWorksOutsideProjectWorkingDirectory(t *testing.T) {
+	root := t.TempDir()
+	assets := filepath.Join(root, "assets")
+	if err := os.MkdirAll(filepath.Join(assets, "sprites"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	imagePath := filepath.Join(assets, "sprites", "hero.png")
+	if err := os.WriteFile(imagePath, []byte("sprite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(assets, "animations.toml")
+	if err := os.WriteFile(path, []byte("[[entity_asset]]\nentity_type = 'Hero'\nsheet = 'assets/sprites/hero.png'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	loader := NewAnimLoader()
+	if err := loader.SetProjectRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativeConfigPath, err := filepath.Rel(cwd, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loader.Load(relativeConfigPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := loader.ResolveSheet("assets/sprites/hero.png"); got != imagePath {
+		t.Errorf("game resolved project-relative sheet as %q instead of %q", got, imagePath)
 	}
 }
 

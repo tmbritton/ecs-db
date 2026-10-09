@@ -288,7 +288,7 @@ func (g *Game) drawSprites(dst imageDrawer) {
 		}
 
 		def, hasDef := g.animLoader.Get(animation)
-		sheetImg, hasImg := g.imageCache.Get(sheet)
+		sheetImg, hasImg := g.imageCache.Get(g.animLoader.ResolveSheet(sheet))
 
 		if !hasDef || !hasImg {
 			// Fallback: solid colour rectangle.

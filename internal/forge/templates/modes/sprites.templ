@@ -34,13 +34,62 @@ templ SpritesMainRegion(data Data) {
 			} else {
 				<p data-testid="sprites-animation-count">{ itoa(len(data.AnimationDefs)) } animations · { itoa(len(data.AnimationBindings)) } entity-sheet bindings</p>
 				for _, def := range data.AnimationDefs {
-					<div class="list-row mono" data-testid={ "animation-" + def.Name }>{ def.Name } · { def.Sheet } · { itoa(len(def.Frames)) } frames · { ftoa(def.FPS) } fps</div>
+					<a class={ "list-row mono", kv("list-row--active", def.Name == data.AnimationSelected) } href={ URL(spriteHref(data.AnimationPath, def.Name)) } data-testid={ "animation-" + def.Name } if def.Name == data.AnimationSelected { aria-current="true" }>{ def.Name } · { def.Sheet } · { itoa(len(def.Frames)) } frames · { ftoa(def.FPS) } fps</a>
 				}
-				for _, binding := range data.AnimationBindings {
-					<div class="list-row mono" data-testid={ "entity-sheet-" + binding.EntityType }>{ binding.EntityType } → { binding.Sheet }</div>
+					for _, binding := range data.AnimationBindings {
+						<div class="list-row mono" data-testid={ "entity-sheet-" + binding.EntityType }>{ binding.EntityType } → { binding.Sheet }</div>
+						if warning := data.AnimationBindingWarnings[binding.EntityType]; warning != "" {
+							<p class="badge-problem" role="status" data-testid={ "sprite-binding-warning-" + binding.EntityType }>If { binding.EntityType } uses this animation, its bound sheet { binding.Sheet } cannot play it: { warning }</p>
+						}
+					}
+				if data.AnimationSelected != "" {
+					<section aria-label="Selected animation" data-testid="sprites-selected-animation">
+						<h3>{ data.AnimationSelected }</h3>
+						if data.AnimationPreview.Problem != "" {
+							<p class="badge-problem" role="alert" data-testid="sprite-preview-problem">{ data.AnimationPreview.Problem }</p>
+						} else {
+							<img src={ spriteImageURL(data.AnimationPreview.Sheet) } alt={ "Sprite strip for " + data.AnimationSelected } data-testid="sprite-strip" style="image-rendering:pixelated;max-width:100%;"/>
+							<span class="sprite-frame" role="img" aria-label={ "Playing animation " + data.AnimationSelected } data-testid="sprite-playback" style={ spriteFrameStyle(data.AnimationPreview.Sheet, data.AnimationPreview.TileSize, data.AnimationPreview.Frames[0]) } data-sheet={ data.AnimationPreview.Sheet } data-frames={ spriteFrames(data.AnimationPreview.Frames) } data-fps={ ftoa(data.AnimationPreview.FPS) } data-loop={ boolAttr(data.AnimationPreview.Loop) } data-tile-size={ itoa(data.AnimationPreview.TileSize) }></span>
+						}
+						<div data-testid="sprite-frames" role="list" aria-label="Animation frames in playback order">
+							for _, frame := range data.AnimationPreview.Frames {
+								<div role="listitem" class="mono">
+									if data.AnimationPreview.Problem == "" {
+										<span role="img" aria-label={ "Frame column " + itoa(frame) } style={ spriteFrameStyle(data.AnimationPreview.Sheet, data.AnimationPreview.TileSize, frame) } class="sprite-frame"></span>
+									}
+									column { itoa(frame) }
+								</div>
+							}
+						</div>
+						<p class="mono">{ ftoa(data.AnimationPreview.FPS) } fps · loop { boolAttr(data.AnimationPreview.Loop) } · { itoa(data.AnimationPreview.Columns) } columns · { itoa(data.AnimationPreview.TileSize) }px squares</p>
+						<label for="sprite-name">Animation name</label><input id="sprite-name" class="schema__input" type="text" data-testid="sprite-name" value={ data.AnimationSelected } data-on:change={ spriteFieldAction(data.AnimationPath, data.AnimationSelected, "name") }/>
+						<label for="sprite-sheet">Sprite sheet (selected mod)</label><input id="sprite-sheet" class="schema__input" type="text" data-testid="sprite-sheet" value={ data.AnimationPreview.Sheet } data-on:change={ spriteFieldAction(data.AnimationPath, data.AnimationSelected, "sheet") }/>
+						<p class="schema__hint" data-testid="sprite-sheet-boundary">This previews the animation sheet; an entity draws its own entity_asset sheet binding. Changing this sheet alone does not change that entity's artwork in-game.</p>
+						<label for="sprite-frame-input">Frame columns in playback order, comma-separated</label><input id="sprite-frame-input" class="schema__input" type="text" data-testid="sprite-frame-input" value={ spriteFrames(data.AnimationPreview.Frames) } data-on:change={ spriteFieldAction(data.AnimationPath, data.AnimationSelected, "frames") }/>
+						<label for="sprite-fps">Frames per second</label><input id="sprite-fps" class="schema__input" type="number" step="any" min="0.01" data-testid="sprite-fps" value={ ftoa(data.AnimationPreview.FPS) } data-on:change={ spriteFieldAction(data.AnimationPath, data.AnimationSelected, "fps") }/>
+						<label for="sprite-loop">Loop animation</label><select id="sprite-loop" class="schema__input" data-testid="sprite-loop" data-on:change={ spriteFieldAction(data.AnimationPath, data.AnimationSelected, "loop") }><option value="true" selected?={ data.AnimationPreview.Loop }>Loop</option><option value="false" selected?={ !data.AnimationPreview.Loop }>Play once</option></select>
+					</section>
 				}
+				<section aria-label="Create animation">
+					<label for="sprite-create-name">New animation name</label><input id="sprite-create-name" data-testid="sprite-create-name" data-bind="spriteCreateName"/>
+					<label for="sprite-create-sheet">Sprite sheet</label><input id="sprite-create-sheet" data-testid="sprite-create-sheet" data-bind="spriteCreateSheet"/>
+					<label for="sprite-create-frames">Frame columns</label><input id="sprite-create-frames" data-testid="sprite-create-frames" data-bind="spriteCreateFrames"/>
+					<label for="sprite-create-fps">FPS</label><input id="sprite-create-fps" type="number" data-testid="sprite-create-fps" data-bind="spriteCreateFPS"/>
+					<label for="sprite-create-loop">Loop</label><select id="sprite-create-loop" data-testid="sprite-create-loop" data-bind="spriteCreateLoop"><option value="true">Loop</option><option value="false">Play once</option></select>
+					<button type="button" data-testid="sprite-create-submit" data-on:click={ spriteCreateAction("animation", data.AnimationPath) }>Create animation</button>
+				</section>
+				<section aria-label="Entity-sheet bindings">
+				<p class="schema__hint">An entity_asset sheet is the art the game draws for that entity type, separately from each animation's sheet above.</p>
+					for _, binding := range data.AnimationBindings {
+						<label for={ "sprite-binding-type-" + binding.EntityType }>Entity type</label><input id={ "sprite-binding-type-" + binding.EntityType } value={ binding.EntityType } data-on:change={ spriteFieldAction(data.AnimationPath, binding.EntityType, "binding-name") }/>
+						<label for={ "sprite-binding-" + binding.EntityType }>Sheet for { binding.EntityType }</label><input id={ "sprite-binding-" + binding.EntityType } value={ binding.Sheet } data-on:change={ spriteFieldAction(data.AnimationPath, binding.EntityType, "binding-sheet") }/>
+					}
+					<label for="sprite-binding-name">New entity type binding</label><input id="sprite-binding-name" data-testid="sprite-binding-name" data-bind="spriteBindingName"/>
+					<label for="sprite-binding-sheet">Binding sheet</label><input id="sprite-binding-sheet" data-testid="sprite-binding-sheet" data-bind="spriteBindingSheet"/>
+					<button type="button" data-testid="sprite-binding-create-submit" data-on:click={ spriteCreateAction("binding", data.AnimationPath) }>Create binding</button>
+				</section>
 			}
-			<p class="schema__hint">The game watches this animations.toml and the selected sprites directory: animations.toml hot-reloads after Save.</p>
+			<p class="schema__hint">The game watches this animations.toml and the selected sprites directory: animations.toml hot-reloads after Save. Only the first row of { itoa(data.AnimationTileSize) }px square frames is playable; frame numbers are columns, not arbitrary rectangles.</p>
 			if data.Problem != "" {
 				<p class="badge-problem" role="alert" data-testid="sprites-edit-problem">{ data.Problem }</p>
 			}
