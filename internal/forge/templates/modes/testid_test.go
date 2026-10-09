@@ -8,6 +8,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 )
 
@@ -18,6 +19,9 @@ var testIDRE = regexp.MustCompile(`data-testid="([^"]+)"`)
 // Playwright costs a timeout and a screenshot.
 func TestStubs_ExposeTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 	for _, m := range mode.All {
+		if m.Slug == "tiles" {
+			continue // TILES now has a real file list and inspector.
+		}
 		t.Run(m.Slug, func(t *testing.T) {
 			var buf bytes.Buffer
 			if err := Render(m.Slug, Data{}).Render(context.Background(), &buf); err != nil {
@@ -34,6 +38,30 @@ func TestStubs_ExposeTheTestIDsTheSuiteSelectsOn(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTilesMode_ExposesTheTestIDsTheSuiteSelectsOn(t *testing.T) {
+	var buf bytes.Buffer
+	data := Data{
+		Tilesets:        []tilesets.Entry{{Path: "shared.tsx", Writable: true, Maps: []string{"a.tmx"}}, {Path: "legacy.tsj", Problem: "read-only"}},
+		SelectedTileset: "legacy.tsj",
+	}
+	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{
+		"tiles-mode", "tileset-list", "tileset-panel", "tileset-legacy.tsj", "tileset-shared.tsx",
+		"tileset-title", "tileset-path", "tileset-readonly", "tileset-maps", "tileset-problem",
+	})
+}
+
+func TestTilesMode_DistinctPathsWithSameBasenameHaveUniqueRowTestIDs(t *testing.T) {
+	var buf bytes.Buffer
+	data := Data{Tilesets: []tilesets.Entry{{Path: "one/shared.tsx"}, {Path: "two/shared.tsx"}}}
+	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{"tileset-shared.tsx", "tileset-shared.tsx-2"})
 }
 
 // 12-inline-validation.spec.js selects on these, and unlike the ids above they

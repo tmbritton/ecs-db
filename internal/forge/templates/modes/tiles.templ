@@ -1,0 +1,75 @@
+package modes
+
+import "net/url"
+import "path/filepath"
+import "strings"
+
+templ TilesListRegion(data Data) {
+	<nav id="mode-list" class="schema__list" aria-label="External tilesets" data-testid="tileset-list">
+		<div class="section-heading"><span>Tilesets ◂ maps</span></div>
+		for _, entry := range data.Tilesets {
+			<a href={ URL("/forge/tiles?file=" + url.QueryEscape(entry.Path)) }
+				class={ "list-row", kv("list-row--active", entry.Path == data.SelectedTileset) }
+				data-testid={ tilesetRowTestID(data.Tilesets, entry.Path) }
+				data-dirty={ boolAttr(data.DirtyTilesets[entry.Path]) }
+				if entry.Path == data.SelectedTileset {
+					aria-current="true"
+				}
+			>
+				<span class="list-row__glyph" aria-hidden="true">▦</span>
+				<span class="list-row__label">{ filepath.Base(entry.Path) }</span>
+				if !entry.Writable {
+					<span class="badge-override mono">read-only</span>
+				}
+				if data.DirtyTilesets[entry.Path] {
+					<span class="badge-problem" title="unsaved changes">●</span>
+				}
+			</a>
+		}
+		if len(data.Tilesets) == 0 {
+			<p class="schema__hint" data-testid="no-tilesets">No external tilesets are referenced by open maps.</p>
+		}
+		<p class="schema__hint">Embedded tilesets belong to their map and are not external TILES files.</p>
+	</nav>
+}
+
+templ TilesMainRegion(data Data) {
+	<div id="mode-main" class="schema__main" data-testid="tileset-panel">
+		if data.SelectedTileset == "" {
+			<p class="schema__hint">Select an external tileset to inspect it.</p>
+		} else {
+			<header class="editor-header"><h2 data-testid="tileset-title">{ filepath.Base(data.SelectedTileset) }</h2></header>
+			<p class="mono" data-testid="tileset-path">{ data.SelectedTileset }</p>
+			for _, entry := range data.Tilesets {
+				if entry.Path == data.SelectedTileset {
+					if !entry.Writable {
+						if strings.EqualFold(filepath.Ext(entry.Path), ".tsj") {
+							<p data-testid="tileset-readonly">Read-only tileset. JSON .tsj files are inspected here but not saved by Forge.</p>
+						} else {
+							<p data-testid="tileset-readonly">Unavailable for editing. See the file problem below.</p>
+						}
+					}
+					if entry.Problem != "" {
+						<p class="badge-problem" data-testid="tileset-problem">{ entry.Problem }</p>
+					}
+					<p>Referenced by:</p>
+					<ul data-testid="tileset-maps">
+						for _, m := range entry.Maps {
+							<li>{ filepath.Base(m) }</li>
+						}
+					</ul>
+				}
+			}
+			if data.TilesetProblem != "" {
+				<p data-testid="tileset-open-problem">{ data.TilesetProblem }</p>
+			}
+			if data.Tileset != nil {
+				<p data-testid="tileset-summary">{ data.Tileset.Name } · { itoa(data.Tileset.TileCount) } tiles</p>
+			}
+			<p class="schema__hint">Saved TSX metadata takes effect on the next ecs-db run.</p>
+			if data.Problem != "" {
+				<p class="badge-problem" data-testid="tileset-edit-problem">{ data.Problem }</p>
+			}
+		}
+	</div>
+}

@@ -19,6 +19,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/server"
 	"github.com/tmbritton/ecs-db/internal/forge/session"
 	"github.com/tmbritton/ecs-db/internal/forge/status"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/web"
 	"github.com/tmbritton/ecs-db/internal/schema"
 )
@@ -66,6 +67,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 	var editing *session.Session
 	var machineSession *machines.Session
 	var mapSession *maps.Session
+	var tilesetSession *tilesets.Session
 	var resolved []project.Machine
 	var behaviorDirs []string
 	var problems []project.Problem
@@ -131,6 +133,8 @@ func runForge(cmd *cobra.Command, _ []string) error {
 			Root:    filepath.Dir(proj.ConfigPath),
 			MapPath: proj.MapPath,
 		})
+		tilesetSession = tilesets.Open(filepath.Dir(proj.ConfigPath), mapSession)
+		mapSession.SetTilesetOpener(tilesetSession.WorkingBytes)
 	}
 
 	srv := server.New(server.Config{
@@ -146,6 +150,7 @@ func runForge(cmd *cobra.Command, _ []string) error {
 		Machines:       resolved,
 		MachineSession: machineSession,
 		MapSession:     mapSession,
+		TilesetSession: tilesetSession,
 		BehaviorDirs:   behaviorDirs,
 		Problems:       problems,
 	}, web.Static)

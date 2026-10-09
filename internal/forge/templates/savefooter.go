@@ -1,7 +1,9 @@
 package templates
 
 import (
+	"encoding/json"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -140,6 +142,40 @@ func MapFooter(path, file string, dirty bool, elsewhere Elsewhere) templ.Compone
 	})
 }
 
+// TilesetFooter writes only the selected external TSX. A read-only TSJ has no
+// footer, because none of these operations can write it.
+func TilesetFooter(path, file string, dirty bool, elsewhere Elsewhere) templ.Component {
+	q := "?file=" + url.QueryEscape(path)
+	return components.SaveFooter(components.SaveFooterProps{
+		Dirty: dirty, File: file, Title: path,
+		Elsewhere:  elsewhere.describe(),
+		SaveAction: "@post('/forge/tiles/save" + q + "')",
+		ReloadAction: "confirm(" + tilesetJSString("Reload "+file+" from disk? Unsaved changes will be lost.") + ") && " +
+			"@post('/forge/tiles/reload" + q + "')",
+		DiscardAction: "confirm(" + tilesetJSString("Discard unsaved changes to "+file+"?") + ") && " +
+			"@post('/forge/tiles/discard" + q + "')",
+	})
+}
+
+// JSON string encoding is a valid JavaScript literal and escapes quotes,
+// control characters and HTML-sensitive characters in author-chosen filenames.
+func tilesetJSString(s string) string {
+	b, _ := json.Marshal(s) // a Go string cannot fail JSON encoding
+	return string(b)
+}
+
+// TilesetStatusFooter keeps cross-mode unsaved work visible when the selected
+// TSJ is read-only or an external TSX cannot safely be opened. It has no
+// actions, since neither file may be saved from this selection.
+func TilesetStatusFooter(path, status string, elsewhere Elsewhere) templ.Component {
+	if path == "" {
+		return components.SaveFooter(components.SaveFooterProps{Status: status, Elsewhere: elsewhere.describe()})
+	}
+	return components.SaveFooter(components.SaveFooterProps{
+		Status: status, File: filepath.Base(path), Title: path, Elsewhere: elsewhere.describe(),
+	})
+}
+
 // Elsewhere is unsaved work the footer on screen cannot save.
 //
 // One Save button does one thing and the footer follows the mode, so without
@@ -154,6 +190,7 @@ type Elsewhere struct {
 	Schema   bool
 	Machines int
 	Maps     int
+	Tilesets int
 }
 
 // describe is the one line the footer shows, or "" when everything else is
@@ -175,6 +212,12 @@ func (e Elsewhere) describe() string {
 		parts = append(parts, "1 unsaved map in MAP")
 	case e.Maps > 1:
 		parts = append(parts, strconv.Itoa(e.Maps)+" unsaved maps in MAP")
+	}
+	switch {
+	case e.Tilesets == 1:
+		parts = append(parts, "1 unsaved tileset in TILES")
+	case e.Tilesets > 1:
+		parts = append(parts, strconv.Itoa(e.Tilesets)+" unsaved tilesets in TILES")
 	}
 	return strings.Join(parts, " · ")
 }

@@ -45,7 +45,7 @@ test.describe("app shell", () => {
   // so an unfinished build reads as unfinished rather than broken. Implemented
   // modes are listed here so this test shrinks as they land rather than being
   // quietly weakened.
-  const IMPLEMENTED = new Set(["schema", "ents", "agents", "map"]);
+	const IMPLEMENTED = new Set(["schema", "ents", "agents", "map", "tiles"]);
 
   test("each unimplemented mode names itself and the epic that fills it", async ({ page }) => {
     for (const m of MODES.filter((m) => !IMPLEMENTED.has(m.slug))) {
@@ -61,6 +61,7 @@ test.describe("app shell", () => {
       ["ents", "ents-mode"],
       ["agents", "agents-mode"],
       ["map", "map-mode"],
+      ["tiles", "tiles-mode"],
     ]) {
       await page.goto(`/forge/${slug}`);
       await expect(byTestId(page, testid)).toBeVisible();
@@ -100,9 +101,9 @@ test.describe("navigation is navigation", () => {
     // Deliberately a mode that is still stubbed, so this stays about routing
     // rather than about whatever the mode happens to render. It moves as modes
     // land, which is the point of IMPLEMENTED above.
-    await page.goto("/forge/tiles");
-    await expect(byTestId(page, "rail-tiles")).toHaveAttribute("data-active", "true");
-    await expect(byTestId(page, "mode-stub-caption")).toHaveText("TILES");
+    await page.goto("/forge/sprites");
+    await expect(byTestId(page, "rail-sprites")).toHaveAttribute("data-active", "true");
+    await expect(byTestId(page, "mode-stub-caption")).toHaveText("SPRT");
   });
 
   test("an unknown mode is a 404", async ({ page }) => {

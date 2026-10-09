@@ -77,7 +77,7 @@ var Registry = map[string]Content{
 		Page:    MapPage,
 		Signals: MapSignals,
 	},
-	"tiles":   stubContent("TILES", "Tileset metadata: collision, animation, terrain and class.", "Epic 16"),
+	"tiles":   {Regions: twoPane(TilesListRegion, TilesMainRegion), Page: TwoPanePage("tiles-mode")},
 	"ents":    {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},
 	"schema":  {Regions: twoPane(SchemaListRegion, SchemaMainRegion), Page: TwoPanePage("schema-mode")},
 	"agents":  {Regions: twoPane(AgentsListRegion, AgentsMainRegion), Page: TwoPanePage("agents-mode")},

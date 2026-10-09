@@ -32,6 +32,12 @@ func TestRegistry_CoversEveryMode(t *testing.T) {
 				t.Fatalf("render %s: %v", m.Slug, err)
 			}
 			got := buf.String()
+			if m.Slug == "tiles" {
+				if !strings.Contains(got, `data-testid="tiles-mode"`) {
+					t.Error("implemented TILES mode did not render its project file surface")
+				}
+				return
+			}
 			// An unfinished build should say what it is and what fills it,
 			// rather than rendering an ambiguous blank region.
 			if !strings.Contains(got, m.Caption) {

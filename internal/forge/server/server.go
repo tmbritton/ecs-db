@@ -38,6 +38,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/components"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -94,6 +95,8 @@ type Config struct {
 	// and declares no [map] — a project with no level is a project, and MAP
 	// mode says so rather than the editor refusing to start.
 	MapSession *maps.Session
+	// TilesetSession owns shared external TSX documents referenced by open maps.
+	TilesetSession *tilesets.Session
 	// Problems are the project's loading failures. They are what turns "that
 	// machine did not resolve" into a sentence naming the file and the reason,
 	// instead of sending the user to the log to find out what the tool already
@@ -254,6 +257,7 @@ func (s *Server) routes() http.Handler {
 	s.registerCanvasRoutes(mux)
 	s.registerEntsEditRoutes(mux)
 	s.registerMapEditRoutes(mux)
+	s.registerTilesetRoutes(mux)
 	s.registerAssetRoutes(mux)
 	mux.HandleFunc("GET /forge/{mode}", s.handleMode)
 	mux.HandleFunc("GET /forge/{mode}/events", s.handleModeEvents)
@@ -394,6 +398,9 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 	if slug == "agents" && data.SelectedMachine != "" {
 		q.Set("machine", data.SelectedMachine)
 	}
+	if slug == "tiles" && data.SelectedTileset != "" {
+		q.Set("file", data.SelectedTileset)
+	}
 	// The statechart's selection is *not* here, and must not be. It is the
 	// page's, recorded against the page's id, which streamSubscription adds
 	// alongside this. A selection frozen into this URL is what made selecting a
@@ -435,6 +442,7 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	data.SelectedMachine, data.DirtyMachines, data.ReformatMachines = s.machineData(r)
 	slug := modeSlug(r)
 	s.addMapData(&data, r, slug)
+	s.addTilesetData(&data, r, slug)
 	if s.cfg.MachineSession != nil {
 		data.HasMachines = true
 		data.MachineMods = s.cfg.MachineSession.ModsThatCanHold()
@@ -838,10 +846,13 @@ func (s *Server) footer(slug string, data modes.Data) templates.Component {
 	if slug == "map" && s.cfg.MapSession != nil {
 		return s.mapFooter(data)
 	}
+	if slug == "tiles" && s.cfg.TilesetSession != nil {
+		return s.tilesetFooter(data)
+	}
 	if s.cfg.Session == nil {
 		return templates.NoFooter()
 	}
-	elsewhere := templates.Elsewhere{Machines: s.unsavedMachines(), Maps: s.unsavedMaps()}
+	elsewhere := templates.Elsewhere{Machines: s.unsavedMachines(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets()}
 	dirty, err := s.cfg.Session.Dirty()
 	if err != nil {
 		// A schema that will not serialise cannot be saved, and saying "clean"
@@ -884,6 +895,7 @@ func (s *Server) mapFooter(data modes.Data) templates.Component {
 			Schema:   s.unsavedSchema(),
 			Machines: s.unsavedMachines(),
 			Maps:     s.unsavedMapsExcept(data.SelectedMap),
+			Tilesets: s.unsavedTilesets(),
 		})
 }
 
@@ -958,7 +970,7 @@ func (s *Server) machinesFooter(data modes.Data) templates.Component {
 		machinesFooterFile(data.DirtyMachines, data.ReformatMachines),
 		len(data.DirtyMachines) > len(data.ReformatMachines),
 		dirtyNames(data.DirtyMachines),
-		templates.Elsewhere{Schema: s.unsavedSchema(), Maps: s.unsavedMaps()},
+		templates.Elsewhere{Schema: s.unsavedSchema(), Maps: s.unsavedMaps(), Tilesets: s.unsavedTilesets()},
 		invalid,
 	)
 }
@@ -1098,6 +1110,10 @@ func (s *Server) saveReports() []components.SaveReportView {
 	for _, r := range reports {
 		view := components.SaveReportView{Report: r}
 		switch {
+		case s.holdsTileset(r.Path):
+			q := "?file=" + url.QueryEscape(r.Path)
+			view.ReloadAction = "@post('/forge/tiles/reload" + q + "')"
+			view.OverwriteAction = "@post('/forge/tiles/save/overwrite" + q + "')"
 		case s.holdsMap(r.Path):
 			q := "?map=" + url.QueryEscape(r.Path)
 			view.ReloadAction = "@post('/forge/map/reload" + q + "')"

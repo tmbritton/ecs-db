@@ -11,6 +11,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/migration"
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/schema"
@@ -48,7 +49,13 @@ type Data struct {
 	// Computed for every mode, not only MAP: the save footer is in the shell
 	// and is on screen everywhere, so a footer that only knew about unsaved
 	// maps while MAP happened to be open is a way to lose work.
-	DirtyMaps map[string]bool
+	DirtyMaps       map[string]bool
+	Tilesets        []tilesets.Entry
+	SelectedTileset string
+	Tileset         *tiled.Tileset
+	TilesetProblem  string
+	DirtyTilesets   map[string]bool
+	HasTilesets     bool
 	// MapProblems is why a map the project has is not open, or is open and
 	// incomplete — a file that will not parse, a .tmj, a tileset that will not
 	// resolve. Shown rather than hidden, for the reason project.Problem exists:

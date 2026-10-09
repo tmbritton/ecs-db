@@ -8,12 +8,18 @@ package components
 // is being saved — that is the caller's business.
 type SaveFooterProps struct {
 	Dirty         bool
+	// Status replaces "saved" on files without a write action (read-only TSJ,
+	// unavailable TSX). The footer still reports unsaved work elsewhere.
+	Status        string
 	File          string // display only, e.g. "overworld.tmx"
 	// Title is the hover text for the file label, for a File that summarises
 	// several — "3 unsaved machines" says how many and this says which.
 	Title string
 	SaveAction    string
 	DiscardAction string
+	// ReloadAction offers an explicit read from disk even when the working file
+	// is clean. Currently TILES uses this to pick up edits made in Tiled.
+	ReloadAction string
 	// Blocked is a save the engine would refuse. Save is disabled and the
 	// reason is stated beside it: a control that is disabled for a reason the
 	// user cannot see is indistinguishable from one that is broken, and the
@@ -40,7 +46,9 @@ templ SaveFooter(props SaveFooterProps) {
 		data-blocked={ boolAttr(props.Blocked) }
 	>
 		<div class="save-footer__hint mono">
-			if props.Dirty {
+			if props.Status != "" {
+				{ props.Status }
+			} else if props.Dirty {
 				● unsaved
 			} else if props.Elsewhere != "" {
 				● saved here
@@ -63,7 +71,11 @@ templ SaveFooter(props SaveFooterProps) {
 				<span class="save-footer__blocked" data-testid="save-blocked">· { props.BlockedReason }</span>
 			}
 		</div>
+		if props.Status == "" {
 		<div class="save-footer__actions">
+			if props.ReloadAction != "" {
+				<button type="button" class="save-footer__discard" data-testid="save-footer-reload" data-on:click={ props.ReloadAction }>Reload from disk</button>
+			}
 			<button
 				type="button"
 				class="save-footer__discard"
@@ -84,5 +96,6 @@ templ SaveFooter(props SaveFooterProps) {
 				}
 			>Save</button>
 		</div>
+		}
 	</div>
 }

@@ -720,6 +720,8 @@ Two claims here were checked while planning Epic 15 and are false. **There was n
 
 - [x] **MAP occupant authoring** — Painting a Tile imports its referenced entity template. MAP inspects and edits additional object-layer links by stable layer/cell, including one River shared across irregular cells with distinct per-cell artwork; moving objects and erasing Tiles keep links and movement in sync. No polygon collision authoring. `make test`, both builds/lint sets and 310 Playwright checks passed; `internal/forge/tilelinks` coverage 82.5%, `internal/forge/mapvalidation` 96.9%. See [Epic 16 Story 4](stories/epic-16/04-map-occupant-authoring.md).
 
+- [x] **TILES project session (Story 5)** — Shared referenced TSX files have one lossless working document, selected-file footer, atomic save/conflict/reload/discard, project-scoped path checks and MAP preview integration. JSON `.tsj` remains read-only. `make test`, both builds and lint tag sets, and 315 browser checks passed; `internal/forge/tilesets` coverage 86.4%, `internal/forge/maps` 87.1%, `internal/forge/server` 86.7%. See [Epic 16 Story 5](stories/epic-16/05-tileset-session.md).
+
 - [ ] **TILES mode** — Tileset grid and enlarged tile with class/type and art metadata. The TSX writer is ready; movement restrictions are authored on occupant entities in MAP, not on tile artwork. No polygon collision authoring or global `passable` toggle. Tiled tile animation and collision polygons have no engine consumer yet.
 
 - [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.

@@ -62,7 +62,10 @@ type Session struct {
 	tilesets map[string]error
 	// images is every image path the open maps' tilesets refer to, recorded by
 	// Resolved. See Serves.
-	images   map[string]bool
+	images map[string]bool
+	// opener reads working TSX bytes when the TILES session holds this path.
+	// Nil keeps the prior disk-only behavior for projects without that session.
+	opener   func(string) ([]byte, error)
 	order    []string // paths, configured map first
 	maps     []Map
 	problems []project.Problem
@@ -97,6 +100,22 @@ func Open(cfg Config) *Session {
 	}
 	s.reload()
 	return s
+}
+
+// SetTilesetOpener injects a working-byte reader from TILES. It never takes
+// the tileset session lock here; Preview calls it under the map lock, while
+// TILES Refresh discovers map refs before taking its own lock.
+func (s *Session) SetTilesetOpener(opener func(string) ([]byte, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.opener = opener
+}
+
+func (s *Session) openTileset(path string) ([]byte, error) {
+	if s.opener != nil {
+		return s.opener(path)
+	}
+	return os.ReadFile(path)
 }
 
 // Refresh re-reads which maps the project has.
@@ -422,7 +441,7 @@ func (s *Session) Preview(path string) (*tiled.Map, []TilesetProblem, error) {
 		for i, ref := range preview.Tilesets {
 			one := *preview
 			one.Tilesets = []tiled.TilesetRef{ref}
-			if err := one.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
+			if err := one.ResolveTilesets(filepath.Dir(path), s.openTileset); err != nil {
 				problems = append(problems, TilesetProblem{Index: i, Source: ref.Source, Err: err})
 				continue
 			}
@@ -443,7 +462,7 @@ func (s *Session) resolve(path string, doc *tiled.Document) (*tiled.Map, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := m.ResolveTilesets(filepath.Dir(path), os.ReadFile); err != nil {
+	if err := m.ResolveTilesets(filepath.Dir(path), s.openTileset); err != nil {
 		return nil, err
 	}
 	s.recordImages(m)
