@@ -219,16 +219,17 @@ func TestInspect_SeparatesStackedTileTemplatesFromSharedObjectLinks(t *testing.T
 		layerID       int
 		cell          Cell
 		wantType      string
+		wantClass     string
 		wantLinkedIDs []int
 		wantEmpty     bool
 		wantErr       string
 	}{
-		{"lower floor", 4, Cell{0, 0}, "Floor", nil, false, ""},
-		{"upper wall and two objects", 9, Cell{0, 0}, "Wall", []int{5, 6}, false, ""},
-		{"upper floor shared river", 9, Cell{1, 0}, "Floor", []int{5}, false, ""},
-		{"empty lower cell", 4, Cell{1, 0}, "", nil, true, ""},
-		{"unknown layer", 999, Cell{0, 0}, "", nil, false, "layer"},
-		{"outside map", 9, Cell{2, 0}, "", nil, false, "outside"},
+		{"lower floor", 4, Cell{0, 0}, "Floor", "", nil, false, ""},
+		{"upper wall and two objects", 9, Cell{0, 0}, "Wall", "wall", []int{5, 6}, false, ""},
+		{"upper floor shared river", 9, Cell{1, 0}, "Floor", "", []int{5}, false, ""},
+		{"empty lower cell", 4, Cell{1, 0}, "", "", nil, true, ""},
+		{"unknown layer", 999, Cell{0, 0}, "", "", nil, false, "layer"},
+		{"outside map", 9, Cell{2, 0}, "", "", nil, false, "outside"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := Inspect(m, tt.layerID, tt.cell)
@@ -238,7 +239,7 @@ func TestInspect_SeparatesStackedTileTemplatesFromSharedObjectLinks(t *testing.T
 				}
 				return
 			}
-			if err != nil || got.EntityType != tt.wantType || got.Empty != tt.wantEmpty ||
+			if err != nil || got.EntityType != tt.wantType || got.ArtworkClass != tt.wantClass || got.Empty != tt.wantEmpty ||
 				len(got.ObjectIDs) != len(tt.wantLinkedIDs) {
 				t.Fatalf("Inspect = %+v,%v, want type %q links %v empty=%v", got, err, tt.wantType, tt.wantLinkedIDs, tt.wantEmpty)
 			}

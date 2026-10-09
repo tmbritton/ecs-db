@@ -109,6 +109,19 @@ func TestRegions_DoNotContainOneAnother(t *testing.T) {
 	}
 }
 
+func TestTilesRegions_GridAndInspectorPatchIndependently(t *testing.T) {
+	content := Registry["tiles"]
+	want := []string{"mode-list", "tileset-head", "tileset-grid-region", "tileset-inspector-region"}
+	if len(content.Regions) != len(want) {
+		t.Fatalf("TILES has %d regions, want %v", len(content.Regions), want)
+	}
+	for i, id := range want {
+		if content.Regions[i].ID != id {
+			t.Errorf("TILES region %d = %q, want %q", i, content.Regions[i].ID, id)
+		}
+	}
+}
+
 func TestRegions_HaveDistinctIDs(t *testing.T) {
 	for slug, content := range Registry {
 		seen := make(map[string]bool, len(content.Regions))
@@ -297,9 +310,18 @@ func TestSignals_SeedLayerVisibilityFromTheFile(t *testing.T) {
 // A mode with no view state of its own declares none, rather than an empty
 // object that would still have to be parsed on every page load.
 func TestSignals_AreAbsentWhereAModeHasNoViewState(t *testing.T) {
-	for _, slug := range []string{"schema", "ents", "agents", "tiles", "sprites"} {
+	for _, slug := range []string{"schema", "ents", "agents", "sprites"} {
 		if s := Registry[slug].Signals; s != nil && s(Data{}) != "" {
 			t.Errorf("%s declares signals it has no use for: %s", slug, s(Data{}))
+		}
+	}
+}
+
+func TestSignals_TilesPropertyFormKeepsInputsAcrossInspectorPatches(t *testing.T) {
+	got := Registry["tiles"].Signals(Data{})
+	for _, want := range []string{`"tilePropertyName":""`, `"tilePropertyType":"string"`, `"tilePropertyValue":""`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("TILES property form omitted client-owned signal %s: %s", want, got)
 		}
 	}
 }

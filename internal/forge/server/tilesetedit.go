@@ -3,15 +3,18 @@ package server
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
+	"github.com/tmbritton/ecs-db/internal/tiled"
 )
 
 func (s *Server) addTilesetData(data *modes.Data, r *http.Request, slug string) {
@@ -126,10 +129,90 @@ func (s *Server) tilesetFooter(data modes.Data) templates.Component {
 }
 
 func (s *Server) registerTilesetRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /forge/tiles/tile/class", s.sameOriginOnly(s.handleTilesetTileClass))
+	mux.HandleFunc("POST /forge/tiles/tile/property", s.sameOriginOnly(s.handleTilesetTileProperty))
 	mux.HandleFunc("POST /forge/tiles/save", s.sameOriginOnly(s.handleTilesetSave))
 	mux.HandleFunc("POST /forge/tiles/save/overwrite", s.sameOriginOnly(s.handleTilesetOverwrite))
 	mux.HandleFunc("POST /forge/tiles/discard", s.sameOriginOnly(s.handleTilesetDiscard))
 	mux.HandleFunc("POST /forge/tiles/reload", s.sameOriginOnly(s.handleTilesetReload))
+}
+
+func (s *Server) handleTilesetTileProperty(w http.ResponseWriter, r *http.Request) {
+	sess, path, ok := s.tilesetFile(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	id, err := strconv.ParseUint(q.Get("tile"), 10, 32)
+	if err == nil && !q.Has("value") {
+		err = fmt.Errorf("tile property edit named no value")
+	}
+	name, kind, value := q.Get("name"), q.Get("type"), q.Get("value")
+	if err == nil {
+		err = validateTileProperty(name, kind, value)
+	}
+	if err == nil {
+		err = sess.Edit(path, func(doc *tiled.TilesetDocument) error {
+			return doc.SetTileProperty(uint32(id), name, tiled.Property{Type: kind, Value: value})
+		})
+	}
+	if err != nil {
+		s.refuseTilesetEdit(w, r, err)
+		return
+	}
+	s.setEditProblem("")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func validateTileProperty(name, kind, value string) error {
+	if name == "" {
+		return fmt.Errorf("a tile property needs a name")
+	}
+	if name == tiled.PropPassable {
+		return fmt.Errorf("artwork passable is ignored by the game; author movement on referenced entities in MAP")
+	}
+	switch kind {
+	case "string":
+		return nil
+	case "int":
+		if _, err := strconv.ParseInt(value, 10, 64); err != nil {
+			return fmt.Errorf("%s takes a whole number: %w", name, err)
+		}
+	case "float":
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return fmt.Errorf("%s takes a finite number", name)
+		}
+	case "bool":
+		if value != "true" && value != "false" {
+			return fmt.Errorf("%s takes true or false", name)
+		}
+	default:
+		return fmt.Errorf("supported tile property types are string, int, float and bool; got %q", kind)
+	}
+	return nil
+}
+
+func (s *Server) handleTilesetTileClass(w http.ResponseWriter, r *http.Request) {
+	sess, path, ok := s.tilesetFile(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	id, err := strconv.ParseUint(q.Get("tile"), 10, 32)
+	if err == nil && q.Has("value") {
+		err = sess.Edit(path, func(doc *tiled.TilesetDocument) error {
+			return doc.SetTileClass(uint32(id), q.Get("value"))
+		})
+	} else if err == nil {
+		err = fmt.Errorf("tile class edit named no value")
+	}
+	if err != nil {
+		s.refuseTilesetEdit(w, r, err)
+		return
+	}
+	s.setEditProblem("")
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) tilesetFile(w http.ResponseWriter, r *http.Request) (*tilesets.Session, string, bool) {

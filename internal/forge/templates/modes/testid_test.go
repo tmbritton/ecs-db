@@ -8,6 +8,7 @@ import (
 
 	"github.com/tmbritton/ecs-db/internal/agent"
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
+	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
@@ -68,13 +69,14 @@ func TestTilesMode_DistinctPathsWithSameBasenameHaveUniqueRowTestIDs(t *testing.
 
 func TestTilesMode_ReadSurfaceIDsAreUniqueAndBrowserPinned(t *testing.T) {
 	tile := tilesurface.Tile{
-		ID: 13, ImageURL: "/forge/asset?path=art.png", SW: 16, SH: 16, SheetW: 32, SheetH: 32,
+		ID: 13, Class: "hallway", ImageURL: "/forge/asset?path=art.png", SW: 16, SH: 16, SheetW: 32, SheetH: 32,
 		Properties: []tilesurface.Property{{Name: "kind", Type: "class", PropertyType: "Terrain", Value: "water"}},
 	}
 	data := Data{
 		Tilesets: []tilesets.Entry{{Path: "tiles.tsx", Writable: true}}, SelectedTileset: "tiles.tsx",
 		Tileset:  &tiled.Tileset{Name: "sheet", TileCount: 1, TileWidth: 16, TileHeight: 16},
 		TileView: tilesurface.View{Tiles: []tilesurface.Tile{tile}, Selected: &tile, TileCount: 1, Pages: 3, Page: 1},
+		Problem:  "a refused tile edit",
 	}
 	var buf bytes.Buffer
 	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
@@ -84,12 +86,25 @@ func TestTilesMode_ReadSurfaceIDsAreUniqueAndBrowserPinned(t *testing.T) {
 		"tile-grid", "tile-inspector", "tile-selected", "tile-13", "tile-grid-art-13",
 		"tile-inspector-art-13", "tile-class", "tile-properties", "tileset-metadata",
 		"tile-page-next", "tile-page-previous",
+		"tile-class-input", "tile-property-name", "tile-property-type", "tile-property-value", "tile-property-submit",
+		"tile-grid-class-13", "tile-property-editor", "tileset-edit-problem",
 	})
 	if !bytes.Contains(buf.Bytes(), []byte("Terrain")) {
 		t.Error("selected tile's authored custom property type was omitted")
 	}
 	if !bytes.Contains(buf.Bytes(), []byte(`role="listitem"`)) {
 		t.Error("the tile grid advertised a list without accessible list items")
+	}
+}
+
+func TestMAPTileInspector_NamesTheWorkingArtworkClass(t *testing.T) {
+	data := Data{MapView: MapView{LayerID: 1}, SelectedTile: &tilelinks.Inspection{GID: 15, EntityType: "Floor", ArtworkClass: "hallway"}}
+	var buf bytes.Buffer
+	if err := tileInspector(data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(`data-testid="tile-artwork-class"`)) || !bytes.Contains(buf.Bytes(), []byte("hallway")) {
+		t.Fatal("MAP's selected Tile concealed the working TSX artwork class")
 	}
 }
 

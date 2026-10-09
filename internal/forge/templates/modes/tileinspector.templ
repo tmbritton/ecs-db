@@ -16,6 +16,9 @@ templ tileInspector(data Data) {
 					<p class="schema__hint" data-testid="tile-empty">This cell is empty in the selected layer. Paint a Tile before linking an entity.</p>
 				} else {
 					<p class="schema__hint" data-testid="tile-template">Painted gid { gidLabel(data.SelectedTile.GID) } creates a referenced { data.SelectedTile.EntityType } on the next ecs-db run.</p>
+					if data.SelectedTile.ArtworkClass != "" {
+						<p class="schema__hint" data-testid="tile-artwork-class">Artwork class/type: { data.SelectedTile.ArtworkClass }</p>
+					}
 					<div data-testid="tile-linked-objects">
 						for _, id := range data.SelectedTile.ObjectIDs {
 							{{ linked := tileLinkedObject(data, id) }}

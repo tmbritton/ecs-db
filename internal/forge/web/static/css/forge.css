@@ -1086,6 +1086,21 @@ option:disabled {
   margin: 0;
 }
 
+.tileset-edit-fields {
+  display: grid;
+  max-width: 380px;
+  grid-template-columns: 120px 1fr;
+  gap: 6px 12px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.tileset-edit-fields button {
+  grid-column: 2;
+  padding: 6px;
+  cursor: pointer;
+}
+
 .schema__editor,
 .schema__empty {
   min-width: 0;

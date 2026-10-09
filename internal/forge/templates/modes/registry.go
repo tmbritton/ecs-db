@@ -77,7 +77,18 @@ var Registry = map[string]Content{
 		Page:    MapPage,
 		Signals: MapSignals,
 	},
-	"tiles":   {Regions: twoPane(TilesListRegion, TilesMainRegion), Page: TwoPanePage("tiles-mode")},
+	"tiles": {
+		Regions: []Region{
+			{"mode-list", TilesListRegion},
+			{"tileset-head", TilesHeadRegion},
+			{"tileset-grid-region", TilesGridRegion},
+			{"tileset-inspector-region", TilesInspectorRegion},
+		},
+		Page: TilesPage,
+		Signals: func(Data) string {
+			return `{"tilePropertyName":"","tilePropertyType":"string","tilePropertyValue":""}`
+		},
+	},
 	"ents":    {Regions: twoPane(EntsListRegion, EntsMainRegion), Page: TwoPanePage("ents-mode")},
 	"schema":  {Regions: twoPane(SchemaListRegion, SchemaMainRegion), Page: TwoPanePage("schema-mode")},
 	"agents":  {Regions: twoPane(AgentsListRegion, AgentsMainRegion), Page: TwoPanePage("agents-mode")},

@@ -82,6 +82,199 @@ func TestTilesMode_PageIdentityIsNotATileGridPage(t *testing.T) {
 	}
 }
 
+func TestTilesClassEdit_UpdatesTheHeldTSXAndBothMapPreviews(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	response, err := http.Post(srv.URL+"/forge/tiles/tile/class?file="+url.QueryEscape(tsx)+"&tile=0&value=water", "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("class edit HTTP %s", response.Status)
+	}
+	page := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsx)+"&tile=0")
+	if !strings.Contains(page, `data-testid="tile-class"`) || !strings.Contains(page, "water") || !strings.Contains(page, `save-footer--dirty`) {
+		t.Error("class edit did not update inspector and dirty footer")
+	}
+	if !strings.Contains(page, `data-testid="tile-grid-class-0"`) {
+		t.Error("class edit did not update the tile grid")
+	}
+	for _, name := range []string{"level1.tmx", "arena.tmx"} {
+		preview, problems, err := s.cfg.MapSession.Preview(filepath.Join(filepath.Dir(tsx), name))
+		if err != nil || len(problems) > 0 || preview.Tilesets[0].Tileset.Tiles[0].Type != "water" {
+			t.Fatalf("%s missed the unsaved class: %v, %v", name, problems, err)
+		}
+	}
+	disk, err := os.ReadFile(tsx)
+	if err != nil || strings.Contains(string(disk), `type="water"`) {
+		t.Error("class edit wrote TSX before Save")
+	}
+}
+
+func TestTilesPropertyEdit_AddsTypedMetadataToImplicitSheetTileWithoutLosingXML(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	original := strings.Replace(mapTSX,
+		`<tile id="0" type="floor"><properties><property name="passable" type="bool" value="true"/></properties></tile>`,
+		`<!-- custom metadata stays -->`, 1)
+	if err := os.WriteFile(tsx, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.TilesetSession.Reload(tsx); err != nil {
+		t.Fatal(err)
+	}
+	uri := srv.URL + "/forge/tiles/tile/property?file=" + url.QueryEscape(tsx) + "&tile=0&name=entityType&type=string&value=River"
+	resp, err := http.Post(uri, "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("property edit: %s", resp.Status)
+	}
+	page := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsx)+"&tile=0")
+	if !strings.Contains(page, `data-testid="tile-properties"`) || !strings.Contains(page, "River") {
+		t.Error("added property was not reflected by the inspector")
+	}
+	if err := s.cfg.TilesetSession.Save(tsx); err != nil {
+		t.Fatal(err)
+	}
+	disk, err := os.ReadFile(tsx)
+	if err != nil || !strings.Contains(string(disk), "custom metadata stays") || !strings.Contains(string(disk), `<tile id="0"`) || !strings.Contains(string(disk), `value="River"`) {
+		t.Fatalf("implicit tile edit lost preserved XML: %s, %v", disk, err)
+	}
+}
+
+func TestTilesPropertyEdit_RefusesInvalidTypeValueOrLegacyPassability(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	for _, tt := range []struct {
+		name, args, reason string
+	}{
+		{"invalid int", "&tile=1&name=hardness&type=int&value=plenty", "whole number"},
+		{"unknown type", "&tile=1&name=flag&type=magic&value=hi", "supported"},
+		{"legacy passable", "&tile=1&name=passable&type=bool&value=true", "MAP"},
+		{"missing name", "&tile=1&type=string&value=hi", "name"},
+		{"unknown ID", "&tile=100&name=kind&type=string&value=hi", "no tile"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Post(srv.URL+"/forge/tiles/tile/property?file="+url.QueryEscape(tsx)+tt.args, "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			problem, _ := s.lastEditProblem()
+			if resp.StatusCode != http.StatusNoContent || !strings.Contains(problem, tt.reason) {
+				t.Errorf("refusal %s = HTTP %s, %q", tt.name, resp.Status, problem)
+			}
+			if dirty, err := s.cfg.TilesetSession.Dirty(); err != nil || len(dirty) > 0 {
+				t.Errorf("refused edit dirtied TSX: %v, %v", dirty, err)
+			}
+		})
+	}
+}
+
+func TestValidateTileProperty_OnlySupportedFiniteTypedValues(t *testing.T) {
+	for _, tt := range []struct {
+		name, property, kind, value string
+		wantErr                     bool
+	}{
+		{"string", "entityType", "string", "River", false},
+		{"int", "height", "int", "-3", false},
+		{"float", "speed", "float", "1.5", false},
+		{"bool", "decorative", "bool", "false", false},
+		{"invalid float", "speed", "float", "NaN", true},
+		{"infinite float", "speed", "float", "+Inf", true},
+		{"invalid bool", "decorative", "bool", "1", true},
+		{"unsupported class", "terrain", "class", "Grass", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateTileProperty(tt.property, tt.kind, tt.value); (err != nil) != tt.wantErr {
+				t.Errorf("validateTileProperty(%q,%q,%q) = %v", tt.property, tt.kind, tt.value, err)
+			}
+		})
+	}
+}
+
+func TestTilesMode_EditingControlsBelongOnlyToWritableTSX(t *testing.T) {
+	srv, _, tsx := tilesetServer(t)
+	writable := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsx)+"&tile=0")
+	for _, want := range []string{`data-testid="tile-class-input"`, `data-testid="tile-property-name"`, `data-testid="tile-property-type"`, `data-testid="tile-property-value"`, `data-testid="tile-property-submit"`} {
+		if !strings.Contains(writable, want) {
+			t.Errorf("writable TSX omitted %s", want)
+		}
+	}
+	root := filepath.Dir(tsx)
+	tsj := filepath.Join(root, "legacy.tsj")
+	if err := os.WriteFile(tsj, []byte(`{"name":"legacy","tilewidth":16,"tileheight":16,"tilecount":1,"columns":1,"image":"fixture.png","imagewidth":16,"imageheight":16}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "legacy.tmx"), []byte(strings.ReplaceAll(mapBody("legacy", "1,1,\n1,1"), "fixture.tsx", "legacy.tsj")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readonly := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsj)+"&tile=0")
+	if strings.Contains(readonly, `data-testid="tile-class-input"`) || strings.Contains(readonly, `data-testid="tile-property-submit"`) {
+		t.Error("read-only TSJ rendered write controls")
+	}
+}
+
+func TestTilesClassEdit_NoOpAndUnheldPathCannotWrite(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	for _, tt := range []struct {
+		name, path, value string
+		wantProblem       bool
+	}{
+		{"existing class unchanged", tsx, "floor", false},
+		{"not in the session", filepath.Join(filepath.Dir(tsx), "unlisted.tsx"), "water", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.wantProblem {
+				if err := os.WriteFile(tt.path, []byte(mapTSX), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resp, err := http.Post(srv.URL+"/forge/tiles/tile/class?file="+url.QueryEscape(tt.path)+"&tile=0&value="+url.QueryEscape(tt.value), "application/x-www-form-urlencoded", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			problem, _ := s.lastEditProblem()
+			if tt.wantProblem != (problem != "") {
+				t.Errorf("edit refusal = %q, want problem %v", problem, tt.wantProblem)
+			}
+			if dirty, err := s.cfg.TilesetSession.Dirty(); err != nil || len(dirty) > 0 {
+				t.Errorf("no-op/refused class edit dirtied TSX: %v, %v", dirty, err)
+			}
+		})
+	}
+}
+
+func TestTilesPropertyEdit_DoesNotInventAnAbsentCollectionTile(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	collection := `<?xml version="1.0"?><tileset name="sparse" tilewidth="16" tileheight="16" tilecount="2" columns="0"><tile id="0"><image source="fixture.png" width="16" height="16"/></tile><tile id="21"><image source="fixture.png" width="16" height="16"/></tile></tileset>`
+	if err := os.WriteFile(tsx, []byte(collection), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.TilesetSession.Reload(tsx); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{
+		"/forge/tiles/tile/class?file=" + url.QueryEscape(tsx) + "&tile=10&value=unknown",
+		"/forge/tiles/tile/property?file=" + url.QueryEscape(tsx) + "&tile=10&name=entityType&type=string&value=Wall",
+	} {
+		resp, err := http.Post(srv.URL+route, "application/x-www-form-urlencoded", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		problem, _ := s.lastEditProblem()
+		if !strings.Contains(problem, "no tile 10") {
+			t.Errorf("an absent collection ID got no refusal from %s: %q", route, problem)
+		}
+	}
+	if dirty, err := s.cfg.TilesetSession.Dirty(); err != nil || len(dirty) != 0 {
+		t.Fatalf("refused collection edit mutated the session: %v, %v", dirty, err)
+	}
+}
+
 func TestTilesMode_DirtySharedFileConflictAndReloadFollowSelectedFile(t *testing.T) {
 	srv, s, tsx := tilesetServer(t)
 	if err := s.cfg.TilesetSession.Edit(tsx, func(d *tiled.TilesetDocument) error { return d.SetTileClass(0, "changed") }); err != nil {

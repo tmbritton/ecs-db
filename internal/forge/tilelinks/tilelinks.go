@@ -49,6 +49,7 @@ type Inspection struct {
 	LayerID, X, Y int
 	GID           uint32
 	EntityType    string
+	ArtworkClass  string
 	Empty         bool
 	ObjectIDs     []int
 }
@@ -83,6 +84,7 @@ func Inspect(m *tiled.Map, layerID int, at Cell) (Inspection, error) {
 		return Inspection{}, fmt.Errorf("tile layer %d cell (%d,%d) cannot resolve its tileset", layerID, at.X, at.Y)
 	}
 	result.EntityType = ref.Tileset.Tiles[local].Properties.Get("entityType")
+	result.ArtworkClass = ref.Tileset.Tiles[local].Type
 	if result.EntityType == "" {
 		result.EntityType = ref.Tileset.Properties.Get("entityType")
 	}

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
@@ -64,4 +65,25 @@ func tilesetPropertyType(p tilesurface.Property) string {
 		return p.Type + "/" + p.PropertyType
 	}
 	return p.Type
+}
+
+func tilesetWritable(data Data) bool {
+	for _, entry := range data.Tilesets {
+		if entry.Path == data.SelectedTileset {
+			return entry.Writable
+		}
+	}
+	return false
+}
+
+func tilesetTileClassAction(path string, id uint32) string {
+	return valueAction("/forge/tiles/tile/class", "value", "file", path, "tile", gidLabel(id))
+}
+
+func tilesetTilePropertyAction(path string, id uint32) string {
+	base := action("/forge/tiles/tile/property", "file", path, "tile", gidLabel(id))
+	inner := strings.TrimSuffix(strings.TrimPrefix(base, "@post('"), "')")
+	return "@post('" + inner + "&name=' + encodeURIComponent($tilePropertyName) + " +
+		"'&type=' + encodeURIComponent($tilePropertyType) + " +
+		"'&value=' + encodeURIComponent($tilePropertyValue))"
 }

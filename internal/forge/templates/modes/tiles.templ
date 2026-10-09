@@ -34,8 +34,19 @@ templ TilesListRegion(data Data) {
 	</nav>
 }
 
-templ TilesMainRegion(data Data) {
-	<div id="mode-main" class="schema__main" data-testid="tileset-panel">
+templ TilesPage(rendered []string) {
+	<div class="schema" data-testid="tiles-mode">
+		@templ.Raw(rendered[0])
+		<div class="schema__main" data-testid="tileset-panel">
+			for _, html := range rendered[1:] {
+				@templ.Raw(html)
+			}
+		</div>
+	</div>
+}
+
+templ TilesHeadRegion(data Data) {
+	<div id="tileset-head">
 		if data.SelectedTileset == "" {
 			<p class="schema__hint">Select an external tileset to inspect it.</p>
 		} else {
@@ -84,13 +95,27 @@ templ TilesMainRegion(data Data) {
 						}
 					</div>
 				}
-				@tilesetGrid(data)
-				@tilesetInspector(data)
 			}
 			<p class="schema__hint">Saved TSX metadata takes effect on the next ecs-db run.</p>
-			if data.Problem != "" {
-				<p class="badge-problem" data-testid="tileset-edit-problem">{ data.Problem }</p>
-			}
+		}
+	</div>
+}
+
+templ TilesGridRegion(data Data) {
+	<div id="tileset-grid-region">
+		if data.Tileset != nil {
+			@tilesetGrid(data)
+		}
+	</div>
+}
+
+templ TilesInspectorRegion(data Data) {
+	<div id="tileset-inspector-region">
+		if data.Tileset != nil {
+			@tilesetInspector(data)
+		}
+		if data.Problem != "" {
+			<p class="badge-problem" data-testid="tileset-edit-problem">{ data.Problem }</p>
 		}
 	</div>
 }
@@ -115,6 +140,9 @@ templ tilesetGrid(data Data) {
 					>
 						@tilesetArt(tile, 48, "tile-grid-art-")
 						<span class="mono">{ gidLabel(tile.ID) }</span>
+						if tile.Class != "" {
+							<span class="mono" data-testid={ "tile-grid-class-" + gidLabel(tile.ID) }>{ tile.Class }</span>
+						}
 					</a>
 					</div>
 				}
@@ -158,6 +186,19 @@ templ tilesetInspector(data Data) {
 						class/type: { tile.Class }
 					}
 				</p>
+				if tilesetWritable(data) {
+					<div class="tileset-edit-fields">
+						<label for="tile-class-input">Tile class/type</label>
+						<input
+							id="tile-class-input"
+							class="schema__input"
+							type="text"
+							value={ tile.Class }
+							data-testid="tile-class-input"
+							data-on:change={ tilesetTileClassAction(data.SelectedTileset, tile.ID) }
+						/>
+					</div>
+				}
 				if !tile.Explicit {
 					<p class="schema__hint">Implicit sheet tile; no tile-level metadata authored.</p>
 				}
@@ -169,6 +210,22 @@ templ tilesetInspector(data Data) {
 					</dl>
 				} else {
 					<p class="schema__hint" data-testid="tile-no-properties">No tile-level properties authored.</p>
+				}
+				if tilesetWritable(data) {
+					<div class="tileset-edit-fields" data-testid="tile-property-editor">
+						<label for="tile-property-name">Property name</label>
+						<input id="tile-property-name" type="text" class="schema__input" data-testid="tile-property-name" data-bind="tilePropertyName"/>
+						<label for="tile-property-type">Property type</label>
+						<select id="tile-property-type" class="schema__input" data-testid="tile-property-type" data-bind="tilePropertyType">
+							<option value="string" selected>string</option>
+							<option value="int">int</option>
+							<option value="float">float</option>
+							<option value="bool">bool</option>
+						</select>
+						<label for="tile-property-value">Property value</label>
+						<input id="tile-property-value" type="text" class="schema__input" data-testid="tile-property-value" data-bind="tilePropertyValue"/>
+						<button type="button" data-testid="tile-property-submit" data-on:click={ tilesetTilePropertyAction(data.SelectedTileset, tile.ID) }>Set property</button>
+					</div>
 				}
 			</div>
 		}
