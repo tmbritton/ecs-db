@@ -1045,6 +1045,10 @@ option:disabled {
   background: var(--active);
 }
 
+.tileset-tile--invalid {
+  border-color: var(--red);
+}
+
 .tileset-art {
   display: inline-block;
   flex: none;

@@ -24,6 +24,7 @@ type Tile struct {
 	Image      string // empty if no project-contained image can be served
 	ImageURL   string // filled by the HTTP adapter; never by this reading model
 	MissingArt bool
+	ArtProblem string
 	SX, SY     int
 	SW, SH     int
 	SheetW     int
@@ -119,8 +120,12 @@ func Build(set *tiled.Tileset, selected, page string, available func(string) boo
 		if v.Collection {
 			image := set.Tiles[id].Image
 			tile.SW, tile.SH = image.Width, image.Height
-			if imageOK(image.Path) {
+			if image.Width <= 0 || image.Height <= 0 {
+				tile.ArtProblem = fmt.Sprintf("tile %d image %q has no declared dimensions for a reliable crop", id, image.Source)
+			} else if imageOK(image.Path) {
 				tile.Image = image.Path
+			} else {
+				tile.ArtProblem = fmt.Sprintf("tile %d image %q is unavailable", id, image.Source)
 			}
 		} else {
 			x, y, w, h, ok := set.SourceRect(id)
@@ -128,8 +133,16 @@ func Build(set *tiled.Tileset, selected, page string, available func(string) boo
 				tile.SX, tile.SY, tile.SW, tile.SH = x, y, w, h
 			}
 			tile.SheetW, tile.SheetH = set.Image.Width, set.Image.Height
-			if ok && imageOK(set.Image.Path) {
+			unknownDimensions := set.Image.Width <= 0 || set.Image.Height <= 0
+			outside := ok && (x+w > set.Image.Width || y+h > set.Image.Height)
+			if unknownDimensions {
+				tile.ArtProblem = fmt.Sprintf("tileset image %q has no declared dimensions for a reliable tile crop", set.Image.Source)
+			} else if outside {
+				tile.ArtProblem = fmt.Sprintf("tile %d source rectangle is outside the declared sheet image %q", id, set.Image.Source)
+			} else if ok && imageOK(set.Image.Path) {
 				tile.Image = set.Image.Path
+			} else {
+				tile.ArtProblem = fmt.Sprintf("tileset image %q is unavailable for tile %d", set.Image.Source, id)
 			}
 		}
 		tile.MissingArt = tile.Image == ""

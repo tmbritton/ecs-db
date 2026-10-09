@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -167,6 +168,12 @@ func TestTilesPropertyEdit_RefusesInvalidTypeValueOrLegacyPassability(t *testing
 			}
 			if dirty, err := s.cfg.TilesetSession.Dirty(); err != nil || len(dirty) > 0 {
 				t.Errorf("refused edit dirtied TSX: %v, %v", dirty, err)
+			}
+			if tt.name == "invalid int" {
+				_, field := s.lastEditProblem()
+				if field != "tile-property" {
+					t.Errorf("typed-property refusal attributed to %q, want its input", field)
+				}
 			}
 		})
 	}
@@ -445,5 +452,42 @@ func TestTilesMode_ExternallyChangedTSJImageCanBeReadWithoutVisitingMAP(t *testi
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("new TSJ image is not allow-listed: %s", resp.Status)
+	}
+}
+
+func TestTilesMode_ValidatesBadTileMetadataWithoutBlockingSave(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	bad := `<?xml version="1.0"?><tileset name="troubled" tilewidth="16" tileheight="16" tilecount="1" columns="1"><image source="missing.png" width="16" height="16"/><tile id="0" type="broken"><properties><property name="entityType" value="UnknownEnemy"/><property name="passable" type="bool" value="true"/><property name="weight" type="int" value="lots"/></properties><objectgroup id="1"/><animation><frame tileid="0" duration="80"/></animation></tile><wangsets/><terraintypes/></tileset>`
+	if err := os.WriteFile(tsx, []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.cfg.TilesetSession.Reload(tsx); err != nil {
+		t.Fatal(err)
+	}
+	body := mapPage(t, srv, "/forge/tiles?file="+url.QueryEscape(tsx)+"&tile=0")
+	for _, want := range []string{`data-testid="tileset-validation"`, `data-testid="tile-validation-0"`, `data-testid="tile-grid-invalid-0"`, "UnknownEnemy", "passable", "whole number", "missing.png", `data-testid="tiled-only-metadata"`, "animation", "collision objects", "wangsets", "terrains"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("TILES validation omitted %q", want)
+		}
+	}
+	if !strings.Contains(body, `data-testid="save-footer"`) || strings.Contains(body, `data-blocked="true"`) {
+		t.Error("repairable TSX metadata blocked Save")
+	}
+}
+
+func TestTilesMode_EditRefusalDoesNotAttachToADifferentTile(t *testing.T) {
+	srv, s, tsx := tilesetServer(t)
+	resp, err := http.Post(srv.URL+"/forge/tiles/tile/property?file="+url.QueryEscape(tsx)+"&tile=0&name=height&type=int&value=many", "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	request := func(id int) *http.Request {
+		return httptest.NewRequest(http.MethodGet, "/forge/tiles?file="+url.QueryEscape(tsx)+"&tile="+strconv.Itoa(id), nil)
+	}
+	onFirst := s.modeData(request(0))
+	onSecond := s.modeData(request(1))
+	if onFirst.ProblemField != "tile-property" || !strings.Contains(onFirst.Problem, "whole number") || onSecond.Problem != "" || onSecond.ProblemField != "" {
+		t.Fatalf("refusal leaked to another tile: first %q/%q, second %q/%q", onFirst.Problem, onFirst.ProblemField, onSecond.Problem, onSecond.ProblemField)
 	}
 }

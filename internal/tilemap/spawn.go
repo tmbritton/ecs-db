@@ -968,6 +968,55 @@ func propertyValue(propType, raw string) (any, error) {
 	}
 }
 
+// ValidateTileTemplateField checks one Component.field property with the same
+// schema lookup and value parser the map importer uses for referenced entities.
+// The Tiled property's declared type is not authoritative: the schema column
+// is. Map-position-dependent fields such as OccupiedCells are checked again
+// when the tile is actually placed by the importer.
+func ValidateTileTemplateField(s *schema.DatabaseSchema, name, raw string) error {
+	if s == nil {
+		return nil // no open schema to validate against
+	}
+	comp, field, ok := strings.Cut(name, ".")
+	if !ok {
+		return fmt.Errorf("property %q names no component field", name)
+	}
+	declared, canonical := schema.ComponentByName(s, comp)
+	if canonical == "" {
+		return fmt.Errorf("property %q names component %q, which the schema does not declare", name, comp)
+	}
+	if strings.EqualFold(canonical, "Position") {
+		return fmt.Errorf("property %q sets Position, which comes from the Tile's placed cell", name)
+	}
+	kind := declared.Type
+	if layout := schema.StorageLayout(declared.Type); layout != schema.LayoutColumns {
+		column := schema.LayoutColumnName(layout)
+		if !strings.EqualFold(field, column) {
+			return fmt.Errorf("property %q names %q, but component %q holds its value in %q", name, field, canonical, column)
+		}
+	} else {
+		prop, canonicalField := schema.PropertyByName(declared.Properties, field)
+		if canonicalField == "" {
+			return fmt.Errorf("property %q names %q, which component %q does not declare", name, field, canonical)
+		}
+		kind = prop.Type
+	}
+	value, err := propertyValue(kind, raw)
+	if err != nil {
+		return fmt.Errorf("property %q: %w", name, err)
+	}
+	if (strings.EqualFold(canonical, "Passability") || strings.EqualFold(canonical, "Visibility")) && strings.EqualFold(field, "kind") {
+		label, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("property %q must be a taxonomy label", name)
+		}
+		if _, err := s.AllowsInteraction(canonical, label, nil); err != nil {
+			return fmt.Errorf("property %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // describeWarning is describeRefusal for something that was created anyway.
 func describeWarning(obj tiled.Object, m *tiled.Map, warning string) string {
 	return describeRefusal(obj, m, errors.New(warning))

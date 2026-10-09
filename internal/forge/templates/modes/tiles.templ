@@ -77,7 +77,25 @@ templ TilesHeadRegion(data Data) {
 			}
 			if data.Tileset != nil {
 				<p data-testid="tileset-summary">{ data.Tileset.Name } · { itoa(data.Tileset.TileCount) } tiles</p>
+				if data.TileValidation.Errors > 0 || data.TileValidation.Warnings > 0 {
+					<div data-testid="tileset-validation" role="status" class="badge-problem">
+						{ itoa(data.TileValidation.Errors) } errors · { itoa(data.TileValidation.Warnings) } warnings on the shown page
+						for _, finding := range data.TileValidation.Tileset {
+							<p>{ finding.Message }</p>
+						}
+					</div>
+				}
+				if len(data.TiledOnly) > 0 {
+					<div data-testid="tiled-only-metadata" class="schema__hint">
+						Tiled metadata is preserved on Save but not simulated:
+						for _, name := range data.TiledOnly {
+							<span>{ name } · </span>
+						}
+						Use MAP entities for movement/sight and SPRT for sprite animation.
+					</div>
+				}
 				<p class="schema__hint">Movement and sight come from referenced entities in MAP; artwork metadata alone does not set them.</p>
+				<p class="schema__hint" data-testid="tiled-feature-boundary">Tiled collision polygons, tile animations, wangsets and terrains are not game mechanics here. Use MAP occupants for interactions and SPRT for sprite animation; lossless TSX Save preserves the authored XML.</p>
 				<div class="tileset-readout mono" data-testid="tileset-metadata">
 					<span>class/type: { data.Tileset.Class }</span>
 					<span>tile: { itoa(data.Tileset.TileWidth) }×{ itoa(data.Tileset.TileHeight) } px</span>
@@ -132,7 +150,7 @@ templ tilesetGrid(data Data) {
 					<div role="listitem">
 					<a
 						href={ URL(tilesetTileHref(data.SelectedTileset, tile.ID, data.TileView.Page)) }
-						class={ "tileset-tile", kv("tileset-tile--selected", data.TileView.Selected != nil && data.TileView.Selected.ID == tile.ID) }
+						class={ "tileset-tile", kv("tileset-tile--selected", data.TileView.Selected != nil && data.TileView.Selected.ID == tile.ID), kv("tileset-tile--invalid", len(data.TileValidation.Tiles[tile.ID]) > 0) }
 						data-testid={ "tile-" + gidLabel(tile.ID) }
 						if data.TileView.Selected != nil && data.TileView.Selected.ID == tile.ID {
 							aria-current="true"
@@ -142,6 +160,9 @@ templ tilesetGrid(data Data) {
 						<span class="mono">{ gidLabel(tile.ID) }</span>
 						if tile.Class != "" {
 							<span class="mono" data-testid={ "tile-grid-class-" + gidLabel(tile.ID) }>{ tile.Class }</span>
+						}
+						if len(data.TileValidation.Tiles[tile.ID]) > 0 {
+							<span class="badge-problem" data-testid={ "tile-grid-invalid-" + gidLabel(tile.ID) } title="tile metadata needs attention">!</span>
 						}
 					</a>
 					</div>
@@ -176,8 +197,15 @@ templ tilesetInspector(data Data) {
 			<p class="badge-problem" data-testid="tile-problem">{ data.TileView.Problem }</p>
 		} else if data.TileView.Selected != nil {
 			{{ tile := *data.TileView.Selected }}
-			<div data-testid="tile-selected">
+				<div data-testid="tile-selected">
 				<h3>Tile { gidLabel(tile.ID) }</h3>
+				if len(data.TileValidation.Tiles[tile.ID]) > 0 {
+					<ul data-testid={ "tile-validation-" + gidLabel(tile.ID) } class="badge-problem" role="alert">
+						for _, finding := range data.TileValidation.Tiles[tile.ID] {
+							<li>{ finding.Message }</li>
+						}
+					</ul>
+				}
 				<div class="tileset-inspector__art">@tilesetArt(tile, 192, "tile-inspector-art-")</div>
 				<p class="mono" data-testid="tile-class">
 					if tile.Class == "" {
@@ -197,6 +225,9 @@ templ tilesetInspector(data Data) {
 							data-testid="tile-class-input"
 							data-on:change={ tilesetTileClassAction(data.SelectedTileset, tile.ID) }
 						/>
+						if data.ProblemField == "tile-class" {
+							<p class="badge-problem" role="alert" data-testid="tile-class-problem">{ data.Problem }</p>
+						}
 					</div>
 				}
 				if !tile.Explicit {
@@ -225,6 +256,9 @@ templ tilesetInspector(data Data) {
 						<label for="tile-property-value">Property value</label>
 						<input id="tile-property-value" type="text" class="schema__input" data-testid="tile-property-value" data-bind="tilePropertyValue"/>
 						<button type="button" data-testid="tile-property-submit" data-on:click={ tilesetTilePropertyAction(data.SelectedTileset, tile.ID) }>Set property</button>
+						if data.ProblemField == "tile-property" {
+							<p class="badge-problem" role="alert" data-testid="tile-property-problem">{ data.Problem }</p>
+						}
 					</div>
 				}
 			</div>

@@ -1,6 +1,7 @@
 package tiled_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -53,6 +54,74 @@ func TestParseTilesetDocument_RoundTripsUnknownTSXAndCollectionExactly(t *testin
 				t.Errorf("writer has no usable reading model: %+v, %v", set, err)
 			}
 		})
+	}
+}
+
+func TestTilesetDocument_MetadataFeaturesDistinguishAuthoredNodesFromComments(t *testing.T) {
+	for _, tt := range []struct {
+		name, source string
+		editID       uint32
+		want         []string
+	}{
+		{"rich authored XML", richTSX, 1, []string{"tile 1 collision objects", "tile 1 animation", "wangsets", "terrains"}},
+		{"comment containing XML", strings.Replace(collectionTSXDocument, "</tileset>", "<!-- <animation/><objectgroup/> -->\n</tileset>", 1), 3, nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			d, err := tiled.ParseTilesetDocument([]byte(tt.source), "tiles.tsx", ".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, mutate := range []bool{false, true} {
+				if mutate {
+					if err := d.SetTileClass(tt.editID, "updated"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				got := d.MetadataFeatures()
+				if len(got) != len(tt.want) {
+					t.Fatalf("metadata features after mutation %v = %v, want %v", mutate, got, tt.want)
+				}
+				for i, feature := range got {
+					if feature != tt.want[i] {
+						t.Errorf("metadata feature %d = %q, want %q", i, feature, tt.want[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTilesetDocument_ClassAmbiguitiesNameOnlyAuthoredConflictingTileIDs(t *testing.T) {
+	src := `<tileset name="sheet" tilewidth="16" tileheight="16" tilecount="2" columns="2"><image source="sheet.png" width="32" height="16"/><!-- <tile id="1" type="not-real" class="not-real"/> --><tile id="0" type="wall" class="door"/></tileset>`
+	doc, err := tiled.ParseTilesetDocument([]byte(src), "sheet.tsx", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := doc.ClassAmbiguities()
+	if len(ids) != 1 || ids[0] != 0 {
+		t.Fatalf("ambiguous class/type IDs = %v, want [0]", ids)
+	}
+}
+
+func TestTilesetDocument_MetadataFeaturesBoundTheHeaderAndReturnDetachedLists(t *testing.T) {
+	var src strings.Builder
+	src.WriteString(`<tileset name="many" tilewidth="8" tileheight="8" tilecount="64" columns="8"><image source="sheet.png" width="64" height="64"/>`)
+	for id := 0; id < 64; id++ {
+		fmt.Fprintf(&src, `<tile id="%d"><animation><frame tileid="0" duration="80"/></animation></tile>`, id)
+	}
+	src.WriteString(`<wangsets/><terraintypes/></tileset>`)
+	doc, err := tiled.ParseTilesetDocument([]byte(src.String()), "many.tsx", ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	features := doc.MetadataFeatures()
+	if len(features) > 19 || !strings.Contains(strings.Join(features, " "), "more tile metadata") ||
+		!strings.Contains(strings.Join(features, " "), "wangsets") || !strings.Contains(strings.Join(features, " "), "terrains") {
+		t.Fatalf("unbounded or incomplete Tiled-only metadata header: %v", features)
+	}
+	features[0] = "caller changed this"
+	if next := doc.MetadataFeatures(); next[0] == features[0] {
+		t.Error("a caller mutated the cached metadata scan")
 	}
 }
 

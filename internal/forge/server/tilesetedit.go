@@ -13,6 +13,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesetvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/tiled"
 )
@@ -65,6 +66,19 @@ func (s *Server) addTilesetData(data *modes.Data, r *http.Request, slug string) 
 				if selected := data.TileView.Selected; selected != nil && selected.Image != "" {
 					selected.ImageURL = assetURL(selected.Image)
 				}
+				known := make(map[string]bool, len(data.Schema.EntityTypes))
+				for name := range data.Schema.EntityTypes {
+					known[name] = true
+				}
+				var ambiguous []uint32
+				if s.holdsTileset(data.SelectedTileset) {
+					_ = sess.Read(data.SelectedTileset, func(doc *tiled.TilesetDocument) error {
+						data.TiledOnly = doc.MetadataFeatures()
+						ambiguous = doc.ClassAmbiguities()
+						return nil
+					})
+				}
+				data.TileValidation = tilesetvalidation.Check(data.Tileset, data.TileView, known, ambiguous, &data.Schema)
 			}
 		}
 	}
@@ -271,6 +285,17 @@ func (s *Server) tilesetRestore(w http.ResponseWriter, r *http.Request, action f
 
 func (s *Server) refuseTilesetEdit(w http.ResponseWriter, r *http.Request, err error) {
 	slog.ErrorContext(r.Context(), "tileset edit", "err", err)
-	s.setEditProblem(err.Error())
+	field := ""
+	switch r.URL.Path {
+	case "/forge/tiles/tile/class":
+		field = "tile-class"
+	case "/forge/tiles/tile/property":
+		field = "tile-property"
+	}
+	if field == "" {
+		s.setEditProblem(err.Error())
+	} else {
+		s.setTilesetProblemOn(field, r.URL.Query().Get("file"), r.URL.Query().Get("tile"), err.Error())
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

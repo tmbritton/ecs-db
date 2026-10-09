@@ -509,6 +509,20 @@ func (s *Server) setEditProblemOn(field, msg string) {
 	defer s.mu.Unlock()
 	s.editProblem = msg
 	s.editProblemField = field
+	s.editProblemFile, s.editProblemTile = "", ""
+}
+
+func (s *Server) setTilesetProblemOn(field, file, tile, msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.editProblem, s.editProblemField = msg, field
+	s.editProblemFile, s.editProblemTile = file, tile
+}
+
+func (s *Server) lastEditProblemTarget() (msg, field, file, tile string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.editProblem, s.editProblemField, s.editProblemFile, s.editProblemTile
 }
 
 // lastEditProblem is why the last edit was refused and which control it was

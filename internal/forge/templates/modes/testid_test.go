@@ -10,6 +10,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/mode"
 	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesetvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
 	"github.com/tmbritton/ecs-db/internal/tiled"
@@ -106,6 +107,34 @@ func TestMAPTileInspector_NamesTheWorkingArtworkClass(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte(`data-testid="tile-artwork-class"`)) || !bytes.Contains(buf.Bytes(), []byte("hallway")) {
 		t.Fatal("MAP's selected Tile concealed the working TSX artwork class")
 	}
+}
+
+func TestTilesMode_ValidationTestIDsArePinnedInBothRegions(t *testing.T) {
+	tile := tilesurface.Tile{ID: 13, MissingArt: true}
+	data := Data{
+		Tilesets: []tilesets.Entry{{Path: "tiles.tsx", Writable: true}}, SelectedTileset: "tiles.tsx",
+		Tileset:  &tiled.Tileset{Name: "sheet", TileCount: 1, TileWidth: 16, TileHeight: 16},
+		TileView: tilesurface.View{Tiles: []tilesurface.Tile{tile}, Selected: &tile, TileCount: 1},
+		TileValidation: tilesetvalidation.Report{
+			Errors: 2, Tileset: []tilesetvalidation.Finding{{Message: "sheet missing"}},
+			Tiles: map[uint32][]tilesetvalidation.Finding{13: {{Message: "tile missing"}}},
+		},
+		TiledOnly: []string{"tile 13 animation"}, Problem: "invalid value", ProblemField: "tile-property",
+	}
+	var buf bytes.Buffer
+	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{
+		"tileset-validation", "tiled-only-metadata", "tiled-feature-boundary", "tile-grid-invalid-13", "tile-validation-13",
+		"tile-property-problem", "tileset-edit-problem",
+	})
+	data.ProblemField = "tile-class"
+	buf.Reset()
+	if err := Render("tiles", data).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	assertModeTestIDs(t, buf.String(), []string{"tile-class-problem"})
 }
 
 // 12-inline-validation.spec.js selects on these, and unlike the ids above they

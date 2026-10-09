@@ -136,6 +136,7 @@ test("invalid typed input explains the refusal and leaves the TSX clean", async 
     await byTestId(page, "tile-property-submit").click();
     expect((await sent).status()).toBe(204);
     await expect(byTestId(page, "tileset-edit-problem")).toContainText("whole number");
+    await expect(byTestId(page, "tile-property-problem")).toContainText("whole number");
     await expect(byTestId(page, "save-footer")).not.toHaveClass(/save-footer--dirty/);
     await expect(byTestId(page, "tile-properties")).toHaveCount(0);
   } finally {

@@ -3,6 +3,7 @@ package tiled
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -17,6 +18,9 @@ type TilesetDocument struct {
 	cached    *Tileset
 	cachedErr error
 	valid     bool
+	metaValid bool
+	metadata  []string
+	ambiguous []uint32
 }
 
 // ParseTilesetDocument accepts external XML tilesets only. JSON tilesets can
@@ -57,7 +61,93 @@ func (d *TilesetDocument) Tileset() (*Tileset, error) {
 	return d.cached, d.cachedErr
 }
 
-func (d *TilesetDocument) invalidate() { d.valid = false }
+// MetadataFeatures names authored Tiled-only XML which this game's renderer,
+// traversal and sprite animator do not consume. The writer retains it, but the
+// editor must not imply that saving it changes gameplay. The parsed tree keeps
+// comments out of the answer and survives surgical tile edits.
+func (d *TilesetDocument) MetadataFeatures() []string {
+	d.metadataSnapshot()
+	return append([]string(nil), d.metadata...)
+}
+
+// ClassAmbiguities returns IDs whose XML declares both spellings. The reading
+// model chooses one to display, but an edit must not silently discard the
+// other: SetTileClass refuses those tiles until the ambiguity is fixed.
+func (d *TilesetDocument) ClassAmbiguities() []uint32 {
+	d.metadataSnapshot()
+	return append([]uint32(nil), d.ambiguous...)
+}
+
+// metadataSnapshot scans the lossless tree once per working document version.
+// The number of authored tiles can be large, but the header never holds more
+// than 16 per-tile labels plus a summary and the two tileset-wide features.
+func (d *TilesetDocument) metadataSnapshot() {
+	if d.metaValid {
+		return
+	}
+	d.metadata, d.ambiguous = nil, nil
+	var extra int
+	var wang, terrains bool
+	add := func(label string) {
+		if len(d.metadata) < 16 {
+			d.metadata = append(d.metadata, label)
+		} else {
+			extra++
+		}
+	}
+	for _, kid := range d.tree.root.kids {
+		if kid.el == nil {
+			continue
+		}
+		if kid.el.name == "wangsets" {
+			wang = true
+		}
+		if kid.el.name == "terraintypes" {
+			terrains = true
+		}
+		if kid.el.name != "tile" {
+			continue
+		}
+		tile := kid.el
+		id := tile.attr("id")
+		hasType, hasClass := false, false
+		for _, attr := range tile.attrs {
+			hasType = hasType || attr.name == "type"
+			hasClass = hasClass || attr.name == "class"
+		}
+		if hasType && hasClass {
+			if parsed, err := strconv.ParseUint(id, 10, 32); err == nil {
+				d.ambiguous = append(d.ambiguous, uint32(parsed))
+			}
+		}
+		var collision, animation bool
+		for _, child := range tile.kids {
+			if child.el != nil {
+				collision = collision || child.el.name == "objectgroup"
+				animation = animation || child.el.name == "animation"
+			}
+		}
+		if collision {
+			add("tile " + id + " collision objects")
+		}
+		if animation {
+			add("tile " + id + " animation")
+		}
+	}
+	if extra > 0 {
+		d.metadata = append(d.metadata, fmt.Sprintf("%d more tile metadata declarations preserved", extra))
+	}
+	if wang {
+		d.metadata = append(d.metadata, "wangsets")
+	}
+	if terrains {
+		d.metadata = append(d.metadata, "terrains")
+	}
+	sort.Slice(d.ambiguous, func(i, j int) bool { return d.ambiguous[i] < d.ambiguous[j] })
+	d.metaValid = true
+}
+
+func (d *TilesetDocument) invalidate() { d.valid, d.metaValid = false, false }
 
 // SetTileProperty edits an explicitly authored tile without reconstructing
 // its animation, collision shapes or unknown children from the reading model.

@@ -1,6 +1,7 @@
 package tilesurface
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tmbritton/ecs-db/internal/tiled"
@@ -94,5 +95,57 @@ func TestBuild_SheetBeyondUint32IDsReportsProblemRatherThanWrapping(t *testing.T
 	v := Build(set, "", "", func(string) bool { return true })
 	if v.Problem == "" || len(v.Tiles) != 0 {
 		t.Fatalf("unaddressable IDs were offered as wrapped local tiles: %d tiles, %q", len(v.Tiles), v.Problem)
+	}
+}
+
+func TestBuild_RectangleBeyondDeclaredSheetUsesAnUnavailableArtFallback(t *testing.T) {
+	set := &tiled.Tileset{
+		TileCount: 2, Columns: 2, TileWidth: 16, TileHeight: 16,
+		Image: tiled.Image{Source: "sheet.png", Path: "sheet.png", Width: 16, Height: 16},
+	}
+	v := Build(set, "1", "", func(string) bool { return true })
+	if v.Tiles[0].MissingArt || !v.Tiles[1].MissingArt || v.Tiles[1].ImageURL != "" || !strings.Contains(v.Tiles[1].ArtProblem, "outside") {
+		t.Fatalf("impossible rectangle still drew a tile: %+v", v.Tiles)
+	}
+}
+
+func TestBuild_SheetWithoutDeclaredDimensionsCannotClaimAPreciseCrop(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		width, height int
+	}{
+		{"missing width", 0, 16},
+		{"missing height", 16, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			set := &tiled.Tileset{
+				TileCount: 1, Columns: 1, TileWidth: 16, TileHeight: 16,
+				Image: tiled.Image{Source: "sheet.png", Path: "sheet.png", Width: tt.width, Height: tt.height},
+			}
+			view := Build(set, "0", "", func(string) bool { return true })
+			if view.Selected == nil || !view.Selected.MissingArt || !strings.Contains(view.Selected.ArtProblem, "dimensions") {
+				t.Fatalf("undeclared dimensions were drawn as trustworthy art: %+v", view.Selected)
+			}
+		})
+	}
+}
+
+func TestBuild_CollectionImageWithoutDimensionsHasNoUsableArt(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		width, height int
+	}{
+		{"width missing", 0, 16},
+		{"height missing", 16, 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			set := &tiled.Tileset{TileCount: 1, Tiles: map[uint32]tiled.TilesetTile{
+				7: {ID: 7, Image: tiled.Image{Source: "art.png", Path: "art.png", Width: tt.width, Height: tt.height}},
+			}}
+			view := Build(set, "7", "", func(string) bool { return true })
+			if view.Selected == nil || !view.Selected.MissingArt || !strings.Contains(view.Selected.ArtProblem, "dimensions") {
+				t.Fatalf("dimensionless collection tile was drawn as valid art: %+v", view.Selected)
+			}
+		})
 	}
 }

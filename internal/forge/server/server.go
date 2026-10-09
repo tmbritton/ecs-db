@@ -154,6 +154,10 @@ type Server struct {
 	// by a full page load, so a stale explanation never outlives the state it
 	// described or leaks into a tab that did nothing wrong.
 	editProblem string
+	// File and tile scope inline TILES refusals so a different selected tile
+	// never inherits the previous tile's validation message.
+	editProblemFile string
+	editProblemTile string
 	// editProblemField is the control that refusal was about, so a panel can
 	// report it where the mistake was made. Empty for a refusal about no one
 	// control, which is most of them.
@@ -501,7 +505,17 @@ func (s *Server) modeData(r *http.Request) modes.Data {
 	// Both from one acquisition. They are written together for a reason — a
 	// field left over from an earlier refusal would make the next one point at
 	// the wrong control — and reading them apart would undo that.
-	data.Problem, data.ProblemField = s.lastEditProblem()
+	var problemFile, problemTile string
+	data.Problem, data.ProblemField, problemFile, problemTile = s.lastEditProblemTarget()
+	if slug == "tiles" && (data.ProblemField == "tile-class" || data.ProblemField == "tile-property") {
+		selected := data.TileSelection
+		if data.TileView.Selected != nil {
+			selected = strconv.FormatUint(uint64(data.TileView.Selected.ID), 10)
+		}
+		if problemFile != data.SelectedTileset || problemTile != selected {
+			data.Problem, data.ProblemField = "", ""
+		}
+	}
 	data.Confirming = s.isConfirming()
 	// The preview costs a database open and a full introspection, so it is
 	// computed only where it is read: the panel is SCHEMA's, and the

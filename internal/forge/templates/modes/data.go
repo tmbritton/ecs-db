@@ -12,6 +12,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/project"
 	"github.com/tmbritton/ecs-db/internal/forge/tilelinks"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesets"
+	"github.com/tmbritton/ecs-db/internal/forge/tilesetvalidation"
 	"github.com/tmbritton/ecs-db/internal/forge/tilesurface"
 	"github.com/tmbritton/ecs-db/internal/forge/usage"
 	"github.com/tmbritton/ecs-db/internal/forge/validation"
@@ -58,6 +59,8 @@ type Data struct {
 	DirtyTilesets   map[string]bool
 	HasTilesets     bool
 	TileView        tilesurface.View
+	TileValidation  tilesetvalidation.Report
+	TiledOnly       []string
 	TileSelection   string
 	TilePage        string
 	// MapProblems is why a map the project has is not open, or is open and
