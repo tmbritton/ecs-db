@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/tmbritton/ecs-db/internal/forge/templates"
 	"github.com/tmbritton/ecs-db/internal/forge/templates/modes"
 	"github.com/tmbritton/ecs-db/internal/renderer"
+	"github.com/tmbritton/ecs-db/internal/schema"
 )
 
 func (s *Server) addAnimationData(data *modes.Data, r *http.Request, slug string) {
@@ -61,6 +63,14 @@ func (s *Server) addAnimationData(data *modes.Data, r *http.Request, slug string
 					}
 				}
 			}
+			data.AnimationImportOpen = r.URL.Query().Get("import") == "1"
+			if data.AnimationImportOpen {
+				data.AnimationImportProblem = r.URL.Query().Get("error")
+				data.AnimationImportSources, err = sess.ProjectImages()
+				if err != nil {
+					data.AnimationImportProblem = err.Error()
+				}
+			}
 		}
 	}
 }
@@ -96,6 +106,7 @@ func (s *Server) animationFooter(data modes.Data) templates.Component {
 }
 
 func (s *Server) registerAnimationRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /forge/sprites/import", s.sameOriginOnly(s.handleSpriteImport))
 	mux.HandleFunc("GET /forge/sprites/image", s.handleSpritesImage)
 	mux.HandleFunc("POST /forge/sprites/edit/{field}", s.sameOriginOnly(s.handleAnimationField))
 	mux.HandleFunc("POST /forge/sprites/create/{kind}", s.sameOriginOnly(s.handleAnimationNew))
@@ -104,6 +115,40 @@ func (s *Server) registerAnimationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /forge/sprites/discard", s.sameOriginOnly(s.handleAnimationDiscard))
 	mux.HandleFunc("POST /forge/sprites/reload", s.sameOriginOnly(s.handleAnimationReload))
 	mux.HandleFunc("POST /forge/sprites/create", s.sameOriginOnly(s.handleAnimationCreate))
+}
+
+func (s *Server) handleSpriteImport(w http.ResponseWriter, r *http.Request) {
+	sess, path, ok := s.animationFile(w, r)
+	if !ok {
+		return
+	}
+	name, entityType := r.PostFormValue("animation"), r.PostFormValue("entity_type")
+	var err error
+	if entityType != "" {
+		if s.cfg.Session == nil {
+			err = fmt.Errorf("a project schema is required to bind an entity type")
+		} else {
+			known := false
+			s.cfg.Session.Read(func(doc schema.DatabaseSchema) { _, known = doc.EntityTypes[entityType] })
+			if !known {
+				err = fmt.Errorf("%q is not an entity type in this project", entityType)
+			}
+		}
+	}
+	if err == nil {
+		_, err = sess.Import(r.PostFormValue("source"), name, entityType, s.cfg.TileSize)
+	}
+	q := url.Values{"file": {path}}
+	if err != nil {
+		q.Set("import", "1")
+		q.Set("error", err.Error())
+		if selected := r.PostFormValue("selected"); selected != "" {
+			q.Set("animation", selected)
+		}
+	} else {
+		q.Set("animation", name)
+	}
+	http.Redirect(w, r, "/forge/sprites?"+q.Encode(), http.StatusSeeOther)
 }
 
 func (s *Server) handleSpritesImage(w http.ResponseWriter, r *http.Request) {

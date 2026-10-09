@@ -422,6 +422,12 @@ func streamQuery(r *http.Request, slug string, data modes.Data) string {
 		if data.AnimationSelected != "" {
 			q.Set("animation", data.AnimationSelected)
 		}
+		if data.AnimationImportOpen {
+			q.Set("import", "1")
+			if data.AnimationImportProblem != "" {
+				q.Set("error", data.AnimationImportProblem)
+			}
+		}
 	}
 	// The statechart's selection is *not* here, and must not be. It is the
 	// page's, recorded against the page's id, which streamSubscription adds

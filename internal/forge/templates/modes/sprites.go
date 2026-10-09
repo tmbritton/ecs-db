@@ -12,6 +12,18 @@ func spriteHref(path, name string) string {
 	return "/forge/sprites?" + (url.Values{"file": {path}, "animation": {name}}).Encode()
 }
 
+func spriteImportHref(path, selected string) string {
+	q := url.Values{"file": {path}, "import": {"1"}}
+	if selected != "" {
+		q.Set("animation", selected)
+	}
+	return "/forge/sprites?" + q.Encode()
+}
+
+func spriteImportClose(path, selected string) string {
+	return "location.assign(" + strconv.Quote(spriteHref(path, selected)) + ")"
+}
+
 func spriteImageURL(sheet string) string {
 	return "/forge/sprites/image?sheet=" + url.QueryEscape(sheet)
 }

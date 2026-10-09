@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/png"
@@ -574,4 +575,119 @@ func TestSpritesMode_WarnsWhenAnEntityBindingCannotPlayTheSelectedColumns(t *tes
 	if strings.Contains(page, `data-testid="sprite-binding-warning-Player"`) {
 		t.Error("a playable first row in a taller bound sheet was wrongly rejected")
 	}
+}
+
+func TestSpritesImportDialog_ListsProjectLocalImages(t *testing.T) {
+	srv, _, path := animationServer(t)
+	projectRoot := filepath.Dir(filepath.Dir(path))
+	source := filepath.Join(projectRoot, "source.png")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 32, 16))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	page := mapPage(t, srv, "/forge/sprites?import=1")
+	for _, want := range []string{`data-testid="sprite-import-dialog"`, `data-testid="sprite-import-source"`, source, `data-testid="sprite-import-submit"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("import dialog omitted %q", want)
+		}
+	}
+}
+
+func TestSpritesImport_CopiesArtAndCreatesDraftButRequiresSaveForTOML(t *testing.T) {
+	srv, s, path := animationServer(t)
+	projectRoot := filepath.Dir(filepath.Dir(path))
+	source := filepath.Join(projectRoot, "source.png")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 32, 16))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"source": {source}, "animation": {"run"}}
+	client := srv.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.PostForm(srv.URL+"/forge/sprites/import?file="+url.QueryEscape(path), form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || !strings.Contains(resp.Header.Get("Location"), "animation=run") {
+		t.Fatalf("successful import did not select new animation: %s, %s", resp.Status, resp.Header.Get("Location"))
+	}
+	copyPath := filepath.Join(projectRoot, "main", "sprites", "source.png")
+	if copied, err := os.ReadFile(copyPath); err != nil || !bytes.Equal(copied, mustReadServer(t, source)) {
+		t.Errorf("imported art was not copied: %v", err)
+	}
+	if err := s.cfg.AnimationSession.Read(func(d *animations.Document) error {
+		if !strings.Contains(string(d.Bytes()), "frames = [0, 1]") {
+			t.Errorf("import did not create two frames in draft: %s", d.Bytes())
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if disk := mustReadServer(t, path); string(disk) != serverAnimations {
+		t.Errorf("import wrote animation TOML without Save: %s", disk)
+	}
+}
+
+func TestSpritesImport_UnknownEntityTypeRefusesBeforeCopy(t *testing.T) {
+	srv, s, path := animationServer(t)
+	projectRoot := filepath.Dir(filepath.Dir(path))
+	source := filepath.Join(projectRoot, "source.png")
+	f, err := os.Create(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 16, 16))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	client := srv.Client()
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.PostForm(srv.URL+"/forge/sprites/import?file="+url.QueryEscape(path), url.Values{
+		"source": {source}, "animation": {"run"}, "entity_type": {"Unknown"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther || !strings.Contains(resp.Header.Get("Location"), "import=1") {
+		t.Fatalf("refusal did not return to the dialog: %s, %s", resp.Status, resp.Header.Get("Location"))
+	}
+	if _, err := os.Stat(filepath.Join(projectRoot, "main", "sprites", "source.png")); !os.IsNotExist(err) {
+		t.Errorf("invalid entity binding copied a sprite: %v", err)
+	}
+	if err := s.cfg.AnimationSession.Read(func(d *animations.Document) error {
+		if string(d.Bytes()) != serverAnimations {
+			t.Errorf("unknown entity type changed the draft: %s", d.Bytes())
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustReadServer(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

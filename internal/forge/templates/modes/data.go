@@ -77,6 +77,9 @@ type Data struct {
 	AnimationPreview         animations.Preview
 	AnimationTileSize        int
 	AnimationDirty           bool
+	AnimationImportOpen      bool
+	AnimationImportSources   []string
+	AnimationImportProblem   string
 	TileSelection            string
 	TilePage                 string
 	// MapProblems is why a map the project has is not open, or is open and

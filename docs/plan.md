@@ -730,14 +730,16 @@ Two claims here were checked while planning Epic 15 and are false. **There was n
 
 - [x] **TILES mode** — Sheet/collection grids, enlarged tile, class/type and typed metadata editing, honest validation and shared TSX save are complete in Stories 5–8. Movement restrictions belong to referenced entities in MAP; no polygon collision authoring or global `passable` toggle. Tiled tile animation and collision polygons have no game consumer. Story 8 verification: 332 browser checks, `internal/forge/tilesetvalidation` 91.8% statement coverage.
 
-- [ ] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
+- [x] **SPRT mode** — Slice a sheet, author named animations, write `animations.toml`.
   - Constrain the UI to what the renderer supports: 1×N horizontal strips of `tileSize` squares, frames as column indices. Multi-row grids are renderer work.
 
 - [x] **SPRT animation-file session (Story 9)** — The first assets mod owns one lossless `animations.toml` working value, with mod-aware source status, atomic Save/Discard/Reload/conflict and a watched sprite root. The renderer watches the parent directory so successive atomic saves hot-reload definitions and transactionally synchronize existing entity-sheet bindings, retrying failed removals without clearing independently changed sheets. `make test`, tagged/headless builds, both lint tag sets and 336 browser checks passed; `internal/forge/animations` coverage 82.7%, `internal/renderer` 75.2%. See [Epic 16 Story 9](stories/epic-16/09-animation-session.md).
 
 - [x] **SPRT mode (Story 10)** — Select and edit first-mod animations and bindings, preview one-row square PNG sprite strips with authored frame order, fps and looping, and report missing/out-of-range artwork and conditional binding mismatches. Named image serving and edits are scoped to the selected mod; the game resolves and caches assets- or project-relative sheets for Draw. Draft changes go through Story 9's Save/Reload/conflict lifecycle. `make test`, both builds/lint tag sets and 344 browser checks passed; `internal/forge/animations` coverage 82.3%, `internal/forge/server` 86.8%, `internal/renderer` 76.1%. See [Epic 16 Story 10](stories/epic-16/10-sprt-mode.md).
 
-- [ ] **Import Sprite Sheet dialog** — Wired to the slicing flow.
+- [x] **Import Sprite Sheet dialog (Story 11)** — Select a project-local PNG, validate its one-row `tileSize` frames, copy atomically without replacing art into the first assets mod and draft its animation/optional entity binding for the shared Save lifecycle. A 349-check browser suite and both lint/build tag sets passed; `internal/forge/animations` coverage 81.3%, `internal/forge/server` 86.8%. See [Epic 16 Story 11](stories/epic-16/11-import-sprite-sheet.md).
+
+**Epic 16 is complete.** Pause here to plan the gameplay vertical slice with the user before implementing it.
 
 ---
 

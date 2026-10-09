@@ -1,6 +1,7 @@
 package modes
 
 import "path/filepath"
+import "github.com/tmbritton/ecs-db/internal/forge/templates/components"
 
 templ SpritesListRegion(data Data) {
 	<nav id="mode-list" class="schema__list" aria-label="Animation asset sources" data-testid="sprites-list">
@@ -24,6 +25,7 @@ templ SpritesMainRegion(data Data) {
 			<p class="schema__hint" data-testid="sprites-no-assets">This project declares no assets mod for sprite animations.</p>
 		} else {
 			<header class="editor-header"><h2 data-testid="sprites-title">{ filepath.Base(data.AnimationPath) }</h2></header>
+			<a href={ URL(spriteImportHref(data.AnimationPath, data.AnimationSelected)) } data-testid="sprite-import-open">Import sprite sheet</a>
 			<p class="mono" data-testid="sprites-file-path">{ data.AnimationPath }</p>
 			<p class="schema__hint">Active source: { data.AnimationActive.Name } · sprites: { filepath.Join(data.AnimationActive.Assets, "sprites") }</p>
 			if data.AnimationProblem != "" {
@@ -92,6 +94,36 @@ templ SpritesMainRegion(data Data) {
 			<p class="schema__hint">The game watches this animations.toml and the selected sprites directory: animations.toml hot-reloads after Save. Only the first row of { itoa(data.AnimationTileSize) }px square frames is playable; frame numbers are columns, not arbitrary rectangles.</p>
 			if data.Problem != "" {
 				<p class="badge-problem" role="alert" data-testid="sprites-edit-problem">{ data.Problem }</p>
+			}
+			if data.AnimationImportOpen {
+				<div data-testid="sprite-import-dialog">
+					@components.ModalShell(components.ModalShellProps{Title: "Import sprite sheet", CloseAction: spriteImportClose(data.AnimationPath, data.AnimationSelected), Width: 560}) {
+						<p class="schema__hint">Copy a project-local PNG into the selected assets mod. The image copy is immediate; the animation and binding remain unsaved until Save.</p>
+						if data.AnimationImportProblem != "" {
+							<p role="alert" class="badge-problem" data-testid="sprite-import-problem">{ data.AnimationImportProblem }</p>
+						}
+						<form method="post" action={ URL("/forge/sprites/import?file=" + urlValue(data.AnimationPath)) }>
+							<input type="hidden" name="selected" value={ data.AnimationSelected }/>
+							<label for="sprite-import-source">Project PNG</label>
+							<select id="sprite-import-source" name="source" class="schema__input" required data-testid="sprite-import-source">
+								<option value="">Choose a project-local PNG</option>
+								for _, source := range data.AnimationImportSources {
+									<option value={ source }>{ source }</option>
+								}
+							</select>
+							<label for="sprite-import-name">Animation name</label>
+							<input id="sprite-import-name" name="animation" type="text" required class="schema__input" data-testid="sprite-import-name"/>
+							<label for="sprite-import-entity-type">Entity type binding (optional)</label>
+							<input id="sprite-import-entity-type" name="entity_type" list="sprite-import-types" class="schema__input" data-testid="sprite-import-entity-type"/>
+							<datalist id="sprite-import-types">
+								for _, name := range entityTypeNames(data.Schema) {
+									<option value={ name }></option>
+								}
+							</datalist>
+							<button type="submit" data-testid="sprite-import-submit">Copy and create draft</button>
+						</form>
+					}
+				</div>
 			}
 		}
 	</div>
