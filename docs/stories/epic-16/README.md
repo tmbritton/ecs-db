@@ -119,6 +119,7 @@ steps (when it has a browser surface) **before** implementation, as in Epics
 12–15. TILES and SPRT can then be verified without treating any unimplemented
 prototype tab as a working feature.
 
-After Story 11 completes Epic 16, the next implementation target is the
-[turn-based point-and-click gameplay demo](../../plan.md#gameplay-milestone-turn-based-point-and-click-demo).
-The remaining Forge epics resume after that playable milestone.
+Epic 16 is complete. Pause to plan the
+[4e-inspired point-and-click gameplay demo](../../plan.md#gameplay-milestone-4e-inspired-point-and-click-adventure-board-game-demo)
+with the user before implementation. The remaining Forge epics resume after
+that playable milestone.
